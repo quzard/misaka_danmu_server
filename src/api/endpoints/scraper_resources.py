@@ -1683,7 +1683,7 @@ async def _fetch_github_release_asset(
     从 GitHub Releases 获取最新版本的压缩包资产信息
 
     Args:
-        repo_info: 仓库信息 (owner, repo)
+        repo_info: 仓库信息 (owner, repo, proxy, proxy_type)
         platform_key: 平台标识 (如 linux-x86, windows-amd64)
         headers: HTTP 请求头
         proxy: 代理URL
@@ -1693,32 +1693,72 @@ async def _fetch_github_release_asset(
     """
     owner = repo_info['owner']
     repo = repo_info['repo']
+    github_proxy = repo_info.get('proxy')  # 用户配置的 GitHub 加速链接
+    proxy_type = repo_info.get('proxy_type')
 
-    # GitHub Releases API
-    api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+    # GitHub Releases API - 原始 URL
+    original_api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
+
+    # 构建要尝试的 API URL 列表
+    api_urls_to_try = []
+
+    # 如果用户配置了加速链接（非 jsDelivr），优先尝试加速地址
+    if github_proxy and proxy_type != 'jsdelivr':
+        # 通用代理格式: https://代理域名/https://api.github.com/...
+        proxied_api_url = f"{github_proxy}/https://api.github.com/repos/{owner}/{repo}/releases/latest"
+        api_urls_to_try.append(('proxied', proxied_api_url))
+        logger.info(f"将尝试通过加速链接获取 Release 信息: {proxied_api_url}")
+
+    # 原始 API 作为回退
+    api_urls_to_try.append(('original', original_api_url))
 
     timeout = httpx.Timeout(60.0, read=60.0)  # 连接60秒，读取60秒
+
+    release_data = None
+    used_proxy = False
+
+    for url_type, api_url in api_urls_to_try:
+        try:
+            async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+                logger.info(f"正在请求 Release API ({url_type}): {api_url}")
+                response = await client.get(api_url)
+                if response.status_code == 200:
+                    release_data = response.json()
+                    used_proxy = (url_type == 'proxied')
+                    logger.info(f"成功获取 Release 信息 (通过 {url_type})")
+                    break
+                else:
+                    logger.warning(f"获取 GitHub Releases 失败 ({url_type}): HTTP {response.status_code}")
+        except Exception as e:
+            logger.warning(f"请求 Release API 失败 ({url_type}): {e}")
+            continue
+
+    if not release_data:
+        logger.error("获取 GitHub Releases 信息失败：所有尝试均失败")
+        return None
+
     try:
-        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
-            response = await client.get(api_url)
-            if response.status_code != 200:
-                logger.warning(f"获取 GitHub Releases 失败: HTTP {response.status_code}")
-                return None
+        version = release_data.get('tag_name', 'unknown')
+        assets = release_data.get('assets', [])
 
-            release_data = response.json()
-            version = release_data.get('tag_name', 'unknown')
-            assets = release_data.get('assets', [])
+        # 查找匹配当前平台的压缩包
+        asset_info = _find_matching_asset(assets, platform_key, version, 'github')
+        if asset_info:
+            # 如果用户配置了 GitHub 加速链接，替换下载 URL
+            if github_proxy and asset_info.get('download_url') and proxy_type != 'jsdelivr':
+                original_url = asset_info['download_url']
+                # 通用代理格式: https://代理域名/https://github.com/...
+                proxied_url = f"{github_proxy}/{original_url}"
+                logger.info(f"应用 GitHub 加速链接: {original_url} -> {proxied_url}")
+                asset_info['download_url'] = proxied_url
+                asset_info['original_url'] = original_url  # 保留原始 URL 用于回退
+            return asset_info
 
-            # 查找匹配当前平台的压缩包
-            asset_info = _find_matching_asset(assets, platform_key, version, 'github')
-            if asset_info:
-                return asset_info
-
-            logger.warning(f"未找到匹配平台 {platform_key} 的压缩包资产")
-            return None
+        logger.warning(f"未找到匹配平台 {platform_key} 的压缩包资产")
+        return None
 
     except Exception as e:
-        logger.error(f"获取 GitHub Releases 信息失败: {e}")
+        logger.error(f"解析 GitHub Releases 信息失败: {e}")
         return None
 
 

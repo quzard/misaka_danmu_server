@@ -4,6 +4,7 @@ import uuid
 import ipaddress
 import logging
 import time
+import hashlib
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status, Request
@@ -70,8 +71,8 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
 
 
 # IP 白名单会话缓存
-# key: client_ip, value: (user, timestamp, ttl_seconds, jti)
-_whitelist_session_cache: Dict[str, Tuple[models.User, float, int, str]] = {}
+# key: (client_ip, ua_hash), value: (user, timestamp, ttl_seconds, jti)
+_whitelist_session_cache: Dict[Tuple[str, str], Tuple[models.User, float, int, str]] = {}
 
 
 def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
@@ -164,10 +165,15 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
     if not whitelist_networks:
         return None
 
-    # 检查缓存：如果该 IP 已经验证过且未过期
+    # 获取 User-Agent 并生成哈希（用于区分同 IP 不同浏览器）
+    user_agent = request.headers.get("user-agent", "")
+    ua_hash = hashlib.md5(user_agent.encode()).hexdigest()[:8] if user_agent else "unknown"
+    cache_key = (client_ip_str, ua_hash)
+
+    # 检查缓存：如果该 IP + UA 已经验证过且未过期
     current_time = time.time()
-    if client_ip_str in _whitelist_session_cache:
-        cached_user, cached_time, cached_ttl, cached_jti = _whitelist_session_cache[client_ip_str]
+    if cache_key in _whitelist_session_cache:
+        cached_user, cached_time, cached_ttl, cached_jti = _whitelist_session_cache[cache_key]
 
         # 【安全检查】验证该 IP 是否仍在当前白名单中
         try:
@@ -179,7 +185,7 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
         if not still_whitelisted:
             # IP 已从白名单移除，立即撤销会话
             logger.warning(f"IP {client_ip_str} 已从白名单移除，撤销其会话")
-            del _whitelist_session_cache[client_ip_str]
+            del _whitelist_session_cache[cache_key]
             try:
                 await session_crud.revoke_session_by_jti(session, cached_jti)
             except Exception as e:
@@ -191,7 +197,7 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
             return cached_user
         else:
             # 缓存过期，删除缓存并撤销数据库中的会话
-            del _whitelist_session_cache[client_ip_str]
+            del _whitelist_session_cache[cache_key]
             try:
                 await session_crud.revoke_session_by_jti(session, cached_jti)
             except Exception as e:
@@ -223,11 +229,26 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                 ttl_seconds = expire_minutes * 60  # 转换为秒
                 db_expire_minutes = expire_minutes
 
-            # 生成唯一的会话 ID
-            jti = f"whitelist_{client_ip_str}_{uuid.uuid4().hex[:8]}"
+            # 使用 IP + UA哈希 作为会话 ID，区分同 IP 不同浏览器
+            jti = f"whitelist_{client_ip_str}_{ua_hash}"
 
-            # 创建数据库会话记录
-            user_agent = request.headers.get("user-agent", "IP白名单免登录")
+            # 检查数据库中是否已存在该 jti 的会话
+            existing_session = await session_crud.get_session_by_jti(session, jti)
+            if existing_session:
+                if not existing_session.get("isRevoked"):
+                    # 检查是否过期
+                    expires_at = existing_session.get("expiresAt")
+                    if expires_at is None or expires_at > get_now():
+                        # 会话有效，更新最后使用时间并复用
+                        await session_crud.update_session_last_used(session, jti)
+                        _whitelist_session_cache[cache_key] = (user, current_time, ttl_seconds, jti)
+                        logger.debug(f"IP {client_ip_str} 复用已有的白名单会话")
+                        return user
+
+                # 会话已过期或被撤销，删除旧会话以便重建
+                await session_crud.delete_session_by_jti(session, jti)
+
+            # 创建新的数据库会话记录
             try:
                 await session_crud.create_user_session(
                     session=session,
@@ -243,7 +264,7 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                 return user
 
             # 缓存结果并打印一次日志
-            _whitelist_session_cache[client_ip_str] = (user, current_time, ttl_seconds, jti)
+            _whitelist_session_cache[cache_key] = (user, current_time, ttl_seconds, jti)
             logger.info(f"IP {client_ip_str} 在白名单中，已建立免登录会话（有效期 {expire_minutes if expire_minutes != -1 else '永久'} 分钟）")
             return user
     except ValueError:
@@ -260,7 +281,10 @@ def clear_whitelist_session_cache(ip: Optional[str] = None):
     """
     global _whitelist_session_cache
     if ip:
-        _whitelist_session_cache.pop(ip, None)
+        # 清除该 IP 的所有会话（不同 UA 的）
+        keys_to_remove = [k for k in _whitelist_session_cache if k[0] == ip]
+        for key in keys_to_remove:
+            del _whitelist_session_cache[key]
     else:
         _whitelist_session_cache.clear()
 
@@ -285,14 +309,19 @@ async def check_ip_whitelist_with_jti(request: Request, session: AsyncSession) -
     trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
     client_ip_str = _get_real_client_ip_sync(request, trusted_proxies_str)
 
+    # 获取 User-Agent 并生成哈希
+    user_agent = request.headers.get("user-agent", "")
+    ua_hash = hashlib.md5(user_agent.encode()).hexdigest()[:8] if user_agent else "unknown"
+    cache_key = (client_ip_str, ua_hash)
+
     # 检查缓存
     current_time = time.time()
-    if client_ip_str in _whitelist_session_cache:
-        cached_user, cached_time, cached_ttl, cached_jti = _whitelist_session_cache[client_ip_str]
+    if cache_key in _whitelist_session_cache:
+        cached_user, cached_time, cached_ttl, cached_jti = _whitelist_session_cache[cache_key]
         if current_time - cached_time < cached_ttl:
             return cached_user, cached_jti
         else:
-            del _whitelist_session_cache[client_ip_str]
+            del _whitelist_session_cache[cache_key]
             try:
                 await session_crud.revoke_session_by_jti(session, cached_jti)
             except Exception as e:
@@ -302,8 +331,8 @@ async def check_ip_whitelist_with_jti(request: Request, session: AsyncSession) -
     user = await check_ip_whitelist(request, session)
     if user:
         # 从缓存中获取 jti
-        if client_ip_str in _whitelist_session_cache:
-            _, _, _, jti = _whitelist_session_cache[client_ip_str]
+        if cache_key in _whitelist_session_cache:
+            _, _, _, jti = _whitelist_session_cache[cache_key]
             return user, jti
         return user, None
 

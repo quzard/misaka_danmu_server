@@ -167,6 +167,7 @@ class ScraperDownloadExecutor:
             _fetch_gitee_release_asset,
             _download_and_extract_release,
             backup_scrapers,
+            restore_scrapers,
         )
 
         self._log("使用全量替换模式")
@@ -212,60 +213,75 @@ class ScraperDownloadExecutor:
             progress_callback=self._log_async
         )
 
-        if success:
-            self.task.progress.current = 1
-            self.task.progress.total = 1
-            self.task.progress.downloaded.append("full_replace")
-            self._log("全量替换完成")
+        if not success:
+            # 下载失败，还原备份
+            self._log("全量替换失败，正在还原备份...", "error")
+            await restore_scrapers(self.current_user, self.scraper_manager)
+            self._log("已还原备份")
+            raise ValueError("全量替换失败")
+
+        # 下载成功，更新 versions.json
+        self._log("正在更新版本信息...")
+        await self._update_versions_json(asset_info, scrapers_dir, platform_key)
+
+        # 清除版本缓存，让前端能获取到最新版本号
+        self._clear_version_cache()
+
+        self.task.progress.current = 1
+        self.task.progress.total = 1
+        self.task.progress.downloaded.append("full_replace")
+        self._log("全量替换完成")
+
+        # 备份新下载的资源
+        self._log("正在备份新下载的资源...")
+        await backup_scrapers(self.current_user)
+        self._log("✓ 新资源备份完成")
+
+        # 检查是否有 Docker socket，决定重启方式
+        from .docker_utils import is_docker_socket_available, restart_container
+        docker_available = is_docker_socket_available()
+
+        if docker_available:
+            # 有 Docker socket，执行容器级别重启
+            from .docker_utils import get_current_container_id
+            detected_id = get_current_container_id()
+
+            self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
+            if detected_id:
+                self._log(f"检测到当前容器 ID: {detected_id}")
+                logger.info(f"自动检测到当前容器 ID: {detected_id}")
+            else:
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+            self._log("将在 3 秒后重启容器...")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
+
+            # 先设置任务状态为完成，让 SSE 有机会发送完成消息给前端
             self.task.status = TaskStatus.COMPLETED
 
-            # 备份新下载的资源
-            self._log("正在备份新下载的资源...")
-            await backup_scrapers(self.current_user)
-            self._log("✓ 新资源备份完成")
+            # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+            await asyncio.sleep(3.0)
 
-            # 检查是否有 Docker socket，决定重启方式
-            from .docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
-
-            if docker_available:
-                # 有 Docker socket，执行容器级别重启
-                from .docker_utils import get_current_container_id
-                detected_id = get_current_container_id()
-
-                self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
-                if detected_id:
-                    self._log(f"检测到当前容器 ID: {detected_id}")
-                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
-                else:
-                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-
-                self._log("将在 2 秒后重启容器...")
-                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
-
-                # 等待日志写入
-                await asyncio.sleep(2.0)
-
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(fallback_name)
-                if result.get("success"):
-                    container_id = result.get("container_id", "unknown")
-                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-                else:
-                    self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    await self.scraper_manager.load_and_sync_scrapers()
+            fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+            result = await restart_container(fallback_name)
+            if result.get("success"):
+                container_id = result.get("container_id", "unknown")
+                self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                logger.info(f"已向容器发送重启指令 (ID: {container_id})")
             else:
-                # 没有 Docker socket，执行软重启（热加载）
-                self._log("⚠️ 未检测到 Docker 套接字，执行热加载（.so 文件可能需要手动重启容器才能生效）")
-                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，执行热加载")
-                await self.scraper_manager.load_and_sync_scrapers()
-                self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+                self._log(f"重启容器失败: {result.get('message')}")
+                logger.warning(f"重启容器失败: {result.get('message')}")
+
+            # 任务状态已在上面设置，直接返回
+            return
         else:
-            raise ValueError("全量替换失败")
+            # 没有 Docker socket，已经执行了热加载
+            self._log("⚠️ 未检测到 Docker 套接字，.so 文件可能需要手动重启容器才能生效")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+
+        self.task.status = TaskStatus.COMPLETED
 
     async def _do_incremental_download(self, base_url, headers, proxy_to_use, platform_key, platform_info):
         """增量下载模式"""
@@ -351,21 +367,30 @@ class ScraperDownloadExecutor:
         download_count = len(self.task.progress.downloaded)
         self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-        # 保存版本信息
-        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
-
-        # 检查下载结果
-        if download_count == 0 and skip_count == 0:
-            self._log("没有成功下载任何弹幕源，已取消重载", "error")
+        # 检查下载结果：只要有任何失败，整个任务就失败
+        if failed_downloads:
+            self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
+            self._log("正在还原备份...")
             await restore_scrapers(self.current_user, self.scraper_manager)
             self._log("已还原备份")
             self.task.status = TaskStatus.FAILED
-            self.task.error_message = "没有成功下载任何弹幕源"
+            self.task.error_message = f"下载失败: {', '.join(failed_downloads)}"
             return
+
+        if download_count == 0 and skip_count == 0:
+            self._log("没有需要下载的弹幕源", "warning")
+            self.task.status = TaskStatus.COMPLETED
+            return
+
+        # 全部成功，保存版本信息
+        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
+
+        # 清除版本缓存，让前端能获取到最新版本号
+        self._clear_version_cache()
 
         # 热加载或容器重启
         if download_count > 0:
-            # 备份新下载的资源
+            # 全部成功才备份新下载的资源
             self._log("正在备份新下载的资源...")
             await backup_scrapers(self.current_user)
             self._log("✓ 新资源备份完成")
@@ -396,11 +421,14 @@ class ScraperDownloadExecutor:
                     self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
                     logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
 
-                self._log("将在 2 秒后重启容器...")
+                self._log("将在 3 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
 
-                # 等待日志写入
-                await asyncio.sleep(2.0)
+                # 先设置任务状态为完成，让 SSE 有机会发送完成消息给前端
+                self.task.status = TaskStatus.COMPLETED
+
+                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                await asyncio.sleep(3.0)
 
                 fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
                 result = await restart_container(fallback_name)
@@ -412,6 +440,9 @@ class ScraperDownloadExecutor:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
                     logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
                     await self.scraper_manager.load_and_sync_scrapers()
+
+                # 任务状态已在上面设置，直接返回
+                return
             else:
                 # 只有新增源或没有 Docker socket：热加载
                 if has_updates and not docker_available:
@@ -582,6 +613,80 @@ class ScraperDownloadExecutor:
             self._log(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息")
         except Exception as e:
             self._log(f"保存版本信息失败: {e}", "warning")
+
+    def _clear_version_cache(self):
+        """清除版本缓存，让前端能获取到最新版本号"""
+        try:
+            import src.api.endpoints.scraper_resources as scraper_resources_module
+            scraper_resources_module._version_cache = None
+            scraper_resources_module._version_cache_time = None
+            logger.info("已清除版本缓存")
+        except Exception as e:
+            logger.warning(f"清除版本缓存失败: {e}")
+
+    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):  # noqa: ARG002
+        """全量替换后更新 versions.json"""
+        try:
+            platform_info = get_platform_info()
+            release_version = asset_info['version'].lstrip('v')
+
+            # 从解压后的 package.json 读取各个源的版本信息
+            scrapers_versions = {}
+            scrapers_hashes = {}
+            local_package_file = scrapers_dir / "package.json"
+
+            if local_package_file.exists():
+                try:
+                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                    # 从 resources 字段提取各个源的版本号和哈希值
+                    resources = package_content.get('resources', {})
+                    for scraper_name, scraper_info in resources.items():
+                        if isinstance(scraper_info, dict):
+                            version = scraper_info.get('version')
+                            if version:
+                                scrapers_versions[scraper_name] = version
+                            # 提取哈希值
+                            hashes = scraper_info.get('hashes', {})
+                            hash_key = f"{platform_info['platform']}_{platform_info['arch']}"
+                            if hash_key in hashes:
+                                scrapers_hashes[scraper_name] = hashes[hash_key]
+                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息")
+                except Exception as e:
+                    logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
+
+            # 构建 versions.json 数据
+            versions_data = {
+                "platform": platform_info['platform'],
+                "type": platform_info['arch'],
+                "version": release_version,
+                "scrapers": scrapers_versions,
+                "hashes": scrapers_hashes,
+                "full_replace": True,
+                "update_time": datetime.now().isoformat()
+            }
+
+            # 写入 versions.json
+            versions_file = scrapers_dir / "versions.json"
+            versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+            await asyncio.to_thread(versions_file.write_text, versions_json_str)
+            logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
+
+            # 同时更新 package.json 的版本号（前端从这里读取整体版本）
+            try:
+                if local_package_file.exists():
+                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                    package_content['version'] = release_version
+                else:
+                    package_content = {"version": release_version}
+                package_json_str = json.dumps(package_content, indent=2, ensure_ascii=False)
+                await asyncio.to_thread(local_package_file.write_text, package_json_str)
+                logger.info(f"已更新 package.json 版本号为: {release_version}")
+            except Exception as pkg_err:
+                logger.warning(f"更新 package.json 失败: {pkg_err}")
+
+        except Exception as e:
+            logger.error(f"更新版本信息失败: {e}", exc_info=True)
+            self._log(f"更新版本信息失败: {e}", "warning")
 
 
 async def start_download_task(

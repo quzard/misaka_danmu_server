@@ -25,6 +25,25 @@ from .ai_prompts import (
 )
 
 
+def _extract_openai_content(response) -> Optional[str]:
+    """从 OpenAI 响应中安全提取内容
+
+    某些 API（如部分兼容接口）可能返回字符串而非标准对象
+    """
+    # 如果响应本身就是字符串，直接返回
+    if isinstance(response, str):
+        logger.warning(f"OpenAI API 返回了字符串而非对象")
+        return response
+
+    # 检查是否有 choices 属性
+    if not hasattr(response, 'choices') or not response.choices:
+        logger.error(f"OpenAI API 响应格式异常: {type(response).__name__}")
+        return None
+
+    # 标准格式
+    return response.choices[0].message.content
+
+
 def _safe_json_loads(text: str, log_raw_response: bool = False) -> Optional[Dict]:
     """安全的JSON解析函数,能处理AI返回的常见错误
 
@@ -476,7 +495,9 @@ class AIMatcher:
                 timeout=30
             )
 
-            content = response.choices[0].message.content
+            content = _extract_openai_content(response)
+            if content is None:
+                return None
             logger.debug(f"AI原始响应: {content}")
 
             parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
@@ -699,7 +720,9 @@ class AIMatcher:
                 timeout=30
             )
 
-            content = response.choices[0].message.content
+            content = _extract_openai_content(response)
+            if content is None:
+                return None
             logger.debug(f"AI识别原始响应: {content}")
 
             parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
@@ -887,7 +910,9 @@ class AIMatcher:
                 timeout=30
             )
 
-            content = response.choices[0].message.content
+            content = _extract_openai_content(response)
+            if content is None:
+                return None
             logger.debug(f"AI别名扩展原始响应: {content}")
 
             parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
@@ -1014,7 +1039,9 @@ class AIMatcher:
                     response_format={"type": "json_object"},
                     timeout=30
                 )
-                content = response.choices[0].message.content
+                content = _extract_openai_content(response)
+                if content is None:
+                    return None
 
             logger.debug(f"AI别名验证原始响应: {content}")
 
@@ -1266,7 +1293,9 @@ class AIMatcher:
                     response_format={"type": "json_object"},
                     timeout=30
                 )
-                content = response.choices[0].message.content
+                content = _extract_openai_content(response)
+                if content is None:
+                    return 0  # 返回第一个结果
 
             if self.log_raw_response:
                 ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
@@ -1337,7 +1366,10 @@ class AIMatcher:
                     temperature=0.1,
                     max_tokens=50
                 )
-                ai_response = response.choices[0].message.content.strip()
+                content = _extract_openai_content(response)
+                if content is None:
+                    return None
+                ai_response = content.strip()
 
             return {"response": ai_response}
 
