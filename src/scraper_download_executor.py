@@ -220,7 +220,10 @@ class ScraperDownloadExecutor:
             self._log("已还原备份")
             raise ValueError("全量替换失败")
 
-        # 下载成功
+        # 下载成功，更新 versions.json
+        self._log("正在更新版本信息...")
+        await self._update_versions_json(asset_info, scrapers_dir, platform_key)
+
         self.task.progress.current = 1
         self.task.progress.total = 1
         self.task.progress.downloaded.append("full_replace")
@@ -265,18 +268,15 @@ class ScraperDownloadExecutor:
                 self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
                 logger.info(f"已向容器发送重启指令 (ID: {container_id})")
             else:
-                self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
-                logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                await self.scraper_manager.load_and_sync_scrapers()
+                self._log(f"重启容器失败: {result.get('message')}")
+                logger.warning(f"重启容器失败: {result.get('message')}")
 
             # 任务状态已在上面设置，直接返回
             return
         else:
-            # 没有 Docker socket，执行软重启（热加载）
-            self._log("⚠️ 未检测到 Docker 套接字，执行热加载（.so 文件可能需要手动重启容器才能生效）")
-            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，执行热加载")
-            await self.scraper_manager.load_and_sync_scrapers()
-            self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+            # 没有 Docker socket，已经执行了热加载
+            self._log("⚠️ 未检测到 Docker 套接字，.so 文件可能需要手动重启容器才能生效")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
 
         self.task.status = TaskStatus.COMPLETED
 
@@ -607,6 +607,70 @@ class ScraperDownloadExecutor:
             self._log(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息")
         except Exception as e:
             self._log(f"保存版本信息失败: {e}", "warning")
+
+    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):  # noqa: ARG002
+        """全量替换后更新 versions.json"""
+        try:
+            platform_info = get_platform_info()
+            release_version = asset_info['version'].lstrip('v')
+
+            # 从解压后的 package.json 读取各个源的版本信息
+            scrapers_versions = {}
+            scrapers_hashes = {}
+            local_package_file = scrapers_dir / "package.json"
+
+            if local_package_file.exists():
+                try:
+                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                    # 从 resources 字段提取各个源的版本号和哈希值
+                    resources = package_content.get('resources', {})
+                    for scraper_name, scraper_info in resources.items():
+                        if isinstance(scraper_info, dict):
+                            version = scraper_info.get('version')
+                            if version:
+                                scrapers_versions[scraper_name] = version
+                            # 提取哈希值
+                            hashes = scraper_info.get('hashes', {})
+                            hash_key = f"{platform_info['platform']}_{platform_info['arch']}"
+                            if hash_key in hashes:
+                                scrapers_hashes[scraper_name] = hashes[hash_key]
+                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息")
+                except Exception as e:
+                    logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
+
+            # 构建 versions.json 数据
+            versions_data = {
+                "platform": platform_info['platform'],
+                "type": platform_info['arch'],
+                "version": release_version,
+                "scrapers": scrapers_versions,
+                "hashes": scrapers_hashes,
+                "full_replace": True,
+                "update_time": datetime.now().isoformat()
+            }
+
+            # 写入 versions.json
+            versions_file = scrapers_dir / "versions.json"
+            versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
+            await asyncio.to_thread(versions_file.write_text, versions_json_str)
+            logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
+
+            # 同时更新 package.json 的版本号（前端从这里读取整体版本）
+            try:
+                if local_package_file.exists():
+                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
+                    package_content['version'] = release_version
+                else:
+                    package_content = {"version": release_version}
+                package_json_str = json.dumps(package_content, indent=2, ensure_ascii=False)
+                await asyncio.to_thread(local_package_file.write_text, package_json_str)
+                logger.info(f"已更新 package.json 版本号为: {release_version}")
+            except Exception as pkg_err:
+                logger.warning(f"更新 package.json 失败: {pkg_err}")
+
+        except Exception as e:
+            logger.error(f"更新版本信息失败: {e}", exc_info=True)
+            self._log(f"更新版本信息失败: {e}", "warning")
 
 
 async def start_download_task(
