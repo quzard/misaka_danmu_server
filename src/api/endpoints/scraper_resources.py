@@ -1757,15 +1757,21 @@ async def _fetch_gitee_release_asset(
 
             release_data = response.json()
             version = release_data.get('tag_name', 'unknown')
-            # Gitee API 返回的是 'attach_files' 而不是 'assets'
-            assets = release_data.get('attach_files', [])
+            # Gitee API 返回的是 'assets' 字段（和 GitHub 类似）
+            assets = release_data.get('assets', [])
+
+            # 调试日志：打印 Gitee 返回的资产信息
+            logger.info(f"Gitee Release 版本: {version}, 资产数量: {len(assets)}")
+            for asset in assets:
+                asset_name = asset.get('name', asset.get('browser_download_url', 'unknown'))
+                logger.debug(f"  - Gitee 资产: {asset_name}")
 
             # 查找匹配当前平台的压缩包
             asset_info = _find_matching_asset(assets, platform_key, version, 'gitee')
             if asset_info:
                 return asset_info
 
-            logger.warning(f"Gitee: 未找到匹配平台 {platform_key} 的压缩包资产")
+            logger.warning(f"Gitee: 未找到匹配平台 {platform_key} 的压缩包资产，目标模式: {platform_key}.tar.gz 或 {platform_key}.zip")
             return None
 
     except Exception as e:
