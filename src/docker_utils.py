@@ -182,13 +182,15 @@ def get_docker_status() -> Dict[str, Any]:
     return status
 
 
-async def restart_container(container_name: str) -> Dict[str, Any]:
+async def restart_container(fallback_container_name: str = "misaka_danmu_server") -> Dict[str, Any]:
     """
-    重启指定容器
-    
+    重启当前容器
+
+    优先自动检测当前容器 ID，如果检测失败则使用兜底容器名称
+
     Args:
-        container_name: 容器名称
-        
+        fallback_container_name: 兜底容器名称（自动检测失败时使用）
+
     Returns:
         操作结果字典
     """
@@ -198,19 +200,30 @@ async def restart_container(container_name: str) -> Dict[str, Any]:
             "message": "Docker socket 不可用，无法通过 Docker API 重启",
             "fallback": True
         }
-    
+
+    # 优先自动检测当前容器 ID
+    container_name = get_current_container_id()
+
+    # 如果自动检测失败，使用兜底容器名称
+    if not container_name:
+        logger.info(f"自动检测容器 ID 失败，使用兜底容器名称: {fallback_container_name}")
+        container_name = fallback_container_name
+    else:
+        logger.info(f"自动检测到当前容器 ID: {container_name}")
+
     try:
         client = get_docker_client()
         if not client:
             return {"success": False, "message": "无法获取 Docker 客户端", "fallback": True}
-        
+
         container = client.containers.get(container_name)
-        logger.info(f"正在重启容器: {container_name}")
+        logger.info(f"正在重启容器: {container_name} (ID: {container.short_id})")
         container.restart(timeout=10)
-        
+
         return {
             "success": True,
-            "message": f"已向容器 '{container_name}' 发送重启指令"
+            "message": f"已向容器 '{container_name}' 发送重启指令",
+            "container_id": container.short_id
         }
     except NotFound:
         return {

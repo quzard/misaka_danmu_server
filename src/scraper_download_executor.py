@@ -237,11 +237,12 @@ class ScraperDownloadExecutor:
                 # 等待日志写入
                 await asyncio.sleep(2.0)
 
-                container_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(container_name)
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                result = await restart_container(fallback_name)
                 if result.get("success"):
-                    self._log(f"已向容器 '{container_name}' 发送重启指令")
-                    logger.info(f"已向容器 '{container_name}' 发送重启指令")
+                    container_id = result.get("container_id", "unknown")
+                    self._log(f"已向容器发送重启指令 (ID: {container_id})")
+                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
                 else:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
                     logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
@@ -378,11 +379,12 @@ class ScraperDownloadExecutor:
                 # 等待日志写入
                 await asyncio.sleep(2.0)
 
-                container_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(container_name)
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                result = await restart_container(fallback_name)
                 if result.get("success"):
-                    self._log(f"已向容器 '{container_name}' 发送重启指令")
-                    logger.info(f"已向容器 '{container_name}' 发送重启指令")
+                    container_id = result.get("container_id", "unknown")
+                    self._log(f"已向容器发送重启指令 (ID: {container_id})")
+                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
                 else:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
                     logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
