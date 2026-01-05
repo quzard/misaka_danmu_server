@@ -22,11 +22,12 @@ from ...config_manager import ConfigManager
 from ...api.dependencies import get_scraper_manager, get_config_manager
 from ... import models
 from ...security import get_current_user
+from ...download_task_manager import get_download_task_manager, TaskStatus
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# 全局锁：防止并发下载
+# 全局锁：防止并发下载（保留用于旧 SSE 接口的兼容）
 _download_lock = asyncio.Lock()
 
 # 版本信息缓存
@@ -1472,6 +1473,146 @@ async def load_resources_stream(
     )
 
 
+# ========== 新版下载任务 API（后台任务模式）==========
+
+@router.post("/scrapers/download/start", summary="启动下载任务")
+async def start_download(
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    manager = Depends(get_scraper_manager)
+):
+    """启动弹幕源下载任务（后台运行，不依赖 SSE 连接）"""
+    from ...scraper_download_executor import start_download_task
+
+    repo_url = payload.get("repoUrl", "")
+    use_full_replace = payload.get("fullReplace", False)
+
+    try:
+        task = await start_download_task(
+            repo_url=repo_url,
+            use_full_replace=use_full_replace,
+            config_manager=config_manager,
+            scraper_manager=manager,
+            current_user=current_user,
+        )
+        logger.info(f"用户 '{current_user.username}' 启动了下载任务: {task.task_id}")
+        return {
+            "task_id": task.task_id,
+            "status": task.status.value,
+            "message": "下载任务已启动"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"启动下载任务失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"启动下载任务失败: {str(e)}")
+
+
+@router.get("/scrapers/download/status/{task_id}", summary="获取下载任务状态")
+async def get_download_status(
+    task_id: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    """获取下载任务的当前状态和进度"""
+    task_manager = get_download_task_manager()
+    task = task_manager.get_task(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return task.to_dict()
+
+
+@router.get("/scrapers/download/current", summary="获取当前下载任务")
+async def get_current_download(
+    current_user: models.User = Depends(get_current_user),
+):
+    """获取当前正在运行的下载任务（如果有）"""
+    task_manager = get_download_task_manager()
+    task = task_manager.current_task
+
+    if task and task.status == TaskStatus.RUNNING:
+        return task.to_dict()
+
+    return {"task_id": None, "status": "idle", "message": "没有正在运行的下载任务"}
+
+
+@router.post("/scrapers/download/cancel/{task_id}", summary="取消下载任务")
+async def cancel_download(
+    task_id: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    """取消正在运行的下载任务"""
+    task_manager = get_download_task_manager()
+
+    if task_manager.cancel_task(task_id):
+        logger.info(f"用户 '{current_user.username}' 取消了下载任务: {task_id}")
+        return {"message": "任务已取消"}
+    else:
+        raise HTTPException(status_code=400, detail="无法取消任务（任务不存在或已完成）")
+
+
+@router.get("/scrapers/download/progress/{task_id}", summary="SSE 进度流")
+async def download_progress_stream(
+    task_id: str,
+    current_user: models.User = Depends(get_current_user),
+):
+    """通过 SSE 实时推送下载进度（可选，用于前端实时显示）"""
+    task_manager = get_download_task_manager()
+    task = task_manager.get_task(task_id)
+
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    async def event_generator():
+        last_message_count = 0
+        while True:
+            # 获取最新状态
+            current_task = task_manager.get_task(task_id)
+            if not current_task:
+                yield f"data: {json.dumps({'type': 'error', 'message': '任务不存在'}, ensure_ascii=False)}\n\n"
+                break
+
+            # 发送进度更新
+            progress_data = {
+                "type": "progress",
+                "status": current_task.status.value,
+                "current": current_task.progress.current,
+                "total": current_task.progress.total,
+                "current_file": current_task.progress.current_file,
+                "downloaded_count": len(current_task.progress.downloaded),
+                "failed_count": len(current_task.progress.failed),
+            }
+
+            # 发送新消息
+            new_messages = current_task.progress.messages[last_message_count:]
+            if new_messages:
+                progress_data["messages"] = new_messages
+                last_message_count = len(current_task.progress.messages)
+
+            yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
+
+            # 任务完成则退出
+            if current_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                yield f"data: {json.dumps({'type': 'done', 'status': current_task.status.value}, ensure_ascii=False)}\n\n"
+                break
+
+            await asyncio.sleep(0.5)  # 每 0.5 秒更新一次
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+# ========== 原有 API ==========
+
 @router.get("/scrapers/auto-update", summary="获取自动更新配置")
 async def get_auto_update_config(
     current_user: models.User = Depends(get_current_user),
@@ -1479,7 +1620,7 @@ async def get_auto_update_config(
 ):
     """获取弹幕源自动更新配置"""
     enabled = await config_manager.get("scraperAutoUpdateEnabled", "false")
-    interval = await config_manager.get("scraperAutoUpdateInterval", "15")
+    interval = await config_manager.get("scraperAutoUpdateInterval", "30")
     return {
         "enabled": enabled.lower() == "true",
         "interval": int(interval)

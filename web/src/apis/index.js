@@ -423,6 +423,15 @@ export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-upda
 export const getScraperFullReplace = () => api.get('/api/ui/scrapers/full-replace')
 /** 保存全量替换配置 */
 export const saveScraperFullReplace = data => api.put('/api/ui/scrapers/full-replace', data)
+
+/** 启动下载任务（新版后台任务模式） */
+export const startScraperDownload = data => api.post('/api/ui/scrapers/download/start', data)
+/** 获取下载任务状态 */
+export const getScraperDownloadStatus = taskId => api.get(`/api/ui/scrapers/download/status/${taskId}`)
+/** 获取当前下载任务 */
+export const getCurrentScraperDownload = () => api.get('/api/ui/scrapers/download/current')
+/** 取消下载任务 */
+export const cancelScraperDownload = taskId => api.post(`/api/ui/scrapers/download/cancel/${taskId}`)
 /** 获取GitHub Token */
 export const getGithubToken = () => api.get('/api/ui/config/github-token')
 /** 保存GitHub Token */

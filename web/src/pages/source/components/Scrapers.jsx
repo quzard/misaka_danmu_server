@@ -49,6 +49,10 @@ import {
   saveScraperFullReplace,
   getScraperDefaultBlacklist,
   getCommonBlacklist,
+  startScraperDownload,
+  getScraperDownloadStatus,
+  getCurrentScraperDownload,
+  cancelScraperDownload,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -226,7 +230,7 @@ export const Scrapers = () => {
     message: '',
     scraper: ''
   })
-  const downloadAbortController = useRef(null)
+  const currentDownloadTaskId = useRef(null)  // 当前下载任务 ID
 
 
   const modalApi = useModal()
@@ -303,10 +307,10 @@ export const Scrapers = () => {
         eventSourceRef.current.abort()
         eventSourceRef.current = null
       }
-      // 同时中断下载
-      if (downloadAbortController.current) {
-        downloadAbortController.current.abort()
-        downloadAbortController.current = null
+      // 同时取消下载任务
+      if (currentDownloadTaskId.current) {
+        cancelScraperDownload(currentDownloadTaskId.current).catch(() => {})
+        currentDownloadTaskId.current = null
       }
     }
   }, [])
@@ -415,6 +419,165 @@ export const Scrapers = () => {
     }
   }
 
+  // 通过 SSE 订阅下载任务进度
+  const subscribeDownloadProgress = (taskId) => {
+    const token = Cookies.get('danmu_token')
+    if (!token) {
+      messageApi.error('未找到认证令牌')
+      setLoadingResources(false)
+      return
+    }
+
+    // 标记任务是否已完成（用于忽略连接断开错误）
+    let taskCompleted = false
+
+    fetchEventSource(`/api/ui/scrapers/download/progress/${taskId}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      onopen: async response => {
+        if (response.ok) {
+          console.log('SSE 进度流已连接')
+        } else {
+          throw new Error(`连接失败: ${response.status}`)
+        }
+      },
+      onmessage: event => {
+        try {
+          const data = JSON.parse(event.data)
+
+          if (data.type === 'progress') {
+            // 更新进度
+            const progress = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0
+            setDownloadProgress(prev => ({
+              ...prev,
+              current: data.current,
+              total: data.total,
+              progress: progress,
+              scraper: data.current_file,
+              message: data.messages?.slice(-1)[0] || prev.message
+            }))
+
+            // 检查状态
+            if (data.status === 'completed') {
+              taskCompleted = true
+              const downloadedCount = data.downloaded_count || 0
+              const skippedCount = data.skipped_count || 0
+              const failedCount = data.failed_count || 0
+
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: 100,
+                message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
+              }))
+
+              if (downloadedCount > 0) {
+                messageApi.success('资源加载成功')
+              } else {
+                messageApi.success('所有弹幕源都是最新的')
+              }
+
+              // 延迟刷新
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: ''
+                })
+                getInfo()
+                loadVersionInfo()
+                setLoadingResources(false)
+              }, downloadedCount > 0 ? 2000 : 1000)
+            }
+
+            if (data.status === 'failed') {
+              taskCompleted = true
+              messageApi.error(data.error_message || '下载失败')
+              setDownloadProgress({
+                visible: false,
+                current: 0,
+                total: 0,
+                progress: 0,
+                message: '',
+                scraper: ''
+              })
+              setLoadingResources(false)
+            }
+
+            if (data.status === 'cancelled') {
+              taskCompleted = true
+              messageApi.info('下载已取消')
+              setDownloadProgress({
+                visible: false,
+                current: 0,
+                total: 0,
+                progress: 0,
+                message: '',
+                scraper: ''
+              })
+              setLoadingResources(false)
+            }
+          }
+
+          if (data.type === 'done') {
+            taskCompleted = true
+            // SSE 流正常结束
+            throw new Error('任务完成，停止 SSE')
+          }
+
+          if (data.type === 'error') {
+            taskCompleted = true
+            messageApi.error(data.message || '下载失败')
+            setDownloadProgress({
+              visible: false,
+              current: 0,
+              total: 0,
+              progress: 0,
+              message: '',
+              scraper: ''
+            })
+            setLoadingResources(false)
+            throw new Error('任务失败，停止 SSE')
+          }
+        } catch (e) {
+          if (e.message.includes('停止 SSE')) {
+            throw e
+          }
+          console.error('解析 SSE 消息失败:', e)
+        }
+      },
+      onerror: error => {
+        console.error('SSE 进度流错误:', error)
+        // 如果任务已完成，忽略连接断开错误
+        if (taskCompleted) {
+          console.log('任务已完成，忽略连接断开错误')
+          throw new Error('任务已完成，停止重试')
+        }
+        if (error.name !== 'AbortError') {
+          messageApi.error('进度连接出错，请刷新页面查看状态')
+          setDownloadProgress({
+            visible: false,
+            current: 0,
+            total: 0,
+            progress: 0,
+            message: '',
+            scraper: ''
+          })
+          setLoadingResources(false)
+        }
+        throw error
+      },
+    }).catch(error => {
+      if (!error.message?.includes('停止')) {
+        console.error('SSE 流错误:', error)
+      }
+    })
+  }
+
   const handleLoadResources = async () => {
     if (!resourceRepoUrl.trim()) {
       messageApi.error('请输入资源仓库链接')
@@ -433,215 +596,34 @@ export const Scrapers = () => {
         current: 0,
         total: 0,
         progress: 0,
-        message: '正在连接资源仓库...',
+        message: '正在启动下载任务...',
         scraper: ''
       })
 
-      // 使用 SSE 加载资源
-      const token = Cookies.get('danmu_token')
-      if (!token) {
-        messageApi.error('未找到认证令牌')
-        return
-      }
-
-      // 取消之前的下载
-      if (downloadAbortController.current) {
-        downloadAbortController.current.abort()
-      }
-
-      const abortController = new AbortController()
-      downloadAbortController.current = abortController
-
-      // 设置全局超时保护 (5分钟)
-      const globalTimeout = setTimeout(() => {
-        console.warn('下载超时,自动中断')
-        abortController.abort()
-        messageApi.error('下载超时,请检查网络连接')
-        setDownloadProgress({
-          visible: false,
-          current: 0,
-          total: 0,
-          progress: 0,
-          message: '',
-          scraper: ''
-        })
-        setLoadingResources(false)
-      }, 5 * 60 * 1000) // 5分钟
-
-      // 标记是否已完成下载（用于忽略容器重启导致的连接断开错误）
-      let downloadCompleted = false
-
-      await fetchEventSource('/api/ui/scrapers/load-resources-stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ repoUrl: resourceRepoUrl }),
-        signal: abortController.signal,
-        onopen: async response => {
-          if (response.ok) {
-            console.log('SSE 下载流已连接')
-          } else {
-            throw new Error(`连接失败: ${response.status}`)
-          }
-        },
-        onmessage: event => {
-          try {
-            const data = JSON.parse(event.data)
-
-            switch (data.type) {
-              case 'info':
-                setDownloadProgress(prev => ({
-                  ...prev,
-                  message: data.message
-                }))
-                break
-
-              case 'compare_result':
-                // 哈希比对完成，显示比对结果
-                setDownloadProgress(prev => ({
-                  ...prev,
-                  message: `比对完成: ${data.to_download} 个需要下载, ${data.to_skip} 个已是最新${data.unsupported > 0 ? `, ${data.unsupported} 个不支持当前平台` : ''}`
-                }))
-                break
-
-              case 'total':
-                setDownloadProgress(prev => ({
-                  ...prev,
-                  total: data.total,
-                  message: `开始下载 ${data.total} 个弹幕源...`
-                }))
-                break
-
-              case 'progress':
-                setDownloadProgress(prev => ({
-                  ...prev,
-                  current: data.current,
-                  progress: data.progress,
-                  scraper: data.scraper,
-                  message: `正在下载 ${data.filename} (${data.current}/${data.total})`
-                }))
-                break
-
-              case 'success':
-                console.log(`成功下载: ${data.scraper}`)
-                break
-
-              case 'skip':
-                // 不支持当前平台的源
-                console.log(`跳过: ${data.scraper}`)
-                break
-
-              case 'skip_hash':
-                // 哈希值相同，跳过下载（在新流程中这个事件不再发送，但保留兼容）
-                console.log(`哈希相同跳过: ${data.scraper}`)
-                break
-
-              case 'failed':
-                console.warn(`下载失败: ${data.scraper}`)
-                break
-
-              case 'complete':
-                clearTimeout(globalTimeout) // 清除超时
-                downloadCompleted = true // 标记下载已完成
-                setDownloadProgress(prev => ({
-                  ...prev,
-                  progress: 100,
-                  message: `下载完成! 成功: ${data.downloaded}, 跳过: ${data.skipped || 0}, 失败: ${data.failed}`
-                }))
-
-                // 根据实际下载数量显示不同的提示
-                if (data.downloaded > 0) {
-                  // 有文件被下载，可能会触发重启或热加载
-                  if (data.full_replace) {
-                    messageApi.success('全量替换完成，服务正在重启...')
-                  } else {
-                    messageApi.success('资源加载成功，正在应用更新...')
-                  }
-                } else {
-                  // 没有文件被下载，所有源都是最新的
-                  messageApi.success('所有弹幕源都是最新的')
-                }
-
-                // 延迟刷新页面
-                const delay = data.downloaded > 0 ? 4000 : 1500
-                setTimeout(() => {
-                  setDownloadProgress({
-                    visible: false,
-                    current: 0,
-                    total: 0,
-                    progress: 0,
-                    message: '',
-                    scraper: ''
-                  })
-                  getInfo()
-                  loadVersionInfo()
-                  setLoadingResources(false)
-                }, delay)
-                break
-
-              case 'container_restart_required':
-                // 容器即将重启，标记为已完成，忽略后续连接断开错误
-                downloadCompleted = true
-                break
-
-              case 'done':
-                // SSE 流正常结束，标记为已完成
-                downloadCompleted = true
-                break
-
-              case 'error':
-                clearTimeout(globalTimeout) // 清除超时
-                messageApi.error(data.message || '加载失败')
-                setDownloadProgress({
-                  visible: false,
-                  current: 0,
-                  total: 0,
-                  progress: 0,
-                  message: '',
-                  scraper: ''
-                })
-                setLoadingResources(false)
-                break
-            }
-          } catch (e) {
-            console.error('解析 SSE 消息失败:', e)
-          }
-        },
-        onerror: error => {
-          console.error('SSE 下载流错误:', error)
-          clearTimeout(globalTimeout) // 清除超时
-          // 如果下载已完成，忽略连接断开错误（可能是容器重启导致）
-          if (downloadCompleted) {
-            console.log('下载已完成，忽略连接断开错误')
-            // 抛出错误以停止 fetchEventSource 的自动重试
-            throw new Error('下载已完成，停止重试')
-          }
-          if (error.name !== 'AbortError') {
-            messageApi.error('下载连接出错')
-            setDownloadProgress({
-              visible: false,
-              current: 0,
-              total: 0,
-              progress: 0,
-              message: '',
-              scraper: ''
-            })
-            setLoadingResources(false)
-          }
-          // 抛出错误以停止 fetchEventSource 的自动重试，防止连接断开后自动重新发起请求
-          throw error
-        },
-      }).catch(error => {
-        clearTimeout(globalTimeout) // 清除超时
-        if (error.name !== 'AbortError') {
-          console.error('SSE 流错误:', error)
-        }
+      // 启动后台下载任务
+      const res = await startScraperDownload({
+        repoUrl: resourceRepoUrl,
+        fullReplace: fullReplaceEnabled
       })
 
+      const taskId = res.data.task_id
+      if (!taskId) {
+        throw new Error('启动下载任务失败')
+      }
+
+      // 保存任务 ID 以便取消
+      currentDownloadTaskId.current = taskId
+
+      setDownloadProgress(prev => ({
+        ...prev,
+        message: `下载任务已启动，正在获取资源信息...`
+      }))
+
+      // 通过 SSE 订阅任务进度
+      subscribeDownloadProgress(taskId)
+
     } catch (error) {
-      messageApi.error(error.response?.data?.detail || '加载失败')
+      messageApi.error(error.response?.data?.detail || '启动下载任务失败')
       setDownloadProgress({
         visible: false,
         current: 0,
@@ -1267,10 +1249,15 @@ export const Scrapers = () => {
                 <Button
                   size="small"
                   danger
-                  onClick={() => {
-                    if (downloadAbortController.current) {
-                      downloadAbortController.current.abort()
-                      downloadAbortController.current = null
+                  onClick={async () => {
+                    if (currentDownloadTaskId.current) {
+                      try {
+                        await cancelScraperDownload(currentDownloadTaskId.current)
+                        messageApi.warning('已取消下载')
+                      } catch (e) {
+                        console.error('取消下载失败:', e)
+                      }
+                      currentDownloadTaskId.current = null
                     }
                     setDownloadProgress({
                       visible: false,
@@ -1281,7 +1268,6 @@ export const Scrapers = () => {
                       scraper: ''
                     })
                     setLoadingResources(false)
-                    messageApi.warning('已取消下载')
                   }}
                 >
                   取消
