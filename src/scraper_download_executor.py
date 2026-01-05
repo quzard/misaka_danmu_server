@@ -376,8 +376,9 @@ class ScraperDownloadExecutor:
 
             # 判断是否有更新已有源（需要容器重启）
             # 如果下载的文件中有任何一个是更新（而非新增），则需要容器重启
+            existing_scrapers = set(self.scraper_manager.scrapers.keys())
             has_updates = any(
-                name in [s.name for s in self.scraper_manager.get_all_scrapers()]
+                name in existing_scrapers
                 for name in self.task.progress.downloaded
             )
 
