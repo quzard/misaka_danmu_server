@@ -230,8 +230,19 @@ class ScraperDownloadExecutor:
 
             if docker_available:
                 # 有 Docker socket，执行容器级别重启
+                from .docker_utils import get_current_container_id
+                detected_id = get_current_container_id()
+
                 self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
-                self._log("检测到 Docker 套接字，将在 2 秒后重启容器...")
+                if detected_id:
+                    self._log(f"检测到当前容器 ID: {detected_id}")
+                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                else:
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                self._log("将在 2 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
 
                 # 等待日志写入
@@ -241,7 +252,7 @@ class ScraperDownloadExecutor:
                 result = await restart_container(fallback_name)
                 if result.get("success"):
                     container_id = result.get("container_id", "unknown")
-                    self._log(f"已向容器发送重启指令 (ID: {container_id})")
+                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
                     logger.info(f"已向容器发送重启指令 (ID: {container_id})")
                 else:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
@@ -372,8 +383,19 @@ class ScraperDownloadExecutor:
 
             if has_updates and docker_available:
                 # 有更新已有源且有 Docker socket，执行容器级别重启
+                from .docker_utils import get_current_container_id
+                detected_id = get_current_container_id()
+
                 self._log("⚠️ 检测到更新已有源，需要重启容器以加载新的 .so 文件")
-                self._log("检测到 Docker 套接字，将在 2 秒后重启容器...")
+                if detected_id:
+                    self._log(f"检测到当前容器 ID: {detected_id}")
+                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                else:
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                self._log("将在 2 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
 
                 # 等待日志写入
@@ -383,7 +405,7 @@ class ScraperDownloadExecutor:
                 result = await restart_container(fallback_name)
                 if result.get("success"):
                     container_id = result.get("container_id", "unknown")
-                    self._log(f"已向容器发送重启指令 (ID: {container_id})")
+                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
                     logger.info(f"已向容器发送重启指令 (ID: {container_id})")
                 else:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
