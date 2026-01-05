@@ -409,11 +409,14 @@ class ScraperDownloadExecutor:
                     self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
                     logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
 
-                self._log("将在 2 秒后重启容器...")
+                self._log("将在 3 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
 
-                # 等待日志写入
-                await asyncio.sleep(2.0)
+                # 先设置任务状态为完成，让 SSE 有机会发送完成消息给前端
+                self.task.status = TaskStatus.COMPLETED
+
+                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                await asyncio.sleep(3.0)
 
                 fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
                 result = await restart_container(fallback_name)
@@ -425,6 +428,9 @@ class ScraperDownloadExecutor:
                     self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
                     logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
                     await self.scraper_manager.load_and_sync_scrapers()
+
+                # 任务状态已在上面设置，直接返回
+                return
             else:
                 # 只有新增源或没有 Docker socket：热加载
                 if has_updates and not docker_available:
