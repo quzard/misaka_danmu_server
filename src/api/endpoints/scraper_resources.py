@@ -1582,7 +1582,9 @@ async def download_progress_stream(
                 "total": current_task.progress.total,
                 "current_file": current_task.progress.current_file,
                 "downloaded_count": len(current_task.progress.downloaded),
+                "skipped_count": len(current_task.progress.skipped),
                 "failed_count": len(current_task.progress.failed),
+                "error_message": current_task.error_message,
             }
 
             # 发送新消息

@@ -86,6 +86,10 @@ class ScraperDownloadExecutor:
         log_func = getattr(logger, level, logger.info)
         log_func(f"[任务 {self.task.task_id}] {message}")
 
+    async def _log_async(self, message: str, level: str = "info"):
+        """异步版本的日志记录（用于 progress_callback）"""
+        self._log(message, level)
+
     async def execute(self):
         """执行下载任务"""
         self.task.status = TaskStatus.RUNNING
@@ -205,7 +209,7 @@ class ScraperDownloadExecutor:
             scrapers_dir=scrapers_dir,
             headers=headers,
             proxy=proxy_to_use,
-            progress_callback=lambda msg: self._log(msg)
+            progress_callback=self._log_async
         )
 
         if success:
@@ -217,6 +221,8 @@ class ScraperDownloadExecutor:
 
             # 热加载
             self._log("正在热加载弹幕源...")
+            self._log("⚠️ 全量替换后需要重启服务以加载新的 .so 文件，服务即将重启...")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，服务即将重启")
             await self.scraper_manager.load_and_sync_scrapers()
             self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
         else:
@@ -319,13 +325,15 @@ class ScraperDownloadExecutor:
             return
 
         # 热加载
-        if download_count > 0 or skip_count > 0:
+        if download_count > 0:
             self._log("正在热加载弹幕源...")
             await backup_scrapers(self.current_user)
+            self._log("⚠️ 增量更新完成，正在重新加载弹幕源...")
+            logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，正在热加载")
             await self.scraper_manager.load_and_sync_scrapers()
             self._log(f"用户 '{self.current_user.username}' 成功加载了 {download_count} 个弹幕源")
 
-        self.task.status = TaskStatus.COMPLETED if not failed_downloads else TaskStatus.COMPLETED
+        self.task.status = TaskStatus.COMPLETED
 
     async def _fetch_package_json(self, package_url, headers, proxy_to_use, timeout_config):
         """获取 package.json"""
