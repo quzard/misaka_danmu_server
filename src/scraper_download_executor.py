@@ -167,6 +167,7 @@ class ScraperDownloadExecutor:
             _fetch_gitee_release_asset,
             _download_and_extract_release,
             backup_scrapers,
+            restore_scrapers,
         )
 
         self._log("使用全量替换模式")
@@ -212,60 +213,66 @@ class ScraperDownloadExecutor:
             progress_callback=self._log_async
         )
 
-        if success:
-            self.task.progress.current = 1
-            self.task.progress.total = 1
-            self.task.progress.downloaded.append("full_replace")
-            self._log("全量替换完成")
-            self.task.status = TaskStatus.COMPLETED
-
-            # 备份新下载的资源
-            self._log("正在备份新下载的资源...")
-            await backup_scrapers(self.current_user)
-            self._log("✓ 新资源备份完成")
-
-            # 检查是否有 Docker socket，决定重启方式
-            from .docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
-
-            if docker_available:
-                # 有 Docker socket，执行容器级别重启
-                from .docker_utils import get_current_container_id
-                detected_id = get_current_container_id()
-
-                self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
-                if detected_id:
-                    self._log(f"检测到当前容器 ID: {detected_id}")
-                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
-                else:
-                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-
-                self._log("将在 2 秒后重启容器...")
-                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
-
-                # 等待日志写入
-                await asyncio.sleep(2.0)
-
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(fallback_name)
-                if result.get("success"):
-                    container_id = result.get("container_id", "unknown")
-                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-                else:
-                    self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    await self.scraper_manager.load_and_sync_scrapers()
-            else:
-                # 没有 Docker socket，执行软重启（热加载）
-                self._log("⚠️ 未检测到 Docker 套接字，执行热加载（.so 文件可能需要手动重启容器才能生效）")
-                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，执行热加载")
-                await self.scraper_manager.load_and_sync_scrapers()
-                self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
-        else:
+        if not success:
+            # 下载失败，还原备份
+            self._log("全量替换失败，正在还原备份...", "error")
+            await restore_scrapers(self.current_user, self.scraper_manager)
+            self._log("已还原备份")
             raise ValueError("全量替换失败")
+
+        # 下载成功
+        self.task.progress.current = 1
+        self.task.progress.total = 1
+        self.task.progress.downloaded.append("full_replace")
+        self._log("全量替换完成")
+
+        # 备份新下载的资源
+        self._log("正在备份新下载的资源...")
+        await backup_scrapers(self.current_user)
+        self._log("✓ 新资源备份完成")
+
+        # 检查是否有 Docker socket，决定重启方式
+        from .docker_utils import is_docker_socket_available, restart_container
+        docker_available = is_docker_socket_available()
+
+        if docker_available:
+            # 有 Docker socket，执行容器级别重启
+            from .docker_utils import get_current_container_id
+            detected_id = get_current_container_id()
+
+            self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
+            if detected_id:
+                self._log(f"检测到当前容器 ID: {detected_id}")
+                logger.info(f"自动检测到当前容器 ID: {detected_id}")
+            else:
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+            self._log("将在 2 秒后重启容器...")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
+
+            # 等待日志写入
+            await asyncio.sleep(2.0)
+
+            fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+            result = await restart_container(fallback_name)
+            if result.get("success"):
+                container_id = result.get("container_id", "unknown")
+                self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                logger.info(f"已向容器发送重启指令 (ID: {container_id})")
+            else:
+                self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
+                logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                await self.scraper_manager.load_and_sync_scrapers()
+        else:
+            # 没有 Docker socket，执行软重启（热加载）
+            self._log("⚠️ 未检测到 Docker 套接字，执行热加载（.so 文件可能需要手动重启容器才能生效）")
+            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，执行热加载")
+            await self.scraper_manager.load_and_sync_scrapers()
+            self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+
+        self.task.status = TaskStatus.COMPLETED
 
     async def _do_incremental_download(self, base_url, headers, proxy_to_use, platform_key, platform_info):
         """增量下载模式"""
@@ -351,21 +358,27 @@ class ScraperDownloadExecutor:
         download_count = len(self.task.progress.downloaded)
         self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-        # 保存版本信息
-        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
-
-        # 检查下载结果
-        if download_count == 0 and skip_count == 0:
-            self._log("没有成功下载任何弹幕源，已取消重载", "error")
+        # 检查下载结果：只要有任何失败，整个任务就失败
+        if failed_downloads:
+            self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
+            self._log("正在还原备份...")
             await restore_scrapers(self.current_user, self.scraper_manager)
             self._log("已还原备份")
             self.task.status = TaskStatus.FAILED
-            self.task.error_message = "没有成功下载任何弹幕源"
+            self.task.error_message = f"下载失败: {', '.join(failed_downloads)}"
             return
+
+        if download_count == 0 and skip_count == 0:
+            self._log("没有需要下载的弹幕源", "warning")
+            self.task.status = TaskStatus.COMPLETED
+            return
+
+        # 全部成功，保存版本信息
+        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
 
         # 热加载或容器重启
         if download_count > 0:
-            # 备份新下载的资源
+            # 全部成功才备份新下载的资源
             self._log("正在备份新下载的资源...")
             await backup_scrapers(self.current_user)
             self._log("✓ 新资源备份完成")
