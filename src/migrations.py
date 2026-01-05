@@ -595,6 +595,33 @@ async def _fix_title_recognition_id_autoincrement(conn: AsyncConnection):
         raise
 
 
+async def _migrate_docker_image_name_v1(conn: AsyncConnection):
+    """
+    修正 dockerImageName 配置的默认值。
+
+    将错误的 'yanyutin753/misaka_danmu_server:latest'
+    修正为 'l429609201/misaka_danmu_server:latest'
+    """
+    logger.info("检查并修正 dockerImageName 配置...")
+
+    # 检查当前值
+    check_sql = text("SELECT config_value FROM config WHERE config_key = 'dockerImageName'")
+    result = await conn.execute(check_sql)
+    current_value = result.scalar_one_or_none()
+
+    if current_value == 'yanyutin753/misaka_danmu_server:latest':
+        # 修正为正确的镜像名
+        update_sql = text("""
+            UPDATE config
+            SET config_value = 'l429609201/misaka_danmu_server:latest'
+            WHERE config_key = 'dockerImageName'
+        """)
+        await conn.execute(update_sql)
+        logger.info("已将 dockerImageName 从 'yanyutin753/misaka_danmu_server:latest' 修正为 'l429609201/misaka_danmu_server:latest'")
+    else:
+        logger.info(f"dockerImageName 当前值为 '{current_value}'，无需修正")
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -612,6 +639,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("fix_api_tokens_id_autoincrement_v2", _fix_api_tokens_id_autoincrement, ()),  # v2: 增加 PostgreSQL 支持
         ("rename_duplicate_idx_created_at_v1", _rename_duplicate_idx_created_at, (db_type,)),  # 修复重复索引名
         ("fix_title_recognition_id_autoincrement_v1", _fix_title_recognition_id_autoincrement, ()),  # 修复 title_recognition.id 自增
+        ("migrate_docker_image_name_v1", _migrate_docker_image_name_v1, ()),  # 修正 dockerImageName 默认值
     ]
 
     for migration_id, migration_func, args in migrations:

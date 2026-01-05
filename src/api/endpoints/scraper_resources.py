@@ -1428,7 +1428,7 @@ async def load_resources_stream(
                                 # 等待日志写入完成
                                 await asyncio.sleep(1.0)
 
-                                container_name = await config_manager.get("containerName", "misaka-danmu-server")
+                                container_name = await config_manager.get("containerName", "misaka_danmu_server")
                                 result = await restart_container(container_name)
                                 if result.get("success"):
                                     logger.info(f"已向容器 '{container_name}' 发送重启指令")

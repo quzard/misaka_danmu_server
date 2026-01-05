@@ -555,7 +555,7 @@ async def restart_service(
     - 如果 Docker socket 可用，通过 Docker API 重启容器
     - 如果 Docker socket 不可用，通过退出进程触发容器重启（依赖 restart policy）
     """
-    container_name = await config_manager.get("containerName", "misaka-danmu-server")
+    container_name = await config_manager.get("containerName", "misaka_danmu_server")
 
     if is_docker_socket_available():
         # 使用 Docker API 重启
@@ -605,8 +605,8 @@ async def stream_update(
             yield f"data: {json.dumps({'status': 'Docker socket 不可用，无法执行更新', 'event': 'ERROR'})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    container_name = await config_manager.get("containerName", "misaka-danmu-server")
-    image_name = await config_manager.get("dockerImageName", "yanyutin753/misaka_danmu_server:latest")
+    container_name = await config_manager.get("containerName", "misaka_danmu_server")
+    image_name = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
     proxy_url = await config_manager.get("proxyUrl", "")
     proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
 

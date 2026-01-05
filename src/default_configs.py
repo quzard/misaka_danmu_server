@@ -114,8 +114,8 @@ def get_default_configs(settings=None, ai_prompts=None):
         'mediaServerSyncInterval': ('3600', '媒体服务器同步间隔(秒)'),
 
         # Docker 容器管理配置
-        'containerName': ('misaka-danmu-server', '当前运行的 Docker 容器名称，用于重启和更新操作。'),
-        'dockerImageName': ('yanyutin753/misaka_danmu_server:latest', 'Docker 镜像名称（含标签），用于一键更新功能。'),
+        'containerName': ('misaka_danmu_server', '当前运行的 Docker 容器名称，用于重启和更新操作。'),
+        'dockerImageName': ('l429609201/misaka_danmu_server:latest', 'Docker 镜像名称（含标签），用于一键更新功能。'),
     }
 
     # 添加需要settings的配置

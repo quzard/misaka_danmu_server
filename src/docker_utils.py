@@ -82,64 +82,100 @@ def get_current_container_id() -> Optional[str]:
     自动检测当前运行的容器 ID
 
     通过以下方式尝试获取：
-    1. hostname（Docker 默认将容器 ID 的前 12 位作为 hostname）
-    2. /proc/self/cgroup 文件（兼容旧版本 Docker）
+    1. 环境变量 HOSTNAME（Docker 默认设置）
+    2. socket.gethostname()
+    3. /proc/self/cgroup 文件（兼容旧版本 Docker）
+    4. /proc/1/cpuset 文件
+    5. /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2）
 
     Returns:
         容器 ID（短格式，12位）或 None
     """
     container_id = None
 
-    # 方法1: 通过 hostname
-    # Docker 默认将容器 ID 的前 12 位作为容器的 hostname
+    # 方法1: 通过环境变量 HOSTNAME
+    # Docker 默认将容器 ID 的前 12 位作为 HOSTNAME 环境变量
     try:
-        hostname = socket.gethostname()
+        hostname = os.environ.get('HOSTNAME', '')
+        logger.debug(f"环境变量 HOSTNAME: {hostname}")
         # 检查是否看起来像容器 ID（12位十六进制）
         if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
             container_id = hostname
-            logger.debug(f"通过 hostname 获取到容器 ID: {container_id}")
+            logger.info(f"通过环境变量 HOSTNAME 获取到容器 ID: {container_id}")
             return container_id
     except Exception as e:
-        logger.debug(f"通过 hostname 获取容器 ID 失败: {e}")
+        logger.debug(f"通过环境变量 HOSTNAME 获取容器 ID 失败: {e}")
 
-    # 方法2: 通过 /proc/self/cgroup 文件
+    # 方法2: 通过 socket.gethostname()
+    try:
+        hostname = socket.gethostname()
+        logger.debug(f"socket.gethostname(): {hostname}")
+        # 检查是否看起来像容器 ID（12位十六进制）
+        if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
+            container_id = hostname
+            logger.info(f"通过 socket.gethostname 获取到容器 ID: {container_id}")
+            return container_id
+    except Exception as e:
+        logger.debug(f"通过 socket.gethostname 获取容器 ID 失败: {e}")
+
+    # 方法3: 通过 /proc/self/cgroup 文件
     try:
         cgroup_path = Path('/proc/self/cgroup')
         if cgroup_path.exists():
-            with open(cgroup_path, 'r') as f:
-                for line in f:
-                    # 格式类似: 12:memory:/docker/容器ID
-                    if 'docker' in line or 'containerd' in line:
-                        parts = line.strip().split('/')
-                        if parts:
-                            potential_id = parts[-1]
-                            # 容器 ID 是 64 位十六进制，取前 12 位
-                            if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
-                                container_id = potential_id[:12]
-                                logger.debug(f"通过 cgroup 获取到容器 ID: {container_id}")
-                                return container_id
+            content = cgroup_path.read_text()
+            logger.debug(f"/proc/self/cgroup 内容: {content[:200]}...")
+            for line in content.splitlines():
+                # 格式类似: 12:memory:/docker/容器ID
+                if 'docker' in line or 'containerd' in line:
+                    parts = line.strip().split('/')
+                    if parts:
+                        potential_id = parts[-1]
+                        # 容器 ID 是 64 位十六进制，取前 12 位
+                        if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                            container_id = potential_id[:12]
+                            logger.info(f"通过 /proc/self/cgroup 获取到容器 ID: {container_id}")
+                            return container_id
     except Exception as e:
-        logger.debug(f"通过 cgroup 获取容器 ID 失败: {e}")
+        logger.debug(f"通过 /proc/self/cgroup 获取容器 ID 失败: {e}")
 
-    # 方法3: 通过 /proc/1/cpuset 文件（某些环境下可用）
+    # 方法4: 通过 /proc/1/cpuset 文件（某些环境下可用）
     try:
         cpuset_path = Path('/proc/1/cpuset')
         if cpuset_path.exists():
-            with open(cpuset_path, 'r') as f:
-                content = f.read().strip()
-                # 格式类似: /docker/容器ID
-                if 'docker' in content or 'containerd' in content:
-                    parts = content.split('/')
-                    if parts:
-                        potential_id = parts[-1]
-                        if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
-                            container_id = potential_id[:12]
-                            logger.debug(f"通过 cpuset 获取到容器 ID: {container_id}")
-                            return container_id
+            content = cpuset_path.read_text().strip()
+            logger.debug(f"/proc/1/cpuset 内容: {content}")
+            # 格式类似: /docker/容器ID
+            if 'docker' in content or 'containerd' in content:
+                parts = content.split('/')
+                if parts:
+                    potential_id = parts[-1]
+                    if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                        container_id = potential_id[:12]
+                        logger.info(f"通过 /proc/1/cpuset 获取到容器 ID: {container_id}")
+                        return container_id
     except Exception as e:
-        logger.debug(f"通过 cpuset 获取容器 ID 失败: {e}")
+        logger.debug(f"通过 /proc/1/cpuset 获取容器 ID 失败: {e}")
 
-    logger.warning("无法自动检测容器 ID，可能不在 Docker 容器中运行")
+    # 方法5: 通过 /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2）
+    try:
+        mountinfo_path = Path('/proc/self/mountinfo')
+        if mountinfo_path.exists():
+            content = mountinfo_path.read_text()
+            # 查找包含 docker 或 containers 的行
+            for line in content.splitlines():
+                if 'docker/containers/' in line or '/docker-' in line:
+                    # 尝试提取容器 ID
+                    import re
+                    # 匹配 64 位十六进制容器 ID
+                    match = re.search(r'([0-9a-f]{64})', line)
+                    if match:
+                        container_id = match.group(1)[:12]
+                        logger.info(f"通过 /proc/self/mountinfo 获取到容器 ID: {container_id}")
+                        return container_id
+    except Exception as e:
+        logger.debug(f"通过 /proc/self/mountinfo 获取容器 ID 失败: {e}")
+
+    logger.warning("无法自动检测容器 ID，可能不在 Docker 容器中运行或使用了自定义 hostname")
     return None
 
 
