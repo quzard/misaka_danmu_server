@@ -82,64 +82,100 @@ def get_current_container_id() -> Optional[str]:
     自动检测当前运行的容器 ID
 
     通过以下方式尝试获取：
-    1. hostname（Docker 默认将容器 ID 的前 12 位作为 hostname）
-    2. /proc/self/cgroup 文件（兼容旧版本 Docker）
+    1. 环境变量 HOSTNAME（Docker 默认设置）
+    2. socket.gethostname()
+    3. /proc/self/cgroup 文件（兼容旧版本 Docker）
+    4. /proc/1/cpuset 文件
+    5. /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2）
 
     Returns:
         容器 ID（短格式，12位）或 None
     """
     container_id = None
 
-    # 方法1: 通过 hostname
-    # Docker 默认将容器 ID 的前 12 位作为容器的 hostname
+    # 方法1: 通过环境变量 HOSTNAME
+    # Docker 默认将容器 ID 的前 12 位作为 HOSTNAME 环境变量
     try:
-        hostname = socket.gethostname()
+        hostname = os.environ.get('HOSTNAME', '')
+        logger.debug(f"环境变量 HOSTNAME: {hostname}")
         # 检查是否看起来像容器 ID（12位十六进制）
         if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
             container_id = hostname
-            logger.debug(f"通过 hostname 获取到容器 ID: {container_id}")
+            logger.info(f"通过环境变量 HOSTNAME 获取到容器 ID: {container_id}")
             return container_id
     except Exception as e:
-        logger.debug(f"通过 hostname 获取容器 ID 失败: {e}")
+        logger.debug(f"通过环境变量 HOSTNAME 获取容器 ID 失败: {e}")
 
-    # 方法2: 通过 /proc/self/cgroup 文件
+    # 方法2: 通过 socket.gethostname()
+    try:
+        hostname = socket.gethostname()
+        logger.debug(f"socket.gethostname(): {hostname}")
+        # 检查是否看起来像容器 ID（12位十六进制）
+        if len(hostname) == 12 and all(c in '0123456789abcdef' for c in hostname.lower()):
+            container_id = hostname
+            logger.info(f"通过 socket.gethostname 获取到容器 ID: {container_id}")
+            return container_id
+    except Exception as e:
+        logger.debug(f"通过 socket.gethostname 获取容器 ID 失败: {e}")
+
+    # 方法3: 通过 /proc/self/cgroup 文件
     try:
         cgroup_path = Path('/proc/self/cgroup')
         if cgroup_path.exists():
-            with open(cgroup_path, 'r') as f:
-                for line in f:
-                    # 格式类似: 12:memory:/docker/容器ID
-                    if 'docker' in line or 'containerd' in line:
-                        parts = line.strip().split('/')
-                        if parts:
-                            potential_id = parts[-1]
-                            # 容器 ID 是 64 位十六进制，取前 12 位
-                            if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
-                                container_id = potential_id[:12]
-                                logger.debug(f"通过 cgroup 获取到容器 ID: {container_id}")
-                                return container_id
+            content = cgroup_path.read_text()
+            logger.debug(f"/proc/self/cgroup 内容: {content[:200]}...")
+            for line in content.splitlines():
+                # 格式类似: 12:memory:/docker/容器ID
+                if 'docker' in line or 'containerd' in line:
+                    parts = line.strip().split('/')
+                    if parts:
+                        potential_id = parts[-1]
+                        # 容器 ID 是 64 位十六进制，取前 12 位
+                        if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                            container_id = potential_id[:12]
+                            logger.info(f"通过 /proc/self/cgroup 获取到容器 ID: {container_id}")
+                            return container_id
     except Exception as e:
-        logger.debug(f"通过 cgroup 获取容器 ID 失败: {e}")
+        logger.debug(f"通过 /proc/self/cgroup 获取容器 ID 失败: {e}")
 
-    # 方法3: 通过 /proc/1/cpuset 文件（某些环境下可用）
+    # 方法4: 通过 /proc/1/cpuset 文件（某些环境下可用）
     try:
         cpuset_path = Path('/proc/1/cpuset')
         if cpuset_path.exists():
-            with open(cpuset_path, 'r') as f:
-                content = f.read().strip()
-                # 格式类似: /docker/容器ID
-                if 'docker' in content or 'containerd' in content:
-                    parts = content.split('/')
-                    if parts:
-                        potential_id = parts[-1]
-                        if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
-                            container_id = potential_id[:12]
-                            logger.debug(f"通过 cpuset 获取到容器 ID: {container_id}")
-                            return container_id
+            content = cpuset_path.read_text().strip()
+            logger.debug(f"/proc/1/cpuset 内容: {content}")
+            # 格式类似: /docker/容器ID
+            if 'docker' in content or 'containerd' in content:
+                parts = content.split('/')
+                if parts:
+                    potential_id = parts[-1]
+                    if len(potential_id) >= 12 and all(c in '0123456789abcdef' for c in potential_id[:12].lower()):
+                        container_id = potential_id[:12]
+                        logger.info(f"通过 /proc/1/cpuset 获取到容器 ID: {container_id}")
+                        return container_id
     except Exception as e:
-        logger.debug(f"通过 cpuset 获取容器 ID 失败: {e}")
+        logger.debug(f"通过 /proc/1/cpuset 获取容器 ID 失败: {e}")
 
-    logger.warning("无法自动检测容器 ID，可能不在 Docker 容器中运行")
+    # 方法5: 通过 /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2）
+    try:
+        mountinfo_path = Path('/proc/self/mountinfo')
+        if mountinfo_path.exists():
+            content = mountinfo_path.read_text()
+            # 查找包含 docker 或 containers 的行
+            for line in content.splitlines():
+                if 'docker/containers/' in line or '/docker-' in line:
+                    # 尝试提取容器 ID
+                    import re
+                    # 匹配 64 位十六进制容器 ID
+                    match = re.search(r'([0-9a-f]{64})', line)
+                    if match:
+                        container_id = match.group(1)[:12]
+                        logger.info(f"通过 /proc/self/mountinfo 获取到容器 ID: {container_id}")
+                        return container_id
+    except Exception as e:
+        logger.debug(f"通过 /proc/self/mountinfo 获取容器 ID 失败: {e}")
+
+    logger.warning("无法自动检测容器 ID，可能不在 Docker 容器中运行或使用了自定义 hostname")
     return None
 
 
@@ -182,13 +218,15 @@ def get_docker_status() -> Dict[str, Any]:
     return status
 
 
-async def restart_container(container_name: str) -> Dict[str, Any]:
+async def restart_container(fallback_container_name: str = "misaka_danmu_server") -> Dict[str, Any]:
     """
-    重启指定容器
-    
+    重启当前容器
+
+    优先自动检测当前容器 ID，如果检测失败则使用兜底容器名称
+
     Args:
-        container_name: 容器名称
-        
+        fallback_container_name: 兜底容器名称（自动检测失败时使用）
+
     Returns:
         操作结果字典
     """
@@ -198,19 +236,30 @@ async def restart_container(container_name: str) -> Dict[str, Any]:
             "message": "Docker socket 不可用，无法通过 Docker API 重启",
             "fallback": True
         }
-    
+
+    # 优先自动检测当前容器 ID
+    container_name = get_current_container_id()
+
+    # 如果自动检测失败，使用兜底容器名称
+    if not container_name:
+        logger.info(f"自动检测容器 ID 失败，使用兜底容器名称: {fallback_container_name}")
+        container_name = fallback_container_name
+    else:
+        logger.info(f"自动检测到当前容器 ID: {container_name}")
+
     try:
         client = get_docker_client()
         if not client:
             return {"success": False, "message": "无法获取 Docker 客户端", "fallback": True}
-        
+
         container = client.containers.get(container_name)
-        logger.info(f"正在重启容器: {container_name}")
+        logger.info(f"正在重启容器: {container_name} (ID: {container.short_id})")
         container.restart(timeout=10)
-        
+
         return {
             "success": True,
-            "message": f"已向容器 '{container_name}' 发送重启指令"
+            "message": f"已向容器 '{container_name}' 发送重启指令",
+            "container_id": container.short_id
         }
     except NotFound:
         return {
@@ -328,6 +377,9 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
         # 获取一次性统计数据（stream=False）
         stats = container.stats(stream=False)
 
+        # 调试：记录原始统计数据的关键字段
+        logger.debug(f"Docker stats 原始数据 keys: {list(stats.keys())}")
+
         # 计算 CPU 使用率
         cpu_percent = 0.0
         cpu_stats = stats.get("cpu_stats", {})
@@ -337,6 +389,8 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
                     precpu_stats.get("cpu_usage", {}).get("total_usage", 0)
         system_delta = cpu_stats.get("system_cpu_usage", 0) - \
                        precpu_stats.get("system_cpu_usage", 0)
+
+        logger.debug(f"CPU 计算: cpu_delta={cpu_delta}, system_delta={system_delta}")
 
         if system_delta > 0 and cpu_delta > 0:
             # 获取 CPU 核心数
@@ -359,30 +413,51 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
             memory_percent = (memory_usage_actual / memory_limit) * 100.0
 
         # 网络 I/O
+        # Docker 网络统计可能在 "networks" 或容器的网络设置中
         networks = stats.get("networks", {})
         network_rx = 0
         network_tx = 0
-        for iface_stats in networks.values():
-            network_rx += iface_stats.get("rx_bytes", 0)
-            network_tx += iface_stats.get("tx_bytes", 0)
+
+        logger.debug(f"网络统计 networks keys: {list(networks.keys()) if networks else 'empty'}")
+
+        if networks:
+            for iface_name, iface_stats in networks.items():
+                rx = iface_stats.get("rx_bytes", 0)
+                tx = iface_stats.get("tx_bytes", 0)
+                logger.debug(f"  网卡 {iface_name}: rx={rx}, tx={tx}")
+                network_rx += rx
+                network_tx += tx
+        else:
+            # 某些网络模式（如 host）可能没有 networks 字段
+            # 尝试从容器信息中获取
+            logger.debug("networks 字段为空，可能使用 host 网络模式")
 
         # 磁盘 I/O
         blkio_stats = stats.get("blkio_stats", {})
         io_read = 0
         io_write = 0
-        for entry in blkio_stats.get("io_service_bytes_recursive", []) or []:
-            if entry.get("op") == "read":
-                io_read += entry.get("value", 0)
-            elif entry.get("op") == "write":
-                io_write += entry.get("value", 0)
+        io_entries = blkio_stats.get("io_service_bytes_recursive", []) or []
+
+        logger.debug(f"磁盘 I/O entries 数量: {len(io_entries)}")
+
+        for entry in io_entries:
+            op = entry.get("op", "").lower()
+            value = entry.get("value", 0)
+            if op == "read":
+                io_read += value
+            elif op == "write":
+                io_write += value
 
         # 获取容器信息
         container_info = container.attrs
         state = container_info.get("State", {})
 
+        # 获取真正的容器名称（Docker 返回的名称带有前导斜杠，需要去掉）
+        real_container_name = container_info.get("Name", "").lstrip("/") or container_name
+
         return {
             "available": True,
-            "containerName": container_name,
+            "containerName": real_container_name,
             "containerId": container.short_id,
             "status": state.get("Status", "unknown"),
             "startedAt": state.get("StartedAt"),

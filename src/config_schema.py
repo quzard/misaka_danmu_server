@@ -148,6 +148,22 @@ CONFIG_SCHEMA = [
         "customComponent": "DatabaseBackupManager",
     },
     {
+        "key": "scraper_update",
+        "label": "弹幕源自动更新",
+        "items": [
+            {
+                "key": "scraperAutoUpdateInterval",
+                "label": "检查间隔",
+                "type": "number",
+                "suffix": "分钟",
+                "min": 15,
+                "max": 1440,
+                "description": "自动检查更新的时间间隔，最低15分钟，最高1440分钟（24小时）。修改后需要重启服务生效。",
+                "placeholder": "30",
+            },
+        ],
+    },
+    {
         "key": "ui",
         "label": "界面设置",
         "items": [

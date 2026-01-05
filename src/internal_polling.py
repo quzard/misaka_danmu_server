@@ -87,8 +87,8 @@ class InternalPollingManager:
             handler=scraper_auto_update_handler,
             enabled_key="scraperAutoUpdateEnabled",
             interval_key="scraperAutoUpdateInterval",
-            default_interval=15,  # 15分钟
-            min_interval=5,       # 最小5分钟
+            default_interval=30,  # 30分钟
+            min_interval=15,      # 最小15分钟
             startup_delay=60      # 启动后60秒开始
         )
 
