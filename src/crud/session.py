@@ -133,6 +133,14 @@ async def revoke_session_by_jti(session: AsyncSession, jti: str) -> bool:
     return result.rowcount > 0
 
 
+async def delete_session_by_jti(session: AsyncSession, jti: str) -> bool:
+    """通过 jti 删除会话（用于白名单会话的重建）"""
+    stmt = delete(UserSession).where(UserSession.jti == jti)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount > 0
+
+
 async def revoke_other_sessions(session: AsyncSession, user_id: int, current_jti: str) -> int:
     """撤销用户的所有其他会话"""
     stmt = update(UserSession).where(
