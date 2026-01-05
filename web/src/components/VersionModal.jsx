@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic } from 'antd'
 import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined } from '@ant-design/icons'
-import { checkAppUpdate, getDockerStatus, getDockerStats, restartService } from '../apis'
+import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
@@ -19,14 +19,66 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updateComplete, setUpdateComplete] = useState(false)
   const [updateError, setUpdateError] = useState(null)
   const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false)
+  const statsAbortController = useRef(null)
   const messageApi = useMessage()
+
+  // 启动 Docker Stats SSE 连接
+  const startStatsSSE = useCallback(() => {
+    const token = Cookies.get('danmu_token')
+    if (!token) return
+
+    // 清理之前的连接
+    if (statsAbortController.current) {
+      statsAbortController.current.abort()
+    }
+    statsAbortController.current = new AbortController()
+
+    fetchEventSource('/api/ui/docker/stats', {
+      signal: statsAbortController.current.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      onopen: async response => {
+        if (!response.ok) {
+          console.error('Docker Stats SSE 连接失败:', response.status)
+        }
+      },
+      onmessage: event => {
+        try {
+          const data = JSON.parse(event.data)
+          setDockerStats(data)
+        } catch (e) {
+          console.error('解析 Docker Stats 数据失败:', e)
+        }
+      },
+      onerror: error => {
+        console.error('Docker Stats SSE 错误:', error)
+      },
+    }).catch(error => {
+      if (error.name !== 'AbortError') {
+        console.error('Docker Stats SSE 流错误:', error)
+      }
+    })
+  }, [])
+
+  // 停止 Docker Stats SSE 连接
+  const stopStatsSSE = useCallback(() => {
+    if (statsAbortController.current) {
+      statsAbortController.current.abort()
+      statsAbortController.current = null
+    }
+  }, [])
 
   // 加载更新信息和 Docker 状态
   useEffect(() => {
     if (open) {
       loadData()
+    } else {
+      // 关闭弹窗时停止 SSE
+      stopStatsSSE()
     }
-  }, [open])
+    return () => stopStatsSSE()
+  }, [open, stopStatsSSE])
 
   const loadData = async () => {
     setLoading(true)
@@ -38,14 +90,9 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
       setUpdateInfo(updateRes.data)
       setDockerStatus(dockerRes.data)
 
-      // 如果 Docker 已连接，获取容器统计信息
+      // 如果 Docker 已连接，启动 SSE 获取实时统计信息
       if (dockerRes.data?.socketAvailable) {
-        try {
-          const statsRes = await getDockerStats()
-          setDockerStats(statsRes.data)
-        } catch (e) {
-          console.error('获取容器统计失败:', e)
-        }
+        startStatsSSE()
       }
     } catch (error) {
       console.error('加载数据失败:', error)
@@ -192,7 +239,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               title={
                 <div className="flex items-center gap-2">
                   <CloudServerOutlined />
-                  <span>容器状态</span>
+                  <span>{dockerStats.containerName || '容器状态'}</span>
                   <Tag color={dockerStats.status === 'running' ? 'success' : 'warning'} className="!ml-2">
                     {dockerStats.status}
                   </Tag>
@@ -210,7 +257,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                   />
                 </Col>
                 <Col span={12}>
-                  <div className="text-xs text-gray-500 mb-1">内存使用</div>
+                  <div className="text-xs text-gray-500 mb-1">内存使用 ({dockerStats.memory?.limitFormatted || '-'})</div>
                   <Progress
                     percent={dockerStats.memory?.percent || 0}
                     size="small"
@@ -220,14 +267,14 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                 </Col>
                 <Col span={12}>
                   <Statistic
-                    title="网络接收"
+                    title={<span>网络接收 <span className="text-green-500">↓{dockerStats.network?.rxRateFormatted || '0 B/s'}</span></span>}
                     value={dockerStats.network?.rxFormatted || '0 B'}
                     valueStyle={{ fontSize: '14px' }}
                   />
                 </Col>
                 <Col span={12}>
                   <Statistic
-                    title="网络发送"
+                    title={<span>网络发送 <span className="text-blue-500">↑{dockerStats.network?.txRateFormatted || '0 B/s'}</span></span>}
                     value={dockerStats.network?.txFormatted || '0 B'}
                     valueStyle={{ fontSize: '14px' }}
                   />

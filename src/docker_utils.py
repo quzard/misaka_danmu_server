@@ -377,6 +377,9 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
         # 获取一次性统计数据（stream=False）
         stats = container.stats(stream=False)
 
+        # 调试：记录原始统计数据的关键字段
+        logger.debug(f"Docker stats 原始数据 keys: {list(stats.keys())}")
+
         # 计算 CPU 使用率
         cpu_percent = 0.0
         cpu_stats = stats.get("cpu_stats", {})
@@ -386,6 +389,8 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
                     precpu_stats.get("cpu_usage", {}).get("total_usage", 0)
         system_delta = cpu_stats.get("system_cpu_usage", 0) - \
                        precpu_stats.get("system_cpu_usage", 0)
+
+        logger.debug(f"CPU 计算: cpu_delta={cpu_delta}, system_delta={system_delta}")
 
         if system_delta > 0 and cpu_delta > 0:
             # 获取 CPU 核心数
@@ -408,30 +413,51 @@ def get_container_stats(fallback_container_name: str = "misaka_danmu_server") ->
             memory_percent = (memory_usage_actual / memory_limit) * 100.0
 
         # 网络 I/O
+        # Docker 网络统计可能在 "networks" 或容器的网络设置中
         networks = stats.get("networks", {})
         network_rx = 0
         network_tx = 0
-        for iface_stats in networks.values():
-            network_rx += iface_stats.get("rx_bytes", 0)
-            network_tx += iface_stats.get("tx_bytes", 0)
+
+        logger.debug(f"网络统计 networks keys: {list(networks.keys()) if networks else 'empty'}")
+
+        if networks:
+            for iface_name, iface_stats in networks.items():
+                rx = iface_stats.get("rx_bytes", 0)
+                tx = iface_stats.get("tx_bytes", 0)
+                logger.debug(f"  网卡 {iface_name}: rx={rx}, tx={tx}")
+                network_rx += rx
+                network_tx += tx
+        else:
+            # 某些网络模式（如 host）可能没有 networks 字段
+            # 尝试从容器信息中获取
+            logger.debug("networks 字段为空，可能使用 host 网络模式")
 
         # 磁盘 I/O
         blkio_stats = stats.get("blkio_stats", {})
         io_read = 0
         io_write = 0
-        for entry in blkio_stats.get("io_service_bytes_recursive", []) or []:
-            if entry.get("op") == "read":
-                io_read += entry.get("value", 0)
-            elif entry.get("op") == "write":
-                io_write += entry.get("value", 0)
+        io_entries = blkio_stats.get("io_service_bytes_recursive", []) or []
+
+        logger.debug(f"磁盘 I/O entries 数量: {len(io_entries)}")
+
+        for entry in io_entries:
+            op = entry.get("op", "").lower()
+            value = entry.get("value", 0)
+            if op == "read":
+                io_read += value
+            elif op == "write":
+                io_write += value
 
         # 获取容器信息
         container_info = container.attrs
         state = container_info.get("State", {})
 
+        # 获取真正的容器名称（Docker 返回的名称带有前导斜杠，需要去掉）
+        real_container_name = container_info.get("Name", "").lstrip("/") or container_name
+
         return {
             "available": True,
-            "containerName": container_name,
+            "containerName": real_container_name,
             "containerId": container.short_id,
             "status": state.get("Status", "unknown"),
             "startedAt": state.get("StartedAt"),
