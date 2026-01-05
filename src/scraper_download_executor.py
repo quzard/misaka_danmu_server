@@ -219,12 +219,39 @@ class ScraperDownloadExecutor:
             self._log("全量替换完成")
             self.task.status = TaskStatus.COMPLETED
 
-            # 热加载
-            self._log("正在热加载弹幕源...")
-            self._log("⚠️ 全量替换后需要重启服务以加载新的 .so 文件，服务即将重启...")
-            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，服务即将重启")
-            await self.scraper_manager.load_and_sync_scrapers()
-            self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+            # 备份新下载的资源
+            self._log("正在备份新下载的资源...")
+            await backup_scrapers(self.current_user)
+            self._log("✓ 新资源备份完成")
+
+            # 检查是否有 Docker socket，决定重启方式
+            from .docker_utils import is_docker_socket_available, restart_container
+            docker_available = is_docker_socket_available()
+
+            if docker_available:
+                # 有 Docker socket，执行容器级别重启
+                self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
+                self._log("检测到 Docker 套接字，将在 2 秒后重启容器...")
+                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
+
+                # 等待日志写入
+                await asyncio.sleep(2.0)
+
+                container_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                result = await restart_container(container_name)
+                if result.get("success"):
+                    self._log(f"已向容器 '{container_name}' 发送重启指令")
+                    logger.info(f"已向容器 '{container_name}' 发送重启指令")
+                else:
+                    self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
+                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                    await self.scraper_manager.load_and_sync_scrapers()
+            else:
+                # 没有 Docker socket，执行软重启（热加载）
+                self._log("⚠️ 未检测到 Docker 套接字，执行热加载（.so 文件可能需要手动重启容器才能生效）")
+                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，执行热加载")
+                await self.scraper_manager.load_and_sync_scrapers()
+                self._log(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
         else:
             raise ValueError("全量替换失败")
 
@@ -324,14 +351,53 @@ class ScraperDownloadExecutor:
             self.task.error_message = "没有成功下载任何弹幕源"
             return
 
-        # 热加载
+        # 热加载或容器重启
         if download_count > 0:
-            self._log("正在热加载弹幕源...")
+            # 备份新下载的资源
+            self._log("正在备份新下载的资源...")
             await backup_scrapers(self.current_user)
-            self._log("⚠️ 增量更新完成，正在重新加载弹幕源...")
-            logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，正在热加载")
-            await self.scraper_manager.load_and_sync_scrapers()
-            self._log(f"用户 '{self.current_user.username}' 成功加载了 {download_count} 个弹幕源")
+            self._log("✓ 新资源备份完成")
+
+            # 检查是否有 Docker socket，决定重启方式
+            from .docker_utils import is_docker_socket_available, restart_container
+            docker_available = is_docker_socket_available()
+
+            # 判断是否有更新已有源（需要容器重启）
+            # 如果下载的文件中有任何一个是更新（而非新增），则需要容器重启
+            has_updates = any(
+                name in [s.name for s in self.scraper_manager.get_all_scrapers()]
+                for name in self.task.progress.downloaded
+            )
+
+            if has_updates and docker_available:
+                # 有更新已有源且有 Docker socket，执行容器级别重启
+                self._log("⚠️ 检测到更新已有源，需要重启容器以加载新的 .so 文件")
+                self._log("检测到 Docker 套接字，将在 2 秒后重启容器...")
+                logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
+
+                # 等待日志写入
+                await asyncio.sleep(2.0)
+
+                container_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                result = await restart_container(container_name)
+                if result.get("success"):
+                    self._log(f"已向容器 '{container_name}' 发送重启指令")
+                    logger.info(f"已向容器 '{container_name}' 发送重启指令")
+                else:
+                    self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
+                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
+                    await self.scraper_manager.load_and_sync_scrapers()
+            else:
+                # 只有新增源或没有 Docker socket：热加载
+                if has_updates and not docker_available:
+                    self._log("⚠️ 检测到更新已有源，但未检测到 Docker 套接字")
+                    self._log("执行热加载（.so 文件可能需要手动重启容器才能生效）")
+                else:
+                    self._log("正在热加载弹幕源...")
+
+                logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，正在热加载")
+                await self.scraper_manager.load_and_sync_scrapers()
+                self._log(f"用户 '{self.current_user.username}' 成功加载了 {download_count} 个弹幕源")
 
         self.task.status = TaskStatus.COMPLETED
 
