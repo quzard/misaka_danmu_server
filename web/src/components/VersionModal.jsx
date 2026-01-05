@@ -6,8 +6,31 @@ import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
 import ReleaseHistoryModal from './ReleaseHistoryModal'
+import ReactMarkdown from 'react-markdown'
 
-const { Text, Paragraph, Title } = Typography
+const { Text, Title } = Typography
+
+// Markdown 渲染样式
+const markdownComponents = {
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+      {children}
+    </a>
+  ),
+  p: ({ children }) => <p className="my-1">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc list-inside my-1 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside my-1 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="ml-2">{children}</li>,
+  code: ({ children }) => (
+    <code className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-blue-400 pl-3 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r text-sm">
+      {children}
+    </blockquote>
+  ),
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+}
 
 export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [loading, setLoading] = useState(false)
@@ -169,13 +192,15 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   // 渲染更新日志
   const renderChangelog = () => {
     if (!updateInfo?.changelog) return null
-    
+
     return (
       <div className="max-h-[300px] overflow-y-auto bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mt-4">
         <Title level={5}>更新日志</Title>
-        <Paragraph>
-          <pre className="whitespace-pre-wrap text-sm">{updateInfo.changelog}</pre>
-        </Paragraph>
+        <div className="text-sm">
+          <ReactMarkdown components={markdownComponents}>
+            {updateInfo.changelog}
+          </ReactMarkdown>
+        </div>
       </div>
     )
   }

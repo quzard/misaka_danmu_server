@@ -3,8 +3,50 @@ import { Modal, Spin, Tag, Badge, Typography, Collapse, Timeline, Button } from 
 import { getReleaseHistory } from '../apis'
 import { useMessage } from '../MessageContext'
 import dayjs from 'dayjs'
+import ReactMarkdown from 'react-markdown'
 
 const { Text } = Typography
+
+// Markdown 渲染样式
+const markdownComponents = {
+  // 链接
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+      {children}
+    </a>
+  ),
+  // 段落
+  p: ({ children }) => <p className="my-2">{children}</p>,
+  // 列表
+  ul: ({ children }) => <ul className="list-disc list-inside my-2 space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-inside my-2 space-y-1">{children}</ol>,
+  li: ({ children }) => <li className="ml-2">{children}</li>,
+  // 代码
+  code: ({ children }) => (
+    <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-sm font-mono">
+      {children}
+    </code>
+  ),
+  // 代码块
+  pre: ({ children }) => (
+    <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto my-2">
+      {children}
+    </pre>
+  ),
+  // 引用块
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-4 border-blue-400 pl-4 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r">
+      {children}
+    </blockquote>
+  ),
+  // 标题
+  h1: ({ children }) => <h1 className="text-xl font-bold my-3">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-lg font-bold my-2">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-base font-bold my-2">{children}</h3>,
+  // 强调
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  em: ({ children }) => <em className="italic">{children}</em>,
+}
 
 export const ReleaseHistoryModal = ({ open, onClose }) => {
   const [loading, setLoading] = useState(false)
@@ -20,7 +62,7 @@ export const ReleaseHistoryModal = ({ open, onClose }) => {
   const loadReleaseHistory = async () => {
     setLoading(true)
     try {
-      const res = await getReleaseHistory(30)
+      const res = await getReleaseHistory(5)
       setReleaseHistory(res.data.releases || [])
     } catch (error) {
       console.error('加载历史版本失败:', error)
@@ -75,9 +117,11 @@ export const ReleaseHistoryModal = ({ open, onClose }) => {
                     ),
                     children: (
                       <div className="max-h-[300px] overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-sm m-0 bg-gray-50 dark:bg-gray-800 p-3 rounded">
-                          {release.changelog || '暂无更新说明'}
-                        </pre>
+                        <div className="text-sm bg-gray-50 dark:bg-gray-800 p-3 rounded">
+                          <ReactMarkdown components={markdownComponents}>
+                            {release.changelog || '暂无更新说明'}
+                          </ReactMarkdown>
+                        </div>
                         {release.releaseUrl && (
                           <Button
                             type="link"
