@@ -209,14 +209,14 @@ async def test_proxy_latency(
 
     # --- 步骤 1: 测试代理连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    test_url_google = "http://www.google.com/generate_204"
+    test_url = "http://www.gstatic.com/generate_204"
 
     if proxy_mode == "none":
         # 直连模式：测试直接连接
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                 start_time = time.time()
-                response = await client.get(test_url_google)
+                response = await client.get(test_url)
                 latency = (time.time() - start_time) * 1000
                 if response.status_code == 204:
                     proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
@@ -236,7 +236,7 @@ async def test_proxy_latency(
             try:
                 async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
                     start_time = time.time()
-                    response = await client.get(test_url_google)
+                    response = await client.get(test_url)
                     latency = (time.time() - start_time) * 1000
                     if response.status_code == 204:
                         proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
@@ -254,8 +254,9 @@ async def test_proxy_latency(
             proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置加速代理地址")
         else:
             # 构建加速代理格式的测试 URL
+            # 格式: {proxy_base}/{protocol}/{host}/{path}
             proxy_base = accelerate_proxy_url.rstrip('/')
-            accelerated_test_url = f"{proxy_base}/http/www.google.com/generate_204"
+            accelerated_test_url = f"{proxy_base}/http/www.gstatic.com/generate_204"
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                     start_time = time.time()
