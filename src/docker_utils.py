@@ -12,6 +12,8 @@ import os
 import sys
 import socket
 import logging
+import time
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, Generator
 
@@ -32,54 +34,129 @@ except ImportError:
     NotFound = Exception
     APIError = Exception
 
+# ==================== 缓存机制 ====================
+# Docker 客户端缓存
+_docker_client_cache: Optional[Any] = None
+_docker_client_cache_time: float = 0
+_DOCKER_CLIENT_CACHE_DURATION = 60  # 缓存 60 秒
+
+# Docker socket 可用性缓存
+_docker_socket_available_cache: Optional[bool] = None
+_docker_socket_available_cache_time: float = 0
+_DOCKER_SOCKET_CACHE_DURATION = 30  # 缓存 30 秒
+
+# 容器 ID 缓存
+_container_id_cache: Optional[str] = None
+_container_id_cache_time: float = 0
+_CONTAINER_ID_CACHE_DURATION = 300  # 缓存 5 分钟（容器 ID 不会频繁变化）
+
+# 线程锁
+_docker_lock = threading.Lock()
+
 
 def is_docker_socket_available() -> bool:
     """
-    检测 Docker socket 是否可用
-    
+    检测 Docker socket 是否可用（带缓存）
+
     Returns:
         bool: Docker socket 是否可用
     """
+    global _docker_socket_available_cache, _docker_socket_available_cache_time
+
+    # 检查缓存
+    current_time = time.time()
+    if _docker_socket_available_cache is not None:
+        if current_time - _docker_socket_available_cache_time < _DOCKER_SOCKET_CACHE_DURATION:
+            return _docker_socket_available_cache
+
     if not DOCKER_AVAILABLE:
         logger.debug("Docker SDK 未安装")
+        _docker_socket_available_cache = False
+        _docker_socket_available_cache_time = current_time
         return False
-    
+
     # 检查 socket 文件是否存在
     if not Path(DOCKER_SOCKET_PATH).exists():
         logger.debug(f"Docker socket 不存在: {DOCKER_SOCKET_PATH}")
+        _docker_socket_available_cache = False
+        _docker_socket_available_cache_time = current_time
         return False
-    
-    # 尝试连接 Docker daemon
+
+    # 尝试连接 Docker daemon（带超时）
     try:
-        client = docker.from_env()
-        client.ping()
+        with _docker_lock:
+            client = docker.from_env(timeout=5)  # 添加 5 秒超时
+            client.ping()
         logger.debug("Docker socket 可用")
+        _docker_socket_available_cache = True
+        _docker_socket_available_cache_time = current_time
         return True
     except Exception as e:
         logger.debug(f"无法连接 Docker daemon: {e}")
+        _docker_socket_available_cache = False
+        _docker_socket_available_cache_time = current_time
         return False
 
 
 def get_docker_client() -> Optional[Any]:
     """
-    获取 Docker 客户端
+    获取 Docker 客户端（带缓存和超时）
 
     Returns:
         docker.DockerClient 或 None
     """
+    global _docker_client_cache, _docker_client_cache_time
+
     if not DOCKER_AVAILABLE:
         return None
 
+    current_time = time.time()
+
+    # 检查缓存的客户端是否仍然有效
+    if _docker_client_cache is not None:
+        if current_time - _docker_client_cache_time < _DOCKER_CLIENT_CACHE_DURATION:
+            # 快速验证客户端是否仍然可用
+            try:
+                _docker_client_cache.ping()
+                return _docker_client_cache
+            except Exception:
+                # 客户端失效，需要重新创建
+                _docker_client_cache = None
+
     try:
-        return docker.from_env()
+        with _docker_lock:
+            # 双重检查
+            if _docker_client_cache is not None and current_time - _docker_client_cache_time < _DOCKER_CLIENT_CACHE_DURATION:
+                return _docker_client_cache
+
+            _docker_client_cache = docker.from_env(timeout=10)  # 添加 10 秒超时
+            _docker_client_cache_time = current_time
+            return _docker_client_cache
     except Exception as e:
         logger.error(f"获取 Docker 客户端失败: {e}")
         return None
 
 
+def invalidate_docker_cache():
+    """清除所有 Docker 相关缓存"""
+    global _docker_client_cache, _docker_client_cache_time
+    global _docker_socket_available_cache, _docker_socket_available_cache_time
+    global _container_id_cache, _container_id_cache_time
+
+    with _docker_lock:
+        _docker_client_cache = None
+        _docker_client_cache_time = 0
+        _docker_socket_available_cache = None
+        _docker_socket_available_cache_time = 0
+        _container_id_cache = None
+        _container_id_cache_time = 0
+
+    logger.debug("Docker 缓存已清除")
+
+
 def get_current_container_id() -> Optional[str]:
     """
-    自动检测当前运行的容器 ID
+    自动检测当前运行的容器 ID（带缓存）
 
     通过以下方式尝试获取：
     1. 环境变量 HOSTNAME（Docker 默认设置）
@@ -91,9 +168,28 @@ def get_current_container_id() -> Optional[str]:
     Returns:
         容器 ID（短格式，12位）或 None
     """
+    global _container_id_cache, _container_id_cache_time
+
+    # 检查缓存
+    current_time = time.time()
+    if _container_id_cache is not None:
+        if current_time - _container_id_cache_time < _CONTAINER_ID_CACHE_DURATION:
+            return _container_id_cache
+
+    container_id = _detect_container_id_impl()
+
+    # 更新缓存（即使是 None 也缓存，避免重复检测）
+    _container_id_cache = container_id
+    _container_id_cache_time = current_time
+
+    return container_id
+
+
+def _detect_container_id_impl() -> Optional[str]:
+    """容器 ID 检测的实际实现（不带缓存）"""
     container_id = None
 
-    # 方法1: 通过环境变量 HOSTNAME
+    # 方法1: 通过环境变量 HOSTNAME（最快，优先使用）
     # Docker 默认将容器 ID 的前 12 位作为 HOSTNAME 环境变量
     try:
         hostname = os.environ.get('HOSTNAME', '')
@@ -106,7 +202,7 @@ def get_current_container_id() -> Optional[str]:
     except Exception as e:
         logger.debug(f"通过环境变量 HOSTNAME 获取容器 ID 失败: {e}")
 
-    # 方法2: 通过 socket.gethostname()
+    # 方法2: 通过 socket.gethostname()（也很快）
     try:
         hostname = socket.gethostname()
         logger.debug(f"socket.gethostname(): {hostname}")
@@ -118,7 +214,7 @@ def get_current_container_id() -> Optional[str]:
     except Exception as e:
         logger.debug(f"通过 socket.gethostname 获取容器 ID 失败: {e}")
 
-    # 方法3: 通过 /proc/self/cgroup 文件
+    # 方法3: 通过 /proc/self/cgroup 文件（可能较慢，特别是在某些 NAS 系统上）
     try:
         cgroup_path = Path('/proc/self/cgroup')
         if cgroup_path.exists():
@@ -156,7 +252,7 @@ def get_current_container_id() -> Optional[str]:
     except Exception as e:
         logger.debug(f"通过 /proc/1/cpuset 获取容器 ID 失败: {e}")
 
-    # 方法5: 通过 /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2）
+    # 方法5: 通过 /proc/self/mountinfo 文件（Docker 20.10+ cgroup v2，可能较慢）
     try:
         mountinfo_path = Path('/proc/self/mountinfo')
         if mountinfo_path.exists():

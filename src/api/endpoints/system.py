@@ -538,153 +538,238 @@ async def get_docker_stats_endpoint(
     使用 Server-Sent Events (SSE) 实时推送统计数据，每秒更新一次。
     自动检测当前运行的容器，无需手动指定容器名称。
     需要 Docker socket 可用才能获取统计信息。
+
+    使用线程 + asyncio.Queue 实现真正的流式推送，不阻塞事件循环。
     """
     from ...docker_utils import is_docker_socket_available, get_current_container_id, get_docker_client
+    import threading
+    import queue
 
     async def stats_generator():
         """生成 SSE 统计数据流"""
-        if not is_docker_socket_available():
+        loop = asyncio.get_event_loop()
+
+        # 在线程池中执行初始化检查
+        try:
+            socket_available = await asyncio.wait_for(
+                loop.run_in_executor(None, is_docker_socket_available),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'available': False, 'message': 'Docker socket 检测超时'})}\n\n"
+            return
+
+        if not socket_available:
             yield f"data: {json.dumps({'available': False, 'message': 'Docker socket 不可用'})}\n\n"
             return
 
-        # 获取容器
-        container_id = get_current_container_id()
+        try:
+            container_id = await asyncio.wait_for(
+                loop.run_in_executor(None, get_current_container_id),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'available': False, 'message': '获取容器 ID 超时'})}\n\n"
+            return
+
         if not container_id:
             yield f"data: {json.dumps({'available': False, 'message': '无法检测当前容器'})}\n\n"
             return
 
-        client = get_docker_client()
+        try:
+            client = await asyncio.wait_for(
+                loop.run_in_executor(None, get_docker_client),
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'available': False, 'message': '获取 Docker 客户端超时'})}\n\n"
+            return
+
         if not client:
             yield f"data: {json.dumps({'available': False, 'message': '无法获取 Docker 客户端'})}\n\n"
             return
 
-        try:
-            container = client.containers.get(container_id)
-            container_info = container.attrs
-            real_container_name = container_info.get("Name", "").lstrip("/") or container_id
+        # 创建异步队列用于线程间通信
+        stats_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
+        stop_event = threading.Event()
 
-            # 使用流式统计数据
-            prev_cpu = 0
-            prev_system = 0
-            prev_rx = 0
-            prev_tx = 0
-            first_sample = True
+        def format_bytes(b):
+            """格式化字节"""
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+                if b < 1024:
+                    return f"{b:.2f} {unit}"
+                b /= 1024
+            return f"{b:.2f} PB"
 
-            for stats in container.stats(stream=True, decode=True):
-                try:
-                    # CPU 使用率计算
-                    cpu_stats = stats.get("cpu_stats", {})
-                    # precpu_stats 用于对比，但我们使用自己保存的 prev_cpu/prev_system
+        def stats_worker():
+            """在后台线程中运行的流式统计数据获取器"""
+            try:
+                container = client.containers.get(container_id)
+                container_info = container.attrs
+                real_container_name = container_info.get("Name", "").lstrip("/") or container_id
+                state = container_info.get("State", {})
 
-                    cpu_total = cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
-                    system_total = cpu_stats.get("system_cpu_usage", 0)
+                prev_cpu = 0
+                prev_system = 0
+                prev_rx = 0
+                prev_tx = 0
+                first_sample = True
 
-                    cpu_percent = 0.0
-                    if not first_sample:
-                        cpu_delta = cpu_total - prev_cpu
-                        system_delta = system_total - prev_system
+                # 使用流式 API 获取统计数据
+                for stats in container.stats(stream=True, decode=True):
+                    if stop_event.is_set():
+                        break
 
-                        if system_delta > 0 and cpu_delta > 0:
-                            online_cpus = cpu_stats.get("online_cpus")
-                            if online_cpus is None:
-                                online_cpus = len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [1]))
-                            cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0
+                    try:
+                        # CPU 使用率计算
+                        cpu_stats = stats.get("cpu_stats", {})
+                        cpu_total = cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
+                        system_total = cpu_stats.get("system_cpu_usage", 0)
 
-                    prev_cpu = cpu_total
-                    prev_system = system_total
+                        cpu_percent = 0.0
+                        if not first_sample:
+                            cpu_delta = cpu_total - prev_cpu
+                            system_delta = system_total - prev_system
 
-                    # 内存使用
-                    memory_stats = stats.get("memory_stats", {})
-                    memory_usage = memory_stats.get("usage", 0)
-                    memory_limit = memory_stats.get("limit", 0)
-                    cache = memory_stats.get("stats", {}).get("cache", 0)
-                    memory_usage_actual = memory_usage - cache
+                            if system_delta > 0 and cpu_delta > 0:
+                                online_cpus = cpu_stats.get("online_cpus")
+                                if online_cpus is None:
+                                    online_cpus = len(cpu_stats.get("cpu_usage", {}).get("percpu_usage", [1]))
+                                cpu_percent = (cpu_delta / system_delta) * online_cpus * 100.0
 
-                    memory_percent = 0.0
-                    if memory_limit > 0:
-                        memory_percent = (memory_usage_actual / memory_limit) * 100.0
+                        prev_cpu = cpu_total
+                        prev_system = system_total
 
-                    # 网络 I/O
-                    networks = stats.get("networks", {})
-                    network_rx = 0
-                    network_tx = 0
-                    for iface_stats in networks.values():
-                        network_rx += iface_stats.get("rx_bytes", 0)
-                        network_tx += iface_stats.get("tx_bytes", 0)
+                        # 内存使用
+                        memory_stats = stats.get("memory_stats", {})
+                        memory_usage = memory_stats.get("usage", 0)
+                        memory_limit = memory_stats.get("limit", 0)
+                        cache = memory_stats.get("stats", {}).get("cache", 0)
+                        memory_usage_actual = memory_usage - cache
 
-                    # 计算网络速率（每秒）
-                    rx_rate = network_rx - prev_rx if not first_sample else 0
-                    tx_rate = network_tx - prev_tx if not first_sample else 0
-                    prev_rx = network_rx
-                    prev_tx = network_tx
+                        memory_percent = 0.0
+                        if memory_limit > 0:
+                            memory_percent = (memory_usage_actual / memory_limit) * 100.0
 
-                    # 磁盘 I/O
-                    blkio_stats = stats.get("blkio_stats", {})
-                    io_read = 0
-                    io_write = 0
-                    for entry in blkio_stats.get("io_service_bytes_recursive", []) or []:
-                        op = entry.get("op", "").lower()
-                        if op == "read":
-                            io_read += entry.get("value", 0)
-                        elif op == "write":
-                            io_write += entry.get("value", 0)
+                        # 网络 I/O
+                        networks = stats.get("networks", {})
+                        network_rx = 0
+                        network_tx = 0
+                        for iface_stats in networks.values():
+                            network_rx += iface_stats.get("rx_bytes", 0)
+                            network_tx += iface_stats.get("tx_bytes", 0)
 
-                    # 容器状态
-                    state = container_info.get("State", {})
+                        rx_rate = network_rx - prev_rx if not first_sample else 0
+                        tx_rate = network_tx - prev_tx if not first_sample else 0
+                        prev_rx = network_rx
+                        prev_tx = network_tx
 
-                    # 格式化字节
-                    def format_bytes(b):
-                        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-                            if b < 1024:
-                                return f"{b:.2f} {unit}"
-                            b /= 1024
-                        return f"{b:.2f} PB"
+                        # 磁盘 I/O
+                        blkio_stats = stats.get("blkio_stats", {})
+                        io_read = 0
+                        io_write = 0
+                        for entry in blkio_stats.get("io_service_bytes_recursive", []) or []:
+                            op = entry.get("op", "").lower()
+                            if op == "read":
+                                io_read += entry.get("value", 0)
+                            elif op == "write":
+                                io_write += entry.get("value", 0)
 
-                    result = {
-                        "available": True,
-                        "containerName": real_container_name,
-                        "containerId": container.short_id,
-                        "status": state.get("Status", "running"),
-                        "startedAt": state.get("StartedAt"),
-                        "cpu": {
-                            "percent": round(cpu_percent, 2),
-                            "onlineCpus": cpu_stats.get("online_cpus", 1)
-                        },
-                        "memory": {
-                            "usage": memory_usage_actual,
-                            "limit": memory_limit,
-                            "percent": round(memory_percent, 2),
-                            "usageFormatted": format_bytes(memory_usage_actual),
-                            "limitFormatted": format_bytes(memory_limit)
-                        },
-                        "network": {
-                            "rxBytes": network_rx,
-                            "txBytes": network_tx,
-                            "rxRate": rx_rate,
-                            "txRate": tx_rate,
-                            "rxFormatted": format_bytes(network_rx),
-                            "txFormatted": format_bytes(network_tx),
-                            "rxRateFormatted": format_bytes(rx_rate) + "/s",
-                            "txRateFormatted": format_bytes(tx_rate) + "/s"
-                        },
-                        "io": {
-                            "readBytes": io_read,
-                            "writeBytes": io_write,
-                            "readFormatted": format_bytes(io_read),
-                            "writeFormatted": format_bytes(io_write)
+                        result = {
+                            "available": True,
+                            "containerName": real_container_name,
+                            "containerId": container.short_id,
+                            "status": state.get("Status", "running"),
+                            "startedAt": state.get("StartedAt"),
+                            "cpu": {
+                                "percent": round(cpu_percent, 2),
+                                "onlineCpus": cpu_stats.get("online_cpus", 1)
+                            },
+                            "memory": {
+                                "usage": memory_usage_actual,
+                                "limit": memory_limit,
+                                "percent": round(memory_percent, 2),
+                                "usageFormatted": format_bytes(memory_usage_actual),
+                                "limitFormatted": format_bytes(memory_limit)
+                            },
+                            "network": {
+                                "rxBytes": network_rx,
+                                "txBytes": network_tx,
+                                "rxRate": rx_rate,
+                                "txRate": tx_rate,
+                                "rxFormatted": format_bytes(network_rx),
+                                "txFormatted": format_bytes(network_tx),
+                                "rxRateFormatted": format_bytes(rx_rate) + "/s",
+                                "txRateFormatted": format_bytes(tx_rate) + "/s"
+                            },
+                            "io": {
+                                "readBytes": io_read,
+                                "writeBytes": io_write,
+                                "readFormatted": format_bytes(io_read),
+                                "writeFormatted": format_bytes(io_write)
+                            }
                         }
-                    }
 
-                    first_sample = False
-                    yield f"data: {json.dumps(result)}\n\n"
+                        first_sample = False
 
-                except Exception as e:
-                    logger.error(f"处理 Docker 统计数据时出错: {e}")
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                        # 将结果放入队列（线程安全地调用异步队列）
+                        asyncio.run_coroutine_threadsafe(
+                            stats_queue.put({"type": "data", "data": result}),
+                            loop
+                        )
 
-        except Exception as e:
-            logger.error(f"获取 Docker 统计流时出错: {e}")
-            yield f"data: {json.dumps({'available': False, 'message': str(e)})}\n\n"
+                    except Exception as e:
+                        logger.error(f"处理 Docker 统计数据时出错: {e}")
+                        asyncio.run_coroutine_threadsafe(
+                            stats_queue.put({"type": "error", "error": str(e)}),
+                            loop
+                        )
+
+            except Exception as e:
+                logger.error(f"Docker 统计线程出错: {e}")
+                asyncio.run_coroutine_threadsafe(
+                    stats_queue.put({"type": "fatal", "error": str(e)}),
+                    loop
+                )
+            finally:
+                # 发送结束信号
+                asyncio.run_coroutine_threadsafe(
+                    stats_queue.put({"type": "done"}),
+                    loop
+                )
+
+        # 启动后台线程
+        worker_thread = threading.Thread(target=stats_worker, daemon=True, name="docker_stats_worker")
+        worker_thread.start()
+
+        try:
+            while True:
+                try:
+                    # 从队列获取数据，带超时
+                    item = await asyncio.wait_for(stats_queue.get(), timeout=15.0)
+
+                    if item["type"] == "done":
+                        break
+                    elif item["type"] == "fatal":
+                        yield f"data: {json.dumps({'available': False, 'message': item['error']})}\n\n"
+                        break
+                    elif item["type"] == "error":
+                        yield f"data: {json.dumps({'error': item['error']})}\n\n"
+                    elif item["type"] == "data":
+                        yield f"data: {json.dumps(item['data'])}\n\n"
+
+                except asyncio.TimeoutError:
+                    # 超时，发送心跳保持连接
+                    yield f"data: {json.dumps({'heartbeat': True})}\n\n"
+                except asyncio.CancelledError:
+                    logger.info("Docker 统计流被取消")
+                    break
+
+        finally:
+            # 通知线程停止
+            stop_event.set()
+            # 等待线程结束（最多 2 秒）
+            worker_thread.join(timeout=2.0)
 
     return StreamingResponse(
         stats_generator(),
