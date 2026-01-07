@@ -117,10 +117,10 @@ class ScraperDownloadExecutor:
             extra_info: 额外信息
         """
         from .cache_manager import CacheManager
-        from .database import get_db_session_factory
+        from .database import get_session_factory
 
         try:
-            cache_manager = CacheManager(get_db_session_factory())
+            cache_manager = CacheManager(get_session_factory())
             cache_data = {
                 "task_id": self.task.task_id,
                 "status": status,
@@ -154,7 +154,7 @@ class ScraperDownloadExecutor:
         """
         import shutil
         from .cache_manager import CacheManager
-        from .database import get_db_session_factory
+        from .database import get_session_factory
 
         if not downloaded_files:
             return None
@@ -179,7 +179,7 @@ class ScraperDownloadExecutor:
                         logger.debug(f"已复制 {file_path.name} 到临时目录")
 
             # 在缓存中记录临时目录信息（用于后续清理和查找）
-            cache_manager = CacheManager(get_db_session_factory())
+            cache_manager = CacheManager(get_session_factory())
             temp_info = {
                 "task_id": self.task.task_id,
                 "temp_dir": str(temp_dir),
@@ -213,10 +213,10 @@ class ScraperDownloadExecutor:
         """
         import shutil
         from .cache_manager import CacheManager
-        from .database import get_db_session_factory
+        from .database import get_session_factory
 
         try:
-            cache_manager = CacheManager(get_db_session_factory())
+            cache_manager = CacheManager(get_session_factory())
             temp_base_dir = _get_temp_download_base_dir()
 
             if not temp_base_dir.exists():
@@ -295,7 +295,7 @@ class ScraperDownloadExecutor:
         """清理指定任务的临时目录"""
         import shutil
         from .cache_manager import CacheManager
-        from .database import get_db_session_factory
+        from .database import get_session_factory
 
         try:
             temp_base_dir = _get_temp_download_base_dir()
@@ -306,7 +306,7 @@ class ScraperDownloadExecutor:
                 logger.info(f"已清理临时目录: {temp_dir}")
 
             # 删除缓存记录
-            cache_manager = CacheManager(get_db_session_factory())
+            cache_manager = CacheManager(get_session_factory())
             await cache_manager.delete(TEMP_DOWNLOAD_DIR_PREFIX, task_id)
 
         except Exception as e:
