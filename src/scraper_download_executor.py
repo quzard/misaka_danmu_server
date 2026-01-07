@@ -27,9 +27,22 @@ logger = logging.getLogger(__name__)
 SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX = "scraper_download_task_"
 SCRAPER_DOWNLOAD_TASK_CACHE_TTL = 3600  # 1小时
 
+# 临时下载目录前缀和TTL（用于部分成功时保存已下载的文件）
+TEMP_DOWNLOAD_DIR_PREFIX = "temp_download_"
+TEMP_DOWNLOAD_TTL_SECONDS = 3600  # 1小时
+
 # 导入需要的工具函数（稍后从 scraper_resources.py 中提取）
 SCRAPERS_DIR = Path("/app/scrapers")
 SCRAPERS_VERSIONS_FILE = SCRAPERS_DIR / "versions.json"
+
+
+def _get_temp_download_base_dir() -> Path:
+    """获取临时下载目录的基础路径"""
+    from .api.endpoints.scraper_resources import _is_docker_environment
+    if _is_docker_environment():
+        return Path("/app/config/temp_downloads")
+    else:
+        return Path("config/temp_downloads")
 
 
 def _get_scrapers_dir() -> Path:
@@ -128,6 +141,176 @@ class ScraperDownloadExecutor:
             logger.info(f"[任务 {self.task.task_id}] 已持久化任务状态到缓存: {status}")
         except Exception as e:
             logger.warning(f"[任务 {self.task.task_id}] 持久化任务状态失败: {e}")
+
+    async def _save_to_temp_dir(self, downloaded_files: list) -> Optional[str]:
+        """
+        将已下载成功的文件保存到临时目录
+
+        Args:
+            downloaded_files: 已下载成功的文件名列表
+
+        Returns:
+            临时目录路径，失败返回 None
+        """
+        import shutil
+        from .cache_manager import CacheManager
+        from .database import get_db_session_factory
+
+        if not downloaded_files:
+            return None
+
+        try:
+            temp_base_dir = _get_temp_download_base_dir()
+            temp_base_dir.mkdir(parents=True, exist_ok=True)
+
+            # 创建以任务ID命名的临时目录
+            temp_dir = temp_base_dir / f"{TEMP_DOWNLOAD_DIR_PREFIX}{self.task.task_id}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            scrapers_dir = _get_scrapers_dir()
+
+            # 复制已下载成功的文件到临时目录
+            for scraper_name in downloaded_files:
+                # 查找该 scraper 的所有相关文件
+                for file_path in scrapers_dir.iterdir():
+                    if file_path.stem == scraper_name or file_path.name.startswith(f"{scraper_name}."):
+                        dest_path = temp_dir / file_path.name
+                        await asyncio.to_thread(shutil.copy2, file_path, dest_path)
+                        logger.debug(f"已复制 {file_path.name} 到临时目录")
+
+            # 在缓存中记录临时目录信息（用于后续清理和查找）
+            cache_manager = CacheManager(get_db_session_factory())
+            temp_info = {
+                "task_id": self.task.task_id,
+                "temp_dir": str(temp_dir),
+                "downloaded_files": downloaded_files,
+                "created_at": datetime.now().isoformat()
+            }
+            await cache_manager.set(
+                TEMP_DOWNLOAD_DIR_PREFIX,
+                self.task.task_id,
+                temp_info,
+                TEMP_DOWNLOAD_TTL_SECONDS
+            )
+
+            self._log(f"已将 {len(downloaded_files)} 个成功下载的文件保存到临时目录")
+            logger.info(f"[任务 {self.task.task_id}] 临时目录: {temp_dir}")
+            return str(temp_dir)
+
+        except Exception as e:
+            logger.warning(f"[任务 {self.task.task_id}] 保存到临时目录失败: {e}")
+            return None
+
+    async def _check_and_use_temp_files(self, to_download: list) -> list:
+        """
+        检查临时目录中是否有可复用的已下载文件
+
+        Args:
+            to_download: 待下载的文件列表 [(scraper_name, scraper_info, file_path, filename, remote_hash), ...]
+
+        Returns:
+            过滤后仍需下载的文件列表
+        """
+        import shutil
+        from .cache_manager import CacheManager
+        from .database import get_db_session_factory
+
+        try:
+            cache_manager = CacheManager(get_db_session_factory())
+            temp_base_dir = _get_temp_download_base_dir()
+
+            if not temp_base_dir.exists():
+                return to_download
+
+            # 查找所有有效的临时目录缓存
+            remaining_to_download = []
+            reused_count = 0
+            scrapers_dir = _get_scrapers_dir()
+
+            for item in to_download:
+                scraper_name = item[0]
+                remote_hash = item[4]
+                reused = False
+
+                # 遍历临时目录查找可复用的文件
+                for temp_dir in temp_base_dir.iterdir():
+                    if not temp_dir.is_dir() or not temp_dir.name.startswith(TEMP_DOWNLOAD_DIR_PREFIX):
+                        continue
+
+                    task_id = temp_dir.name[len(TEMP_DOWNLOAD_DIR_PREFIX):]
+
+                    # 检查缓存是否还有效
+                    temp_info = await cache_manager.get(TEMP_DOWNLOAD_DIR_PREFIX, task_id)
+                    if not temp_info:
+                        # 缓存已过期，清理目录
+                        try:
+                            await asyncio.to_thread(shutil.rmtree, temp_dir)
+                            logger.debug(f"清理过期临时目录: {temp_dir}")
+                        except Exception:
+                            pass
+                        continue
+
+                    # 检查是否有该文件
+                    if scraper_name in temp_info.get("downloaded_files", []):
+                        # 查找临时目录中的文件
+                        for temp_file in temp_dir.iterdir():
+                            if temp_file.stem == scraper_name:
+                                # 验证哈希值
+                                file_hash = await self._calculate_file_hash(temp_file)
+                                if file_hash == remote_hash:
+                                    # 哈希匹配，复制到 scrapers 目录
+                                    dest_path = scrapers_dir / temp_file.name
+                                    await asyncio.to_thread(shutil.copy2, temp_file, dest_path)
+                                    self.task.progress.downloaded.append(scraper_name)
+                                    reused = True
+                                    reused_count += 1
+                                    self._log(f"复用临时文件: {scraper_name}")
+                                    break
+                        if reused:
+                            break
+
+                if not reused:
+                    remaining_to_download.append(item)
+
+            if reused_count > 0:
+                self._log(f"从临时目录复用了 {reused_count} 个文件")
+
+            return remaining_to_download
+
+        except Exception as e:
+            logger.warning(f"[任务 {self.task.task_id}] 检查临时文件失败: {e}")
+            return to_download
+
+    async def _calculate_file_hash(self, file_path: Path) -> str:
+        """计算文件的 SHA256 哈希值"""
+        def _hash():
+            sha256 = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for chunk in iter(lambda: f.read(8192), b""):
+                    sha256.update(chunk)
+            return sha256.hexdigest()
+        return await asyncio.to_thread(_hash)
+
+    async def _cleanup_temp_dir(self, task_id: str):
+        """清理指定任务的临时目录"""
+        import shutil
+        from .cache_manager import CacheManager
+        from .database import get_db_session_factory
+
+        try:
+            temp_base_dir = _get_temp_download_base_dir()
+            temp_dir = temp_base_dir / f"{TEMP_DOWNLOAD_DIR_PREFIX}{task_id}"
+
+            if temp_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, temp_dir)
+                logger.info(f"已清理临时目录: {temp_dir}")
+
+            # 删除缓存记录
+            cache_manager = CacheManager(get_db_session_factory())
+            await cache_manager.delete(TEMP_DOWNLOAD_DIR_PREFIX, task_id)
+
+        except Exception as e:
+            logger.warning(f"清理临时目录失败: {e}")
 
     async def execute(self):
         """执行下载任务"""
@@ -325,13 +508,27 @@ class ScraperDownloadExecutor:
             else:
                 self._log(f"重启容器失败: {result.get('message')}")
                 logger.warning(f"重启容器失败: {result.get('message')}")
+                # 重启失败时提示用户手动重启
+                self._log("⚠️ 请手动重启容器以加载新的弹幕源")
 
             # 任务状态已在上面设置，直接返回
             return
         else:
-            # 没有 Docker socket，已经执行了热加载
-            self._log("⚠️ 未检测到 Docker 套接字，.so 文件可能需要手动重启容器才能生效")
-            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源")
+            # 判断是否是首次下载（本地没有任何弹幕源）
+            existing_scrapers = set(self.scraper_manager.scrapers.keys())
+            is_first_download = len(existing_scrapers) == 0
+
+            if is_first_download:
+                # 首次下载：执行热加载
+                self._log("检测到首次下载弹幕源，正在热加载...")
+                logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
+                await self.scraper_manager.load_and_sync_scrapers()
+                self._log("✓ 弹幕源加载完成")
+            else:
+                # 非首次下载且没有 Docker socket：提示手动重启
+                self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
+                self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，需要手动重启容器")
 
         self.task.status = TaskStatus.COMPLETED
 
@@ -370,9 +567,19 @@ class ScraperDownloadExecutor:
         self.task.progress.total = need_download_count
         self.task.progress.skipped = to_skip
 
-        # 如果没有需要下载的文件
+        # 检查临时目录中是否有可复用的已下载文件
+        to_download = await self._check_and_use_temp_files(to_download)
+        need_download_count = len(to_download)
+
+        # 更新进度
+        self.task.progress.total = need_download_count + len(self.task.progress.downloaded)
+
+        # 如果没有需要下载的文件（全部从临时目录复用或本地已是最新）
         if need_download_count == 0:
-            self._log("所有弹幕源都是最新的，无需下载")
+            if len(self.task.progress.downloaded) > 0:
+                self._log(f"已从临时目录复用 {len(self.task.progress.downloaded)} 个文件，无需额外下载")
+            else:
+                self._log("所有弹幕源都是最新的，无需下载")
             self.task.status = TaskStatus.COMPLETED
             return
 
@@ -419,9 +626,15 @@ class ScraperDownloadExecutor:
         download_count = len(self.task.progress.downloaded)
         self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-        # 检查下载结果：只要有任何失败，整个任务就失败
+        # 检查下载结果：有失败时，保存成功的到临时目录，然后还原备份
         if failed_downloads:
             self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
+
+            # 如果有成功下载的文件，先保存到临时目录（供下次复用）
+            if download_count > 0:
+                self._log(f"正在保存 {download_count} 个成功下载的文件到临时目录...")
+                await self._save_to_temp_dir(self.task.progress.downloaded)
+
             self._log("正在还原备份...")
             await restore_scrapers(self.current_user, self.scraper_manager)
             self._log("已还原备份")
@@ -451,20 +664,16 @@ class ScraperDownloadExecutor:
             from .docker_utils import is_docker_socket_available, restart_container
             docker_available = is_docker_socket_available()
 
-            # 判断是否有更新已有源（需要容器重启）
-            # 如果下载的文件中有任何一个是更新（而非新增），则需要容器重启
+            # 判断是否是首次下载（本地没有任何弹幕源）
             existing_scrapers = set(self.scraper_manager.scrapers.keys())
-            has_updates = any(
-                name in existing_scrapers
-                for name in self.task.progress.downloaded
-            )
+            is_first_download = len(existing_scrapers) == 0
 
-            if has_updates and docker_available:
-                # 有更新已有源且有 Docker socket，执行容器级别重启
+            if docker_available:
+                # 有 Docker socket，执行容器级别重启（确保 .so 文件正确加载）
                 from .docker_utils import get_current_container_id
                 detected_id = get_current_container_id()
 
-                self._log("⚠️ 检测到更新已有源，需要重启容器以加载新的 .so 文件")
+                self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
                 if detected_id:
                     self._log(f"检测到当前容器 ID: {detected_id}")
                     logger.info(f"自动检测到当前容器 ID: {detected_id}")
@@ -492,23 +701,27 @@ class ScraperDownloadExecutor:
                     self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
                     logger.info(f"已向容器发送重启指令 (ID: {container_id})")
                 else:
-                    self._log(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                    await self.scraper_manager.load_and_sync_scrapers()
+                    self._log(f"重启容器失败: {result.get('message')}")
+                    logger.warning(f"重启容器失败: {result.get('message')}")
+                    # 重启失败时不再尝试热加载，提示用户手动重启
+                    self._log("⚠️ 请手动重启容器以加载新的弹幕源")
 
                 # 任务状态已在上面设置，直接返回
                 return
-            else:
-                # 只有新增源或没有 Docker socket：热加载
-                if has_updates and not docker_available:
-                    self._log("⚠️ 检测到更新已有源，但未检测到 Docker 套接字")
-                    self._log("执行热加载（.so 文件可能需要手动重启容器才能生效）")
-                else:
-                    self._log("正在热加载弹幕源...")
-
-                logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，正在热加载")
+            elif is_first_download:
+                # 首次下载（本地没有弹幕源）：执行热加载
+                self._log("检测到首次下载弹幕源，正在热加载...")
+                logger.info(f"用户 '{self.current_user.username}' 首次下载了 {download_count} 个弹幕源，正在热加载")
                 await self.scraper_manager.load_and_sync_scrapers()
-                self._log(f"用户 '{self.current_user.username}' 成功加载了 {download_count} 个弹幕源")
+                self._log(f"✓ 成功加载了 {download_count} 个弹幕源")
+            else:
+                # 非首次下载且没有 Docker socket：提示手动重启
+                self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
+                self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                logger.info(f"用户 '{self.current_user.username}' 更新了 {download_count} 个弹幕源，需要手动重启容器")
+
+        # 全部成功，清理可能存在的临时目录
+        await self._cleanup_temp_dir(self.task.task_id)
 
         self.task.status = TaskStatus.COMPLETED
 
