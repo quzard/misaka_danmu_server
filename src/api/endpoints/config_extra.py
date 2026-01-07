@@ -212,21 +212,8 @@ async def test_proxy_latency(
     test_url = "http://www.gstatic.com/generate_204"
 
     if proxy_mode == "none":
-        # 直连模式：测试直接连接
-        try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
-                start_time = time.time()
-                response = await client.get(test_url)
-                latency = (time.time() - start_time) * 1000
-                if response.status_code == 204:
-                    proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
-                else:
-                    proxy_connectivity_result = ProxyTestResult(
-                        status="failure",
-                        error=f"连接成功但状态码异常: {response.status_code}"
-                    )
-        except Exception as e:
-            proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
+        # 直连模式：跳过代理连通性测试
+        proxy_connectivity_result = ProxyTestResult(status="skipped", error="直连模式无需测试代理")
 
     elif proxy_mode == "http_socks":
         # HTTP/SOCKS 代理模式
