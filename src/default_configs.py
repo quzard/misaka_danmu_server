@@ -38,9 +38,11 @@ def get_default_configs(settings=None, ai_prompts=None):
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
 
         # 代理
+        'proxyMode': ('none', '代理模式: none(不使用代理), http_socks(HTTP/SOCKS代理), accelerate(加速代理)'),
         'proxyUrl': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),
-        'proxyEnabled': ('false', '是否全局启用代理。'),
+        'proxyEnabled': ('false', '是否全局启用代理。'),  # 保留兼容性
         'proxySslVerify': ('true', '使用HTTPS代理时是否验证SSL证书。设为false可解决自签名证书问题。'),
+        'accelerateProxyUrl': ('', '加速代理地址，如 https://your-proxy.vercel.app'),
 
         # 元数据源
         'tmdbApiKey': ('', '用于访问 The Movie Database API 的密钥。'),

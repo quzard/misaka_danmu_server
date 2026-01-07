@@ -411,12 +411,14 @@ class ScraperSettingWithConfig(ScraperSetting):
     version: Optional[str] = None  # 弹幕源版本号
 
 class ProxySettingsResponse(BaseModel):
-    proxyProtocol: str
+    proxyMode: str = "none"  # none, http_socks, accelerate
+    proxyProtocol: str = "http"
     proxyHost: Optional[str] = None
     proxyPort: Optional[int] = None
     proxyUsername: Optional[str] = None
     proxyPassword: Optional[str] = None
-    proxyEnabled: bool = False
+    proxyEnabled: bool = False  # 保留兼容性
+    accelerateProxyUrl: Optional[str] = None
 
 class ReassociationRequest(BaseModel):
     targetAnimeId: int
@@ -493,13 +495,15 @@ class AvailableJobInfo(BaseModel):
     isSystemTask: bool = False
 
 class ProxySettingsUpdate(BaseModel):
-    proxyProtocol: str
+    proxyMode: str = "none"  # none, http_socks, accelerate
+    proxyProtocol: str = "http"
     proxyHost: Optional[str] = None
     proxyPort: Optional[Union[int, str]] = None
     proxyUsername: Optional[str] = None
     proxyPassword: Optional[str] = None
-    proxyEnabled: bool
+    proxyEnabled: bool = False  # 保留兼容性
     proxySslVerify: bool = Field(True, description="是否验证代理服务器的SSL证书")
+    accelerateProxyUrl: Optional[str] = None
 
 class UaRuleCreate(BaseModel):
     uaString: str

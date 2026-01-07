@@ -59,7 +59,9 @@ class ProxyTestResult(BaseModel):
 
 class ProxyTestRequest(BaseModel):
     """代理测试请求"""
-    proxy_url: Optional[str] = None
+    proxy_mode: str = "none"  # none, http_socks, accelerate
+    proxy_url: Optional[str] = None  # HTTP/SOCKS 代理 URL
+    accelerate_proxy_url: Optional[str] = None  # 加速代理地址
 
 
 class FullProxyTestResponse(BaseModel):

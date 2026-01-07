@@ -134,12 +134,28 @@ class BaseScraper(ABC):
         """
         获取当前 provider 的代理配置。
         优先使用预加载的缓存,避免重复数据库查询。
-        """
-        # config_manager 自带缓存,已预加载的配置会直接从内存返回
-        proxy_url = await self.config_manager.get("proxyUrl", "")
-        proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
 
-        if not proxy_enabled_globally or not proxy_url:
+        支持三种代理模式：
+        - none: 不使用代理
+        - http_socks: HTTP/SOCKS 代理
+        - accelerate: 加速代理（URL 重写模式，不返回代理 URL）
+        """
+        # 获取代理模式
+        proxy_mode = await self.config_manager.get("proxyMode", "none")
+
+        # 兼容旧配置：如果 proxyMode 为 none 但 proxyEnabled 为 true，则使用 http_socks 模式
+        if proxy_mode == "none":
+            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
+            if proxy_enabled_globally:
+                proxy_mode = "http_socks"
+
+        # 如果代理模式为 none 或 accelerate，则不返回 HTTP 代理 URL
+        # accelerate 模式通过 URL 重写实现，不需要设置 httpx 的 proxy 参数
+        if proxy_mode != "http_socks":
+            return None
+
+        proxy_url = await self.config_manager.get("proxyUrl", "")
+        if not proxy_url:
             return None
 
         # 获取当前 provider 的代理设置
@@ -152,10 +168,65 @@ class BaseScraper(ABC):
             async with self._session_factory() as session:
                 scraper_settings = await crud.get_all_scraper_settings(session)
             provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
-        
+
         use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
 
         return proxy_url if use_proxy_for_this_provider else None
+
+    async def _should_use_accelerate_proxy(self) -> bool:
+        """检查是否应该使用加速代理模式"""
+        proxy_mode = await self.config_manager.get("proxyMode", "none")
+        return proxy_mode == "accelerate"
+
+    async def _get_accelerate_proxy_url(self) -> str:
+        """获取加速代理地址"""
+        return await self.config_manager.get("accelerateProxyUrl", "")
+
+    def _transform_url_for_accelerate(self, original_url: str, proxy_base: str) -> str:
+        """
+        转换 URL 为加速代理格式
+
+        原始: https://api.example.com/path
+        转换: https://proxy.vercel.app/https/api.example.com/path
+        """
+        if not proxy_base:
+            return original_url
+
+        proxy_base = proxy_base.rstrip('/')
+        protocol = "https" if original_url.startswith("https://") else "http"
+        target = original_url.replace(f"{protocol}://", "")
+
+        return f"{proxy_base}/{protocol}/{target}"
+
+    async def _transform_url_if_needed(self, url: str) -> str:
+        """
+        根据代理模式转换 URL
+
+        - none/http_socks: 返回原始 URL
+        - accelerate: 返回加速代理格式的 URL（如果当前 provider 启用了代理）
+        """
+        if not await self._should_use_accelerate_proxy():
+            return url
+
+        # 检查当前 provider 是否启用了代理
+        provider_setting = None
+        if self._scraper_manager_ref and hasattr(self._scraper_manager_ref, '_cached_scraper_settings'):
+            provider_setting = self._scraper_manager_ref._cached_scraper_settings.get(self.provider_name)
+        else:
+            async with self._session_factory() as session:
+                scraper_settings = await crud.get_all_scraper_settings(session)
+            provider_setting = next((s for s in scraper_settings if s['providerName'] == self.provider_name), None)
+
+        use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
+
+        if not use_proxy_for_this_provider:
+            return url
+
+        proxy_base = await self._get_accelerate_proxy_url()
+        if proxy_base:
+            return self._transform_url_for_accelerate(url, proxy_base)
+
+        return url
     
     async def _log_proxy_usage(self, proxy_url: Optional[str]):
         if proxy_url:
