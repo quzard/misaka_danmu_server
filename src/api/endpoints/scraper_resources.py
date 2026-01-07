@@ -1613,6 +1613,37 @@ async def download_progress_stream(
     )
 
 
+@router.get("/scrapers/download/cached-status/{task_id}", summary="查询缓存的任务状态")
+async def get_cached_task_status(
+    task_id: str,
+    current_user: models.User = Depends(get_current_user),  # noqa: ARG001
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    查询持久化到数据库的任务状态
+
+    用于容器重启后前端查询之前任务的完成状态
+    缓存有效期为1小时
+    """
+    from ...cache_manager import CacheManager
+    from ...database import get_db_session_factory
+    from ...scraper_download_executor import SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX
+
+    cache_manager = CacheManager(get_db_session_factory())
+    cached_data = await cache_manager.get(SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX, task_id, session)
+
+    if cached_data:
+        return {
+            "found": True,
+            "data": cached_data
+        }
+    else:
+        return {
+            "found": False,
+            "data": None
+        }
+
+
 # ========== 原有 API ==========
 
 @router.get("/scrapers/auto-update", summary="获取自动更新配置")

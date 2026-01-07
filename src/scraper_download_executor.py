@@ -23,6 +23,10 @@ from .download_task_manager import (
 
 logger = logging.getLogger(__name__)
 
+# 下载任务状态缓存前缀和TTL
+SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX = "scraper_download_task_"
+SCRAPER_DOWNLOAD_TASK_CACHE_TTL = 3600  # 1小时
+
 # 导入需要的工具函数（稍后从 scraper_resources.py 中提取）
 SCRAPERS_DIR = Path("/app/scrapers")
 SCRAPERS_VERSIONS_FILE = SCRAPERS_DIR / "versions.json"
@@ -89,6 +93,41 @@ class ScraperDownloadExecutor:
     async def _log_async(self, message: str, level: str = "info"):
         """异步版本的日志记录（用于 progress_callback）"""
         self._log(message, level)
+
+    async def _persist_task_status(self, status: str, need_restart: bool = False, extra_info: Optional[Dict] = None):
+        """
+        持久化任务状态到数据库缓存，用于容器重启后前端查询
+
+        Args:
+            status: 任务状态 (completed, failed, cancelled)
+            need_restart: 是否需要重启容器
+            extra_info: 额外信息
+        """
+        from .cache_manager import CacheManager
+        from .database import get_db_session_factory
+
+        try:
+            cache_manager = CacheManager(get_db_session_factory())
+            cache_data = {
+                "task_id": self.task.task_id,
+                "status": status,
+                "need_restart": need_restart,
+                "downloaded_count": len(self.task.progress.downloaded),
+                "skipped_count": len(self.task.progress.skipped),
+                "failed_count": len(self.task.progress.failed),
+                "error_message": self.task.error_message,
+                "completed_at": datetime.now().isoformat(),
+                "extra_info": extra_info or {}
+            }
+            await cache_manager.set(
+                SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX,
+                self.task.task_id,
+                cache_data,
+                SCRAPER_DOWNLOAD_TASK_CACHE_TTL
+            )
+            logger.info(f"[任务 {self.task.task_id}] 已持久化任务状态到缓存: {status}")
+        except Exception as e:
+            logger.warning(f"[任务 {self.task.task_id}] 持久化任务状态失败: {e}")
 
     async def execute(self):
         """执行下载任务"""
@@ -268,8 +307,11 @@ class ScraperDownloadExecutor:
             self._log("将在 3 秒后重启容器...")
             logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
 
-            # 先设置任务状态为完成，让 SSE 有机会发送完成消息给前端
+            # 先设置任务状态为完成
             self.task.status = TaskStatus.COMPLETED
+
+            # 持久化任务状态到缓存（容器重启后前端可查询）
+            await self._persist_task_status("completed", need_restart=True)
 
             # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
             await asyncio.sleep(3.0)
@@ -434,8 +476,11 @@ class ScraperDownloadExecutor:
                 self._log("将在 3 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
 
-                # 先设置任务状态为完成，让 SSE 有机会发送完成消息给前端
+                # 先设置任务状态为完成
                 self.task.status = TaskStatus.COMPLETED
+
+                # 持久化任务状态到缓存（容器重启后前端可查询）
+                await self._persist_task_status("completed", need_restart=True)
 
                 # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
                 await asyncio.sleep(3.0)
