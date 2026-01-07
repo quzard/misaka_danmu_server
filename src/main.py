@@ -37,8 +37,9 @@ from .media_server_manager import MediaServerManager
 from .default_configs import get_default_configs
 from .database import get_db_type
 from .transport_manager import TransportManager
+from .proxy_middleware import init_proxy_middleware
 from sqlalchemy import text
-
+    
 print(f"当前环境: {settings.environment}")
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,10 @@ async def lifespan(app: FastAPI):
     app.state.cache_manager = CacheManager(session_factory)
     logger.info("缓存管理器已初始化")
 
+    # 初始化 ProxyMiddleware
+    app.state.proxy_middleware = init_proxy_middleware(app.state.config_manager)
+    logger.info("代理中间件已初始化")
+
     # 初始化 AIMatcherManager（传入 session_factory 用于 AI 调用统计持久化）
     app.state.ai_matcher_manager = AIMatcherManager(app.state.config_manager, session_factory)
     logger.info("AI匹配管理器已初始化")
@@ -175,10 +180,14 @@ async def lifespan(app: FastAPI):
     logger.info("预加载配置缓存...")
     async with session_factory() as session:
         # 预加载代理相关配置
+        proxy_mode = await crud.get_config_value(session, "proxyMode", "none")
         proxy_url = await crud.get_config_value(session, "proxyUrl", "")
         proxy_enabled = await crud.get_config_value(session, "proxyEnabled", "false")
+        accelerate_proxy_url = await crud.get_config_value(session, "accelerateProxyUrl", "")
+        app.state.config_manager._cache["proxyMode"] = proxy_mode
         app.state.config_manager._cache["proxyUrl"] = proxy_url
         app.state.config_manager._cache["proxyEnabled"] = proxy_enabled
+        app.state.config_manager._cache["accelerateProxyUrl"] = accelerate_proxy_url
 
         # 一次性查询所有 scraper 设置并缓存
         scraper_settings = await crud.get_all_scraper_settings(session)

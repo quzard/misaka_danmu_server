@@ -24,18 +24,38 @@ def _clean_movie_title(title: Optional[str]) -> Optional[str]:
     return cleaned_title
 
 async def _get_proxy_for_tmdb(config_manager: ConfigManager, session_factory: async_sessionmaker[AsyncSession]) -> Optional[str]:
-    """Helper to determine if a proxy should be used for TMDB."""
-    proxy_url = await config_manager.get("proxyUrl", "")
-    proxy_enabled_globally = (await config_manager.get("proxyEnabled", "false")).lower() == 'true'
-    if not proxy_enabled_globally or not proxy_url:
+    """
+    Helper to determine if a proxy should be used for TMDB.
+
+    支持三种代理模式：
+    - none: 不使用代理
+    - http_socks: HTTP/SOCKS 代理
+    - accelerate: 加速代理（URL 重写模式，不返回代理 URL）
+    """
+    # 获取代理模式
+    proxy_mode = await config_manager.get("proxyMode", "none")
+
+    # 兼容旧配置：如果 proxyMode 为 none 但 proxyEnabled 为 true，则使用 http_socks 模式
+    if proxy_mode == "none":
+        proxy_enabled_globally = (await config_manager.get("proxyEnabled", "false")).lower() == 'true'
+        if proxy_enabled_globally:
+            proxy_mode = "http_socks"
+
+    # 如果代理模式为 none 或 accelerate，则不返回 HTTP 代理 URL
+    # accelerate 模式通过 URL 重写实现，不需要设置 httpx 的 proxy 参数
+    if proxy_mode != "http_socks":
         return None
-    
+
+    proxy_url = await config_manager.get("proxyUrl", "")
+    if not proxy_url:
+        return None
+
     async with session_factory() as session:
         metadata_settings = await crud.get_all_metadata_source_settings(session)
-    
+
     provider_setting = next((s for s in metadata_settings if s['providerName'] == 'tmdb'), None)
     use_proxy = provider_setting.get('useProxy', False) if provider_setting else False
-    
+
     return proxy_url if use_proxy else None
 
 class TmdbMetadataSource(BaseMetadataSource):

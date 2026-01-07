@@ -92,18 +92,27 @@ async def get_parameters_schema(
 
 
 @router.get("/config/proxy", response_model=models.ProxySettingsResponse, summary="获取代理配置")
-
 async def get_proxy_settings(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取全局代理配置。"""
+    # 并行获取所有代理配置
+    proxy_mode_task = crud.get_config_value(session, "proxyMode", "none")
     proxy_url_task = crud.get_config_value(session, "proxyUrl", "")
     proxy_enabled_task = crud.get_config_value(session, "proxyEnabled", "false")
-    proxy_url, proxy_enabled_str = await asyncio.gather(proxy_url_task, proxy_enabled_task)
+    accelerate_proxy_url_task = crud.get_config_value(session, "accelerateProxyUrl", "")
+
+    proxy_mode, proxy_url, proxy_enabled_str, accelerate_proxy_url = await asyncio.gather(
+        proxy_mode_task, proxy_url_task, proxy_enabled_task, accelerate_proxy_url_task
+    )
 
     proxy_enabled = proxy_enabled_str.lower() == 'true'
-    
+
+    # 兼容旧配置：如果 proxyMode 为 none 但 proxyEnabled 为 true，则使用 http_socks 模式
+    if proxy_mode == "none" and proxy_enabled:
+        proxy_mode = "http_socks"
+
     # Parse the URL into components
     protocol, host, port, username, password = "http", None, None, None, None
     if proxy_url:
@@ -118,12 +127,14 @@ async def get_proxy_settings(
             logger.error(f"解析存储的代理URL '{proxy_url}' 失败: {e}")
 
     return models.ProxySettingsResponse(
+        proxyMode=proxy_mode,
         proxyProtocol=protocol,
         proxyHost=host,
         proxyPort=port,
         proxyUsername=username,
         proxyPassword=password,
-        proxyEnabled=proxy_enabled
+        proxyEnabled=proxy_enabled,
+        accelerateProxyUrl=accelerate_proxy_url
     )
 
 
@@ -136,6 +147,11 @@ async def update_proxy_settings(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """更新全局代理配置。"""
+    # 保存代理模式
+    await crud.update_config_value(session, "proxyMode", payload.proxyMode)
+    config_manager.invalidate("proxyMode")
+
+    # 构建并保存 HTTP/SOCKS 代理 URL
     proxy_url = ""
     if payload.proxyHost and payload.proxyPort:
         # URL-encode username and password to handle special characters like '@'
@@ -145,18 +161,25 @@ async def update_proxy_settings(
             if payload.proxyPassword:
                 userinfo += ":" + quote(payload.proxyPassword)
             userinfo += "@"
-        
+
         proxy_url = f"{payload.proxyProtocol}://{userinfo}{payload.proxyHost}:{payload.proxyPort}"
 
     await crud.update_config_value(session, "proxyUrl", proxy_url)
     config_manager.invalidate("proxyUrl")
-    
-    await crud.update_config_value(session, "proxyEnabled", str(payload.proxyEnabled).lower())
+
+    # 保存兼容性字段 proxyEnabled（根据 proxyMode 自动设置）
+    proxy_enabled = payload.proxyMode != "none"
+    await crud.update_config_value(session, "proxyEnabled", str(proxy_enabled).lower())
     config_manager.invalidate("proxyEnabled")
 
     await crud.update_config_value(session, "proxySslVerify", str(payload.proxySslVerify).lower())
     config_manager.invalidate("proxySslVerify")
-    logger.info(f"用户 '{current_user.username}' 更新了代理配置。")
+
+    # 保存加速代理地址
+    await crud.update_config_value(session, "accelerateProxyUrl", payload.accelerateProxyUrl or "")
+    config_manager.invalidate("accelerateProxyUrl")
+
+    logger.info(f"用户 '{current_user.username}' 更新了代理配置 (mode={payload.proxyMode})。")
 
 
 
@@ -170,39 +193,78 @@ async def test_proxy_latency(
 ):
     """
     测试代理连接和到各源的延迟。
-    - 如果提供了代理URL，则通过代理测试。
-    - 如果未提供代理URL，则直接连接。
+    支持三种模式：
+    - none: 直连测试
+    - http_socks: HTTP/SOCKS 代理测试
+    - accelerate: 加速代理测试
     """
+    proxy_mode = request.proxy_mode
     proxy_url = request.proxy_url
-    proxy_to_use = proxy_url if proxy_url else None
+    accelerate_proxy_url = request.accelerate_proxy_url
 
-    # --- 步骤 1: 测试与代理服务器本身的连通性 ---
+    # 根据代理模式确定使用的代理
+    proxy_to_use = None
+    if proxy_mode == "http_socks" and proxy_url:
+        proxy_to_use = proxy_url
+
+    # --- 步骤 1: 测试代理连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    if not proxy_url:
-        proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置代理，跳过测试")
+    test_url = "http://www.gstatic.com/generate_204"
+
+    if proxy_mode == "none":
+        # 直连模式：跳过代理连通性测试
+        proxy_connectivity_result = ProxyTestResult(status="skipped", error="直连模式无需测试代理")
+
+    elif proxy_mode == "http_socks":
+        # HTTP/SOCKS 代理模式
+        if not proxy_url:
+            proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置代理地址")
+        else:
+            try:
+                async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
+                    start_time = time.time()
+                    response = await client.get(test_url)
+                    latency = (time.time() - start_time) * 1000
+                    if response.status_code == 204:
+                        proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
+                    else:
+                        proxy_connectivity_result = ProxyTestResult(
+                            status="failure",
+                            error=f"连接成功但状态码异常: {response.status_code}"
+                        )
+            except Exception as e:
+                proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
+
+    elif proxy_mode == "accelerate":
+        # 加速代理模式：测试加速代理地址
+        if not accelerate_proxy_url:
+            proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置加速代理地址")
+        else:
+            # 构建加速代理格式的测试 URL
+            # 格式: {proxy_base}/{protocol}/{host}/{path}
+            proxy_base = accelerate_proxy_url.rstrip('/')
+            accelerated_test_url = f"{proxy_base}/http/www.gstatic.com/generate_204"
+            try:
+                async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+                    start_time = time.time()
+                    response = await client.get(accelerated_test_url)
+                    latency = (time.time() - start_time) * 1000
+                    if response.status_code == 204:
+                        proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
+                    else:
+                        proxy_connectivity_result = ProxyTestResult(
+                            status="failure",
+                            error=f"连接成功但状态码异常: {response.status_code}"
+                        )
+            except Exception as e:
+                proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
     else:
-        # 使用一个已知的高可用、轻量级端点进行测试
-        test_url_google = "http://www.google.com/generate_204"
-        try:
-            async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
-                start_time = time.time()
-                response = await client.get(test_url_google)
-                latency = (time.time() - start_time) * 1000
-                # 204 No Content 是成功的标志
-                if response.status_code == 204:
-                    proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
-                else:
-                    proxy_connectivity_result = ProxyTestResult(
-                        status="failure",
-                        error=f"连接成功但状态码异常: {response.status_code}"
-                    )
-        except Exception as e:
-            proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
+        proxy_connectivity_result = ProxyTestResult(status="skipped", error=f"未知代理模式: {proxy_mode}")
 
     # --- 步骤 2: 动态构建要测试的目标域名列表 ---
     target_sites_results: Dict[str, ProxyTestResult] = {}
     test_domains = set()
-    
+
     # 统一获取所有源的设置
     enabled_metadata_settings = await crud.get_all_metadata_source_settings(session)
     scraper_settings = await crud.get_all_scraper_settings(session)
@@ -214,7 +276,9 @@ async def test_proxy_latency(
         (s, lambda name=s['providerName']: scraper_manager.get_scraper(name)) for s in scraper_settings
     ]
 
-    log_message = "代理未启用，将测试所有已启用的源。" if not proxy_url else "代理已启用，将仅测试已配置代理的源。"
+    # 根据代理模式决定测试哪些源
+    is_proxy_enabled = proxy_mode != "none"
+    log_message = "代理未启用，将测试所有已启用的源。" if not is_proxy_enabled else "代理已启用，将仅测试已配置代理的源。"
     logger.info(log_message)
 
     for setting, get_instance_func in all_sources_settings:
@@ -222,7 +286,7 @@ async def test_proxy_latency(
 
         # 优化：只测试已启用的源
         # 如果代理启用，则只测试勾选了 useProxy 的源；如果代理未启用，则测试所有启用的源。
-        should_test = setting['isEnabled'] and (not proxy_url or setting.get('useProxy', False))
+        should_test = setting['isEnabled'] and (not is_proxy_enabled or setting.get('useProxy', False))
 
         if should_test:
             try:
@@ -247,11 +311,21 @@ async def test_proxy_latency(
     test_domains.update(github_domains)
 
     # --- 步骤 3: 并发执行所有测试 ---
+    # 定义 URL 转换函数（用于加速代理模式）
+    def transform_url_for_test(url: str) -> str:
+        if proxy_mode == "accelerate" and accelerate_proxy_url:
+            proxy_base = accelerate_proxy_url.rstrip('/')
+            protocol = "https" if url.startswith("https://") else "http"
+            target = url.replace(f"{protocol}://", "")
+            return f"{proxy_base}/{protocol}/{target}"
+        return url
+
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
         try:
+            test_url = transform_url_for_test(domain)
             start_time = time.time()
             # 使用 HEAD 请求以提高效率，我们只关心连通性
-            await client.head(domain, timeout=10.0)
+            await client.head(test_url, timeout=10.0)
             latency = (time.time() - start_time) * 1000
             return domain, ProxyTestResult(status="success", latency=latency)
         except Exception as e:

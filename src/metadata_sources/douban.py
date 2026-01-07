@@ -54,16 +54,28 @@ class DoubanMetadataSource(BaseMetadataSource): # type: ignore
         if cookie:
             headers["Cookie"] = cookie
 
-        proxy_url = await self.config_manager.get("proxyUrl", "")
-        proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
+        # 获取代理模式
+        proxy_mode = await self.config_manager.get("proxyMode", "none")
 
-        async with self._session_factory() as session:
-            metadata_settings = await crud.get_all_metadata_source_settings(session)
+        # 兼容旧配置：如果 proxyMode 为 none 但 proxyEnabled 为 true，则使用 http_socks 模式
+        if proxy_mode == "none":
+            proxy_enabled_globally = (await self.config_manager.get("proxyEnabled", "false")).lower() == 'true'
+            if proxy_enabled_globally:
+                proxy_mode = "http_socks"
 
-        provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
-        use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
+        proxy_to_use = None
 
-        proxy_to_use = proxy_url if proxy_enabled_globally and use_proxy_for_this_provider and proxy_url else None
+        # 只有 http_socks 模式才需要设置 httpx 的 proxy 参数
+        if proxy_mode == "http_socks":
+            proxy_url = await self.config_manager.get("proxyUrl", "")
+            if proxy_url:
+                async with self._session_factory() as session:
+                    metadata_settings = await crud.get_all_metadata_source_settings(session)
+
+                provider_setting = next((s for s in metadata_settings if s['providerName'] == self.provider_name), None)
+                use_proxy_for_this_provider = provider_setting.get('useProxy', False) if provider_setting else False
+
+                proxy_to_use = proxy_url if use_proxy_for_this_provider else None
 
         return httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True, proxy=proxy_to_use)
 

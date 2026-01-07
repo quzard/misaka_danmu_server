@@ -131,9 +131,60 @@ async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=
 # --- Anime & Library ---
 
 
+def _normalize_p_attr(p_attr: str, provider_name: Optional[str] = None) -> str:
+    """
+    规范化 p 属性，确保格式为标准的 4 位核心参数：时间,模式,字体大小,颜色,[来源]
+
+    弹弹play API 返回的格式是 3 位：时间,模式,颜色,[来源]
+    标准 XML 格式需要 4 位：时间,模式,字体大小,颜色,[来源]
+    """
+    if not p_attr:
+        default_source = f'[{provider_name}]' if provider_name else ''
+        return f'0,1,25,16777215{default_source}'
+
+    p_parts = p_attr.split(',')
+
+    # 查找可选的用户标签（如[bilibili]），以确定核心参数的数量
+    core_parts_end_index = len(p_parts)
+    has_source_tag = False
+    for i, part in enumerate(p_parts):
+        if '[' in part and ']' in part:
+            core_parts_end_index = i
+            has_source_tag = True
+            break
+
+    core_parts = p_parts[:core_parts_end_index]
+    optional_parts = p_parts[core_parts_end_index:]
+
+    # 场景1: 只有 3 个核心参数 (时间,模式,颜色) - 弹弹play API 格式
+    # 需要在 index 2 插入默认字体大小 25
+    if len(core_parts) == 3:
+        core_parts.insert(2, '25')
+    # 场景2: 字体大小为空或无效 (e.g., "1.23,1,,16777215")
+    elif len(core_parts) == 4 and (not core_parts[2] or not core_parts[2].strip().isdigit()):
+        core_parts[2] = '25'
+    # 场景3: 参数不足 3 个，补全默认值
+    elif len(core_parts) < 3:
+        while len(core_parts) < 4:
+            if len(core_parts) == 0:
+                core_parts.append('0')      # 时间
+            elif len(core_parts) == 1:
+                core_parts.append('1')      # 模式
+            elif len(core_parts) == 2:
+                core_parts.append('25')     # 字体大小
+            elif len(core_parts) == 3:
+                core_parts.append('16777215')  # 颜色（白色）
+
+    # 如果没有来源标签且提供了 provider_name，添加来源标签
+    if not has_source_tag and provider_name:
+        optional_parts.append(f'[{provider_name}]')
+
+    return ','.join(core_parts + optional_parts)
+
+
 def _generate_xml_from_comments(
-    comments: List[Dict[str, Any]], 
-    episode_id: int, 
+    comments: List[Dict[str, Any]],
+    episode_id: int,
     provider_name: Optional[str] = "misaka",
     chat_server: Optional[str] = "danmaku.misaka.org"
 ) -> str:
@@ -147,9 +198,10 @@ def _generate_xml_from_comments(
     # 新增字段
     ET.SubElement(root, 'sourceprovider').text = provider_name
     ET.SubElement(root, 'datasize').text = str(len(comments))
-    
+
     for comment in comments:
-        p_attr = str(comment.get('p', ''))
+        # 规范化 p 属性，确保是标准的 4 位格式，并补全来源标签
+        p_attr = _normalize_p_attr(str(comment.get('p', '')), provider_name)
         d = ET.SubElement(root, 'd', p=p_attr)
         d.text = comment.get('m', '')
     return ET.tostring(root, encoding='unicode', xml_declaration=True)

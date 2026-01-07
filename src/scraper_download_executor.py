@@ -146,10 +146,20 @@ class ScraperDownloadExecutor:
         base_url = _build_base_url(repo_info, repo_url, gitee_info)
 
         # 代理配置
-        proxy_url = await self.config_manager.get("proxyUrl", "")
-        proxy_enabled_str = await self.config_manager.get("proxyEnabled", "false")
-        proxy_enabled = proxy_enabled_str.lower() == "true"
-        proxy_to_use = proxy_url if proxy_enabled and proxy_url else None
+        proxy_mode = await self.config_manager.get("proxyMode", "none")
+
+        # 兼容旧配置：如果 proxyMode 为 none 但 proxyEnabled 为 true，则使用 http_socks 模式
+        if proxy_mode == "none":
+            proxy_enabled_str = await self.config_manager.get("proxyEnabled", "false")
+            if proxy_enabled_str.lower() == "true":
+                proxy_mode = "http_socks"
+
+        proxy_to_use = None
+
+        # 只有 http_socks 模式才需要设置 httpx 的 proxy 参数
+        if proxy_mode == "http_socks":
+            proxy_url = await self.config_manager.get("proxyUrl", "")
+            proxy_to_use = proxy_url if proxy_url else None
 
         if proxy_to_use:
             self._log(f"使用代理: {proxy_to_use}")
