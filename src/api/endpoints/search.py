@@ -292,16 +292,45 @@ async def search_anime_provider(
             )
 
             timer.step_start("别名验证与过滤")
-            # 3. 直接使用所有别名，不进行相似度过滤
-            # 修复：之前的相似度过滤会把日文/英文别名过滤掉，导致 Gamer 等平台搜不到
-            # 元数据源（TMDB/Bangumi等）返回的别名都是经过验证的，可以直接使用
-            filter_aliases = all_possible_aliases.copy()
-            filter_aliases.update(search_titles)  # 确保所有搜索标题都在列表中
+            # 3. 智能别名过滤：中文别名使用相似度过滤，其他语种直接通过
+            # 原因：日文/英文别名可能和中文搜索词完全不同，但仍然是有效的别名
+            filter_aliases = set()
+            chinese_filtered = []  # 被过滤的中文别名
+            non_chinese_added = []  # 直接添加的非中文别名
 
-            # 记录被添加的别名（用于调试）
-            added_aliases = all_possible_aliases - set(search_titles)
-            if added_aliases:
-                logger.info(f"从元数据源获取到 {len(added_aliases)} 个别名: {list(added_aliases)[:10]}{'...' if len(added_aliases) > 10 else ''}")
+            def is_chinese(text: str) -> bool:
+                """判断文本是否主要包含中文字符"""
+                if not text:
+                    return False
+                # 统计中文字符数量
+                chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
+                # 如果中文字符占比超过 50%，认为是中文
+                return chinese_chars / len(text) > 0.5
+
+            for alias in all_possible_aliases:
+                if is_chinese(alias):
+                    # 中文别名：使用相似度过滤（70% 阈值）
+                    if fuzz.token_set_ratio(search_title, alias) > 70:
+                        filter_aliases.add(alias)
+                    else:
+                        chinese_filtered.append(alias)
+                        logger.debug(f"别名验证：已丢弃低相似度的中文别名 '{alias}' (与 '{search_title}' 相比)")
+                else:
+                    # 非中文别名（日文/英文/罗马音等）：直接添加
+                    filter_aliases.add(alias)
+                    non_chinese_added.append(alias)
+
+            # 确保所有搜索标题都在列表中
+            filter_aliases.update(search_titles)
+
+            # 记录统计信息
+            logger.info(f"别名过滤统计: 中文别名 {len(filter_aliases) - len(non_chinese_added)} 个, "
+                       f"非中文别名 {len(non_chinese_added)} 个, "
+                       f"过滤掉 {len(chinese_filtered)} 个低相似度中文别名")
+            if non_chinese_added:
+                logger.info(f"添加的非中文别名: {non_chinese_added[:10]}{'...' if len(non_chinese_added) > 10 else ''}")
+            if chinese_filtered:
+                logger.debug(f"过滤掉的中文别名: {chinese_filtered[:10]}{'...' if len(chinese_filtered) > 10 else ''}")
 
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
