@@ -292,18 +292,17 @@ async def search_anime_provider(
             )
 
             timer.step_start("别名验证与过滤")
-            # 3. 验证每个别名与原始搜索词的相似度
-            validated_aliases = set()
-            for alias in all_possible_aliases:
-                # 使用 token_set_ratio 并设置一个合理的阈值（例如70），以允许小的差异但过滤掉完全不相关的结果。
-                if fuzz.token_set_ratio(search_title, alias) > 70:
-                    validated_aliases.add(alias)
-                else:
-                    logger.debug(f"别名验证：已丢弃低相似度的别名 '{alias}' (与 '{search_title}' 相比)")
-            
-            # 4. 使用经过验证的别名列表进行后续操作
-            filter_aliases = validated_aliases
+            # 3. 直接使用所有别名，不进行相似度过滤
+            # 修复：之前的相似度过滤会把日文/英文别名过滤掉，导致 Gamer 等平台搜不到
+            # 元数据源（TMDB/Bangumi等）返回的别名都是经过验证的，可以直接使用
+            filter_aliases = all_possible_aliases.copy()
             filter_aliases.update(search_titles)  # 确保所有搜索标题都在列表中
+
+            # 记录被添加的别名（用于调试）
+            added_aliases = all_possible_aliases - set(search_titles)
+            if added_aliases:
+                logger.info(f"从元数据源获取到 {len(added_aliases)} 个别名: {list(added_aliases)[:10]}{'...' if len(added_aliases) > 10 else ''}")
+
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
             # 新增：根据您的要求，打印最终的别名列表以供调试
