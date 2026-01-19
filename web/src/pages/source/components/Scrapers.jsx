@@ -1160,6 +1160,15 @@ export const Scrapers = () => {
                 value={resourceRepoUrl}
                 onChange={(e) => setResourceRepoUrl(e.target.value)}
               />
+              {/* 分支选择器 */}
+              <Select
+                value={selectedBranch}
+                onChange={setSelectedBranch}
+                style={{ width: isMobile ? '100%' : 140 }}
+              >
+                <Select.Option value="main">main</Select.Option>
+                <Select.Option value="test">test (仅X86)</Select.Option>
+              </Select>
               {isMobile ? (
                 <>
                   <Button
@@ -1342,19 +1351,6 @@ export const Scrapers = () => {
                           </Button>
                         </div>
                       </div>
-                      {/* 移动端：分支选择 */}
-                      <div className="flex items-center justify-between mt-2">
-                        <Typography.Text className="text-sm text-gray-600">分支:</Typography.Text>
-                        <Select
-                          size="small"
-                          value={selectedBranch}
-                          onChange={setSelectedBranch}
-                          style={{ width: 120 }}
-                        >
-                          <Select.Option value="main">main</Select.Option>
-                          <Select.Option value="test">test (仅X86)</Select.Option>
-                        </Select>
-                      </div>
                       {/* 移动端：自动更新和全量替换开关 */}
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center gap-2">
@@ -1400,18 +1396,6 @@ export const Scrapers = () => {
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
                         <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Typography.Text className="text-sm text-gray-600">分支:</Typography.Text>
-                        <Select
-                          size="small"
-                          value={selectedBranch}
-                          onChange={setSelectedBranch}
-                          style={{ width: 100 }}
-                        >
-                          <Select.Option value="main">main</Select.Option>
-                          <Select.Option value="test">test (仅X86)</Select.Option>
-                        </Select>
                       </div>
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
