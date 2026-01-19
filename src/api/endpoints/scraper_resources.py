@@ -1492,11 +1492,14 @@ async def start_download(
 
     # 检查分支和平台兼容性
     if branch == "test":
-        platform_key = get_platform_key()
-        if platform_key != "x86_64":
+        # 检查机器架构（不是 platform_key）
+        machine = platform.machine().lower()
+        # x86_64 和 amd64 都是 x86 架构
+        if machine not in ['x86_64', 'amd64']:
+            platform_key = get_platform_key()
             raise HTTPException(
                 status_code=400,
-                detail=f"test 分支仅支持 x86_64 平台，当前平台为 {platform_key}"
+                detail=f"test 分支仅支持 x86_64/amd64 平台，当前平台为 {platform_key} (架构: {machine})"
             )
 
     try:

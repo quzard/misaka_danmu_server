@@ -729,6 +729,8 @@ class ScraperDownloadExecutor:
     async def _fetch_package_json(self, package_url, headers, proxy_to_use, timeout_config):
         """获取 package.json"""
         max_retries = 3
+        self._log(f"正在访问: {package_url}")  # 添加 URL 日志
+
         for retry in range(max_retries + 1):
             try:
                 if retry > 0:
@@ -743,9 +745,17 @@ class ScraperDownloadExecutor:
                         return response.json()
                     else:
                         self._log(f"获取资源包信息失败: HTTP {response.status_code}", "warning")
+                        # 添加响应内容日志
+                        try:
+                            error_text = response.text[:500]  # 只记录前500字符
+                            self._log(f"响应内容: {error_text}", "warning")
+                        except:
+                            pass
             except Exception as e:
                 self._log(f"获取资源包信息异常: {e}", "warning")
+                logger.error(f"获取 package.json 异常 (URL: {package_url}): {e}", exc_info=True)
 
+        self._log(f"获取资源包信息失败，已重试 {max_retries} 次", "error")
         return None
 
     async def _compare_hashes(self, resources, platform_key, scrapers_dir):
