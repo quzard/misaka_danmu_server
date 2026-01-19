@@ -129,13 +129,14 @@ def get_platform_key() -> str:
         return f'{system}-{arch}'
 
 
-def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_info: Optional[Dict[str, str]] = None) -> str:
+def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_info: Optional[Dict[str, str]] = None, branch: str = "main") -> str:
     """构造资源下载的base URL
 
     Args:
         repo_info: GitHub仓库解析信息 (包含owner, repo, proxy, proxy_type)
         repo_url: 原始仓库URL
         gitee_info: Gitee仓库解析信息 (包含owner, repo, platform)
+        branch: Git分支名称，默认为 main
 
     Returns:
         构造好的base URL
@@ -144,8 +145,8 @@ def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_in
     if gitee_info:
         owner = gitee_info['owner']
         repo = gitee_info['repo']
-        # Gitee raw 文件 URL 格式: https://gitee.com/owner/repo/raw/main/path
-        return f"https://gitee.com/{owner}/{repo}/raw/main"
+        # Gitee raw 文件 URL 格式: https://gitee.com/owner/repo/raw/branch/path
+        return f"https://gitee.com/{owner}/{repo}/raw/{branch}"
 
     if repo_info:
         owner = repo_info['owner']
@@ -155,11 +156,11 @@ def _build_base_url(repo_info: Optional[Dict[str, str]], repo_url: str, gitee_in
 
         if proxy:
             if proxy_type == 'jsdelivr':
-                return f"{proxy}/gh/{owner}/{repo}@main"
+                return f"{proxy}/gh/{owner}/{repo}@{branch}"
             else:  # generic_proxy
-                return f"{proxy}/https://raw.githubusercontent.com/{owner}/{repo}/main"
+                return f"{proxy}/https://raw.githubusercontent.com/{owner}/{repo}/{branch}"
         else:
-            return f"https://raw.githubusercontent.com/{owner}/{repo}/main"
+            return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}"
     else:
         # 非 GitHub/Gitee 地址：视为静态资源根路径
         return repo_url.rstrip("/")
@@ -1487,16 +1488,27 @@ async def start_download(
 
     repo_url = payload.get("repoUrl", "")
     use_full_replace = payload.get("fullReplace", False)
+    branch = payload.get("branch", "main")  # 获取分支参数，默认 main
+
+    # 检查分支和平台兼容性
+    if branch == "test":
+        platform_key = get_platform_key()
+        if platform_key != "x86_64":
+            raise HTTPException(
+                status_code=400,
+                detail=f"test 分支仅支持 x86_64 平台，当前平台为 {platform_key}"
+            )
 
     try:
         task = await start_download_task(
             repo_url=repo_url,
             use_full_replace=use_full_replace,
+            branch=branch,  # 传递分支参数
             config_manager=config_manager,
             scraper_manager=manager,
             current_user=current_user,
         )
-        logger.info(f"用户 '{current_user.username}' 启动了下载任务: {task.task_id}")
+        logger.info(f"用户 '{current_user.username}' 启动了下载任务: {task.task_id} (分支: {branch})")
         return {
             "task_id": task.task_id,
             "status": task.status.value,

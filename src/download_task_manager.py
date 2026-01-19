@@ -53,6 +53,7 @@ class DownloadTask:
     error_message: Optional[str] = None
     repo_url: str = ""
     use_full_replace: bool = False
+    branch: str = "main"  # 添加分支字段
     # 内部使用
     _cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     _asyncio_task: Optional[asyncio.Task] = None
@@ -132,17 +133,18 @@ class DownloadTaskManager:
         task = self.current_task
         return task is not None and task.status == TaskStatus.RUNNING
 
-    def create_task(self, repo_url: str, use_full_replace: bool = False) -> DownloadTask:
+    def create_task(self, repo_url: str, use_full_replace: bool = False, branch: str = "main") -> DownloadTask:
         """创建新的下载任务"""
         task_id = str(uuid.uuid4())[:8]
         task = DownloadTask(
             task_id=task_id,
             repo_url=repo_url,
             use_full_replace=use_full_replace,
+            branch=branch,  # 添加分支参数
         )
         self._tasks[task_id] = task
         self._cleanup_old_tasks()
-        logger.info(f"创建下载任务: {task_id}")
+        logger.info(f"创建下载任务: {task_id} (分支: {branch})")
         return task
 
     def get_task(self, task_id: str) -> Optional[DownloadTask]:

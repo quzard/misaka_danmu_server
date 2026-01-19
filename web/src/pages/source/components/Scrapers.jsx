@@ -221,6 +221,9 @@ export const Scrapers = () => {
   const [fullReplaceEnabled, setFullReplaceEnabled] = useState(false)
   const [fullReplaceLoading, setFullReplaceLoading] = useState(false)
 
+  // 分支选择相关
+  const [selectedBranch, setSelectedBranch] = useState('main')
+
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
     visible: false,
@@ -603,7 +606,8 @@ export const Scrapers = () => {
       // 启动后台下载任务
       const res = await startScraperDownload({
         repoUrl: resourceRepoUrl,
-        fullReplace: fullReplaceEnabled
+        fullReplace: fullReplaceEnabled,
+        branch: selectedBranch  // 添加分支参数
       })
 
       const taskId = res.data.task_id
@@ -1338,6 +1342,19 @@ export const Scrapers = () => {
                           </Button>
                         </div>
                       </div>
+                      {/* 移动端：分支选择 */}
+                      <div className="flex items-center justify-between mt-2">
+                        <Typography.Text className="text-sm text-gray-600">分支:</Typography.Text>
+                        <Select
+                          size="small"
+                          value={selectedBranch}
+                          onChange={setSelectedBranch}
+                          style={{ width: 120 }}
+                        >
+                          <Select.Option value="main">main</Select.Option>
+                          <Select.Option value="test">test (仅X86)</Select.Option>
+                        </Select>
+                      </div>
                       {/* 移动端：自动更新和全量替换开关 */}
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center gap-2">
@@ -1383,6 +1400,18 @@ export const Scrapers = () => {
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
                         <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Typography.Text className="text-sm text-gray-600">分支:</Typography.Text>
+                        <Select
+                          size="small"
+                          value={selectedBranch}
+                          onChange={setSelectedBranch}
+                          style={{ width: 100 }}
+                        >
+                          <Select.Option value="main">main</Select.Option>
+                          <Select.Option value="test">test (仅X86)</Select.Option>
+                        </Select>
                       </div>
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>

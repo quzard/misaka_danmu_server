@@ -120,6 +120,7 @@ class MetadataDetailsResponse(BaseModel):
     nameJp: Optional[str] = None
     nameRomaji: Optional[str] = None
     aliasesCn: List[str] = []
+    aliasesJp: List[str] = []  # 新增：日文别名列表
     imageUrl: Optional[str] = None
     details: Optional[str] = None
     year: Optional[int] = None

@@ -229,9 +229,27 @@ class MetadataSourceManager:
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
                 for item in res:
                     all_aliases.add(item.title)
+
+                    # 添加中文别名
                     if item.aliasesCn:
                         all_aliases.update(item.aliasesCn)
-                    
+
+                    # 添加日文别名列表（修复：之前缺失）
+                    if item.aliasesJp:
+                        all_aliases.update(item.aliasesJp)
+
+                    # 添加单个日文别名
+                    if item.nameJp:
+                        all_aliases.add(item.nameJp)
+
+                    # 添加英文别名
+                    if item.nameEn:
+                        all_aliases.add(item.nameEn)
+
+                    # 添加罗马音别名
+                    if item.nameRomaji:
+                        all_aliases.add(item.nameRomaji)
+
                     # 如果是 'douban' 或 '360'，则将其结果添加到补充列表中
                     if provider_name in ['douban', '360']:
                         # 构建补充结果,包含extra字段用于传递原始数据

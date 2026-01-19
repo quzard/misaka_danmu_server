@@ -75,10 +75,10 @@ def parse_gitee_url(url: str):
     return parse_gt(url)
 
 
-def _build_base_url(repo_info, repo_url: str, gitee_info) -> str:
+def _build_base_url(repo_info, repo_url: str, gitee_info, branch: str = "main") -> str:
     """构建基础 URL"""
     from .api.endpoints.scraper_resources import _build_base_url as build_url
-    return build_url(repo_info, repo_url, gitee_info)
+    return build_url(repo_info, repo_url, gitee_info, branch)
 
 
 class ScraperDownloadExecutor:
@@ -341,7 +341,8 @@ class ScraperDownloadExecutor:
         if not repo_url:
             raise ValueError("未配置资源仓库链接")
 
-        self._log(f"开始下载，仓库: {repo_url}")
+        branch = self.task.branch  # 获取分支
+        self._log(f"开始下载，仓库: {repo_url}, 分支: {branch}")
 
         # 获取平台信息
         platform_key = get_platform_key()
@@ -365,7 +366,7 @@ class ScraperDownloadExecutor:
             if github_token:
                 headers["Authorization"] = f"Bearer {github_token}"
 
-        base_url = _build_base_url(repo_info, repo_url, gitee_info)
+        base_url = _build_base_url(repo_info, repo_url, gitee_info, branch)  # 传递分支参数
 
         # 代理配置
         proxy_mode = await self.config_manager.get("proxyMode", "none")
@@ -960,6 +961,7 @@ class ScraperDownloadExecutor:
 async def start_download_task(
     repo_url: str,
     use_full_replace: bool,
+    branch: str,  # 添加分支参数
     config_manager,
     scraper_manager,
     current_user,
@@ -972,7 +974,7 @@ async def start_download_task(
         raise ValueError("已有下载任务正在进行，请稍后再试")
 
     # 创建任务
-    task = task_manager.create_task(repo_url, use_full_replace)
+    task = task_manager.create_task(repo_url, use_full_replace, branch)  # 传递分支参数
 
     # 创建执行器
     executor = ScraperDownloadExecutor(
@@ -992,7 +994,7 @@ async def start_download_task(
             logger.error(f"任务 {task.task_id} 执行失败: {e}", exc_info=True)
 
     task._asyncio_task = asyncio.create_task(run_task())
-    logger.info(f"已启动下载任务: {task.task_id}")
+    logger.info(f"已启动下载任务: {task.task_id} (分支: {branch})")
 
     return task
 
