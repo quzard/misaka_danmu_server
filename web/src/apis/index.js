@@ -480,6 +480,10 @@ export const pollBiliLogin = data =>
 export const biliLogout = () =>
   api.post('/api/ui/scrapers/bilibili/actions/logout')
 
+/** 通用 scraper action 调用 */
+export const executeScraperAction = (providerName, actionName, payload = {}) =>
+  api.post(`/api/ui/scrapers/${providerName}/actions/${actionName}`, payload)
+
 /** ----------------------------------------------弹幕库----------------------------------------------  */
 /** 弹幕库列表 (支持搜索和分页) */
 export const getAnimeLibrary = data => api.get('/api/ui/library', data)

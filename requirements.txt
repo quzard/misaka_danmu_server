@@ -36,6 +36,8 @@ brotli
 requests
 # dandanplay scraper dependency
 aiohttp
+# migu
+wasmtime
 # AI匹配功能依赖
 openai>=1.0.0  # 支持OpenAI兼容接口: DeepSeek, OpenAI, SiliconFlow
 google-genai  # Google Gemini 官方 SDK (新版)

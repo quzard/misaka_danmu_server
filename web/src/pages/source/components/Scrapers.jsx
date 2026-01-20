@@ -27,6 +27,7 @@ import {
   biliLogout,
   getbiliLoginQrcode,
   getbiliUserinfo,
+  executeScraperAction,
   getScrapers,
   getSingleScraper,
   pollBiliLogin,
@@ -996,6 +997,21 @@ export const Scrapers = () => {
     }
   }
 
+  // 处理 action 类型按钮点击
+  const handleActionClick = async (providerName, actionName, successMessage, errorMessage) => {
+    try {
+      const res = await executeScraperAction(providerName, actionName)
+      if (res.data?.success === false) {
+        messageApi.error(res.data?.message || errorMessage || '操作失败')
+      } else {
+        messageApi.success(res.data?.message || successMessage || '操作成功')
+      }
+    } catch (error) {
+      console.error('Action error:', error)
+      messageApi.error(error?.response?.data?.detail || errorMessage || '操作失败')
+    }
+  }
+
   const renderDynamicFormItems = () => {
     const currentScraper = list.find(it => it.providerName === setname)
     if (!currentScraper || !currentScraper.configurableFields) {
@@ -1110,6 +1126,40 @@ export const Scrapers = () => {
                 <Input
                   placeholder={placeholder || 'https://example.com'}
                 />
+              </Form.Item>
+            )
+
+          case 'action':
+            // action 类型：渲染一个按钮，点击后调用后端 action
+            const { actionName, buttonText, buttonType, confirmText, successMessage, errorMessage } = config
+            return (
+              <Form.Item
+                key={camelKey}
+                label={label}
+                className="mb-4"
+                tooltip={tooltip}
+              >
+                <Button
+                  type={buttonType || 'default'}
+                  onClick={async () => {
+                    // 如果有确认文本，先弹出确认框
+                    if (confirmText) {
+                      Modal.confirm({
+                        title: '确认操作',
+                        content: confirmText,
+                        okText: '确认',
+                        cancelText: '取消',
+                        onOk: async () => {
+                          await handleActionClick(setname, actionName, successMessage, errorMessage)
+                        }
+                      })
+                    } else {
+                      await handleActionClick(setname, actionName, successMessage, errorMessage)
+                    }
+                  }}
+                >
+                  {buttonText || label}
+                </Button>
               </Form.Item>
             )
 
