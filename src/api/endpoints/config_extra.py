@@ -209,7 +209,7 @@ async def test_proxy_latency(
 
     # --- 步骤 1: 测试代理连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    test_url = "http://www.gstatic.com/generate_204"
+    test_url = "https://www.gstatic.com/generate_204"
 
     if proxy_mode == "none":
         # 直连模式：跳过代理连通性测试
@@ -242,8 +242,9 @@ async def test_proxy_latency(
         else:
             # 构建加速代理格式的测试 URL
             # 格式: {proxy_base}/{protocol}/{host}/{path}
+            # 使用 HTTPS 协议，因为部分云函数代理不支持 HTTP
             proxy_base = accelerate_proxy_url.rstrip('/')
-            accelerated_test_url = f"{proxy_base}/http/www.gstatic.com/generate_204"
+            accelerated_test_url = f"{proxy_base}/https/www.gstatic.com/generate_204"
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                     start_time = time.time()
