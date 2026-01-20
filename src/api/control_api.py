@@ -269,7 +269,7 @@ class ControlXmlImportRequest(BaseModel):
 
 class DanmakuOutputSettings(BaseModel):
     limitPerSource: int = Field(..., alias="limit_per_source")
-    aggregationEnabled: bool = Field(..., alias="aggregation_enabled")
+    mergeOutputEnabled: bool = Field(..., alias="merge_output_enabled")
 
     class Config:
         populate_by_name = True
@@ -1420,18 +1420,18 @@ async def delete_token(tokenId: int, session: AsyncSession = Depends(get_db_sess
 
 @router.get("/settings/danmaku-output", response_model=DanmakuOutputSettings, summary="获取弹幕输出设置")
 async def get_danmaku_output_settings(session: AsyncSession = Depends(get_db_session)):
-    """获取全局的弹幕输出设置，如输出上限和是否聚合。"""
+    """获取全局的弹幕输出设置，如输出上限和是否合并输出。"""
     limit = await crud.get_config_value(session, 'danmakuOutputLimitPerSource', '-1')
-    enabled = await crud.get_config_value(session, 'danmakuAggregationEnabled', 'true')
-    return DanmakuOutputSettings(limit_per_source=int(limit), aggregation_enabled=(enabled.lower() == 'true'))
+    merge_enabled = await crud.get_config_value(session, 'danmakuMergeOutputEnabled', 'false')
+    return DanmakuOutputSettings(limit_per_source=int(limit), merge_output_enabled=(merge_enabled.lower() == 'true'))
 
 @router.put("/settings/danmaku-output", response_model=ControlActionResponse, summary="更新弹幕输出设置")
 async def update_danmaku_output_settings(payload: DanmakuOutputSettings, session: AsyncSession = Depends(get_db_session), config_manager: ConfigManager = Depends(get_config_manager)):
-    """更新全局的弹幕输出设置，包括输出上限和聚合选项。"""
+    """更新全局的弹幕输出设置，包括输出上限和合并输出选项。"""
     await crud.update_config_value(session, 'danmakuOutputLimitPerSource', str(payload.limitPerSource)) # type: ignore
-    await crud.update_config_value(session, 'danmakuAggregationEnabled', str(payload.aggregationEnabled).lower()) # type: ignore
+    await crud.update_config_value(session, 'danmakuMergeOutputEnabled', str(payload.mergeOutputEnabled).lower()) # type: ignore
     config_manager.invalidate('danmakuOutputLimitPerSource')
-    config_manager.invalidate('danmakuAggregationEnabled')
+    config_manager.invalidate('danmakuMergeOutputEnabled')
     return {"message": "弹幕输出设置已更新。"}
 
 

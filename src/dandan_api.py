@@ -3871,10 +3871,20 @@ async def get_comments_for_dandan(
     except (ValueError, TypeError):
         limit = -1
 
+    # 检查是否启用合并输出
+    merge_output_enabled = await config_manager.get('danmakuMergeOutputEnabled', 'false')
+    if merge_output_enabled.lower() == 'true' and comments_data:
+        # 获取合并后的弹幕（包含同一 anime 同一集数的所有源）
+        merged_comments = await crud.fetch_merged_comments(session, episodeId)
+        if merged_comments and len(merged_comments) > len(comments_data):
+            logger.info(f"合并输出已启用: 原始 {len(comments_data)} 条 -> 合并后 {len(merged_comments)} 条")
+            comments_data = merged_comments
+
     # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
-        # 检查缓存
-        cache_key = f"sampled_{episodeId}_{limit}"
+        # 检查缓存（合并输出时使用不同的缓存key）
+        merge_suffix = "_merged" if merge_output_enabled.lower() == 'true' else ""
+        cache_key = f"sampled_{episodeId}_{limit}{merge_suffix}"
         current_time = time.time()
 
         # 尝试从数据库缓存获取

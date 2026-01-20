@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input } from 'antd'
+import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input, Tooltip } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   getDanmuOutputTotal,
   setDanmuOutputTotal,
+  getDanmakuMergeOutputEnabled,
+  setDanmakuMergeOutputEnabled,
   getDanmakuRandomColorMode,
   setDanmakuRandomColorMode,
   getDanmakuRandomColorPalette,
@@ -66,6 +69,7 @@ const paletteToServer = (palette) => {
 export const OutputManage = () => {
   const [loading, setLoading] = useState(false)
   const [limit, setLimit] = useState('-1')
+  const [mergeEnabled, setMergeEnabled] = useState(false)
   const [saveLoading, setSaveLoading] = useState(false)
   const [colorMode, setColorMode] = useState('off')
   const [palette, setPalette] = useState(DEFAULT_COLOR_PALETTE)
@@ -80,14 +84,16 @@ export const OutputManage = () => {
   const getConfig = async () => {
     setLoading(true)
     try {
-      const [limitRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes] = await Promise.all([
+      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes] = await Promise.all([
         getDanmuOutputTotal(),
+        getDanmakuMergeOutputEnabled(),
         getDanmakuRandomColorMode(),
         getDanmakuRandomColorPalette(),
         getDanmakuBlacklistEnabled(),
         getDanmakuBlacklistPatterns(),
       ])
       setLimit(limitRes.data?.value ?? '-1')
+      setMergeEnabled(mergeEnabledRes.data?.value === 'true')
       setColorMode(colorModeRes.data?.value || 'off')
       setPalette(parsePaletteFromServer(colorPaletteRes.data?.value))
       setBlacklistEnabled(blacklistEnabledRes.data?.value === 'true')
@@ -103,8 +109,11 @@ export const OutputManage = () => {
   const handleSaveLimit = async () => {
     setSaveLoading(true)
     try {
-      await setDanmuOutputTotal({ value: `${limit}` })
-      messageApi.success('弹幕输出上限已保存')
+      await Promise.all([
+        setDanmuOutputTotal({ value: `${limit}` }),
+        setDanmakuMergeOutputEnabled({ value: mergeEnabled ? 'true' : 'false' }),
+      ])
+      messageApi.success('弹幕输出配置已保存')
     } catch (e) {
       messageApi.error('保存失败')
     } finally {
@@ -169,11 +178,23 @@ export const OutputManage = () => {
       <Card loading={loading} title="弹幕输出配置">
         <div>在这里调整弹幕 API 的输出行为。</div>
         <div className="my-4">
-          <div className="flex items-center justify-start gap-4 mb-2">
-            <div>弹幕输出上限</div>
-            <InputNumber value={limit} onChange={v => setLimit(v)} />
+          <div className="flex items-center justify-start gap-4 mb-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span>弹幕输出上限</span>
+              <InputNumber value={limit} onChange={v => setLimit(v)} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span>合并输出</span>
+              <Switch
+                checked={mergeEnabled}
+                onChange={setMergeEnabled}
+              />
+              <Tooltip title="启用后，将所有源的弹幕合并后再进行均衡采样输出，而不是每个源单独采样">
+                <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+              </Tooltip>
+            </div>
           </div>
-          <div>
+          <div className="text-sm text-gray-600">
             设置弹幕 API 返回的最大数量。-1 表示无限制。为防止客户端卡顿，建议设置 1000-5000。
             当弹幕总数超过限制时，系统按时间段均匀采样，确保弹幕在视频时长中分布均匀。
           </div>
@@ -184,7 +205,7 @@ export const OutputManage = () => {
             loading={saveLoading}
             onClick={handleSaveLimit}
           >
-            保存输出上限
+            保存输出配置
           </Button>
         </div>
       </Card>

@@ -237,12 +237,12 @@ export const getDanmuOutputTotal = () =>
 
 export const setDanmuOutputTotal = data =>
   api.put('/api/ui/config/danmakuOutputLimitPerSource', data)
-/** 弹幕输出控制 启用弹幕聚合 */
-export const getDanmuOutputAggregation = () =>
-  api.get('/api/ui/config/danmakuAggregationEnabled')
-/** 弹幕输出控制 启用弹幕聚合 */
-export const setDanmuOutputAggregation = data =>
-  api.put('/api/ui/config/danmakuAggregationEnabled', data)
+/** 弹幕输出控制 合并输出开关 */
+export const getDanmakuMergeOutputEnabled = () =>
+  api.get('/api/ui/config/danmakuMergeOutputEnabled')
+/** 弹幕输出控制 合并输出开关 */
+export const setDanmakuMergeOutputEnabled = data =>
+  api.put('/api/ui/config/danmakuMergeOutputEnabled', data)
 /** 弹幕输出配置 随机颜色模式 */
 export const getDanmakuRandomColorMode = () =>
   api.get('/api/ui/config/danmakuRandomColorMode')
