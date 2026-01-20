@@ -926,63 +926,63 @@ export const Library = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                <Tooltip title="编辑影视信息">
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<MyIcon icon="edit" size={18} />}
-                    onClick={async () => {
-                      const res = await getAnimeDetail({ animeId: record.animeId })
-                      form.setFieldsValue({
-                        ...(res.data || {}),
-                        animeId: record.animeId,
-                      })
-                      setEditOpen(true)
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title={record.sources?.some(s => s.isFavorited) ? "已标记（点击管理）" : "标记精确源"}>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<MyIcon icon={record.sources?.some(s => s.isFavorited) ? "favorites-fill" : "favorites"} size={18} />}
-                    className={record.sources?.some(s => s.isFavorited) ? 'text-yellow-500' : ''}
-                    onClick={() => handleFavorite(record)}
-                  />
-                </Tooltip>
-                <Tooltip title={record.sources?.some(s => s.incrementalRefreshEnabled) ? "追更中（点击管理）" : "开启追更"}>
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? "zengliang" : "clock"} size={18} />}
-                    className={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'text-green-500' : ''}
-                    onClick={() => handleIncremental(record)}
-                  />
-                </Tooltip>
-                <Tooltip title="查看详情">
-                  <Button
-                    size="small"
-                    type="text"
-                    icon={<MyIcon icon="book" size={18} />}
-                    onClick={() => {
-                      if (!record.animeId || record.animeId === 0) {
-                        messageApi.error('无效的作品ID')
-                        return
-                      }
-                      navigate(`/anime/${record.animeId}`)
-                    }}
-                  />
-                </Tooltip>
-                <Tooltip title="删除影视条目">
-                  <Button
-                    size="small"
-                    type="text"
-                    danger
-                    icon={<MyIcon icon="delete" size={18} />}
-                    onClick={() => handleDelete(record)}
-                  />
-                </Tooltip>
+              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex-wrap">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon="edit" size={16} />}
+                  onClick={async () => {
+                    const res = await getAnimeDetail({ animeId: record.animeId })
+                    form.setFieldsValue({
+                      ...(res.data || {}),
+                      animeId: record.animeId,
+                    })
+                    setEditOpen(true)
+                  }}
+                >
+                  编辑
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon={record.sources?.some(s => s.isFavorited) ? "favorites-fill" : "favorites"} size={16} />}
+                  className={record.sources?.some(s => s.isFavorited) ? 'text-yellow-500' : ''}
+                  onClick={() => handleFavorite(record)}
+                >
+                  标记
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? "zengliang" : "clock"} size={16} />}
+                  className={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'text-green-500' : ''}
+                  onClick={() => handleIncremental(record)}
+                >
+                  追更
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<MyIcon icon="book" size={16} />}
+                  onClick={() => {
+                    if (!record.animeId || record.animeId === 0) {
+                      messageApi.error('无效的作品ID')
+                      return
+                    }
+                    navigate(`/anime/${record.animeId}`)
+                  }}
+                >
+                  详情
+                </Button>
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<MyIcon icon="delete" size={16} />}
+                  onClick={() => handleDelete(record)}
+                >
+                  删除
+                </Button>
               </div>
             </div>
           )}
