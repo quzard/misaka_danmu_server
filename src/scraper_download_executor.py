@@ -75,10 +75,10 @@ def parse_gitee_url(url: str):
     return parse_gt(url)
 
 
-def _build_base_url(repo_info, repo_url: str, gitee_info) -> str:
+def _build_base_url(repo_info, repo_url: str, gitee_info, branch: str = "main") -> str:
     """构建基础 URL"""
     from .api.endpoints.scraper_resources import _build_base_url as build_url
-    return build_url(repo_info, repo_url, gitee_info)
+    return build_url(repo_info, repo_url, gitee_info, branch)
 
 
 class ScraperDownloadExecutor:
@@ -341,7 +341,8 @@ class ScraperDownloadExecutor:
         if not repo_url:
             raise ValueError("未配置资源仓库链接")
 
-        self._log(f"开始下载，仓库: {repo_url}")
+        branch = self.task.branch  # 获取分支
+        self._log(f"开始下载，仓库: {repo_url}, 分支: {branch}")
 
         # 获取平台信息
         platform_key = get_platform_key()
@@ -365,7 +366,7 @@ class ScraperDownloadExecutor:
             if github_token:
                 headers["Authorization"] = f"Bearer {github_token}"
 
-        base_url = _build_base_url(repo_info, repo_url, gitee_info)
+        base_url = _build_base_url(repo_info, repo_url, gitee_info, branch)  # 传递分支参数
 
         # 代理配置
         proxy_mode = await self.config_manager.get("proxyMode", "none")
@@ -728,6 +729,8 @@ class ScraperDownloadExecutor:
     async def _fetch_package_json(self, package_url, headers, proxy_to_use, timeout_config):
         """获取 package.json"""
         max_retries = 3
+        self._log(f"正在访问: {package_url}")  # 添加 URL 日志
+
         for retry in range(max_retries + 1):
             try:
                 if retry > 0:
@@ -742,9 +745,17 @@ class ScraperDownloadExecutor:
                         return response.json()
                     else:
                         self._log(f"获取资源包信息失败: HTTP {response.status_code}", "warning")
+                        # 添加响应内容日志
+                        try:
+                            error_text = response.text[:500]  # 只记录前500字符
+                            self._log(f"响应内容: {error_text}", "warning")
+                        except:
+                            pass
             except Exception as e:
                 self._log(f"获取资源包信息异常: {e}", "warning")
+                logger.error(f"获取 package.json 异常 (URL: {package_url}): {e}", exc_info=True)
 
+        self._log(f"获取资源包信息失败，已重试 {max_retries} 次", "error")
         return None
 
     async def _compare_hashes(self, resources, platform_key, scrapers_dir):
@@ -960,6 +971,7 @@ class ScraperDownloadExecutor:
 async def start_download_task(
     repo_url: str,
     use_full_replace: bool,
+    branch: str,  # 添加分支参数
     config_manager,
     scraper_manager,
     current_user,
@@ -972,7 +984,7 @@ async def start_download_task(
         raise ValueError("已有下载任务正在进行，请稍后再试")
 
     # 创建任务
-    task = task_manager.create_task(repo_url, use_full_replace)
+    task = task_manager.create_task(repo_url, use_full_replace, branch)  # 传递分支参数
 
     # 创建执行器
     executor = ScraperDownloadExecutor(
@@ -992,7 +1004,7 @@ async def start_download_task(
             logger.error(f"任务 {task.task_id} 执行失败: {e}", exc_info=True)
 
     task._asyncio_task = asyncio.create_task(run_task())
-    logger.info(f"已启动下载任务: {task.task_id}")
+    logger.info(f"已启动下载任务: {task.task_id} (分支: {branch})")
 
     return task
 

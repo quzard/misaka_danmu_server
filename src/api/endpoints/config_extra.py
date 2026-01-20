@@ -209,7 +209,7 @@ async def test_proxy_latency(
 
     # --- 步骤 1: 测试代理连通性 ---
     proxy_connectivity_result: ProxyTestResult
-    test_url = "http://www.gstatic.com/generate_204"
+    test_url = "https://www.gstatic.com/generate_204"
 
     if proxy_mode == "none":
         # 直连模式：跳过代理连通性测试
@@ -242,8 +242,9 @@ async def test_proxy_latency(
         else:
             # 构建加速代理格式的测试 URL
             # 格式: {proxy_base}/{protocol}/{host}/{path}
+            # 使用 HTTPS 协议，因为部分云函数代理不支持 HTTP
             proxy_base = accelerate_proxy_url.rstrip('/')
-            accelerated_test_url = f"{proxy_base}/http/www.gstatic.com/generate_204"
+            accelerated_test_url = f"{proxy_base}/https/www.gstatic.com/generate_204"
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                     start_time = time.time()
@@ -294,13 +295,28 @@ async def test_proxy_latency(
                 # 修正：支持异步获取 test_url
                 if hasattr(instance, 'test_url'):
                     test_url_attr = getattr(instance, 'test_url')
-                    # 检查 test_url 是否是一个异步属性
+                    # 检查是否是协程对象 (async property 返回的)
                     if asyncio.iscoroutine(test_url_attr):
-                        test_domains.add(await test_url_attr)
-                    else:
+                        result = await test_url_attr
+                        if result:
+                            test_domains.add(result)
+                    # 检查是否是异步方法（callable）
+                    elif asyncio.iscoroutinefunction(test_url_attr):
+                        result = await test_url_attr()
+                        if result:
+                            test_domains.add(result)
+                    # 检查是否是普通方法
+                    elif callable(test_url_attr):
+                        result = test_url_attr()
+                        if result:
+                            test_domains.add(result)
+                    # 普通属性
+                    elif test_url_attr:
                         test_domains.add(test_url_attr)
             except ValueError:
                 pass
+            except Exception as e:
+                logger.warning(f"获取 test_url 失败: {e}")
 
     # 添加 GitHub 相关的固定测试域名（用于资源下载）
     github_domains = [

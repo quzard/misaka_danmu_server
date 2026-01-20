@@ -148,6 +148,7 @@ from .episode import (
     clear_episode_comments,
     get_existing_episodes_for_source,
     fetch_comments,
+    fetch_merged_comments,
     add_comments_from_xml,
     check_duplicate_import,
 )
@@ -392,6 +393,7 @@ __all__ = [
     'clear_episode_comments',
     'get_existing_episodes_for_source',
     'fetch_comments',
+    'fetch_merged_comments',
     'add_comments_from_xml',
     'check_duplicate_import',
     # Source

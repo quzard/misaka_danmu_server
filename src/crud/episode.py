@@ -487,16 +487,82 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
         absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
         if not absolute_path:
             return [] # 辅助函数会记录警告
-        
+
         if not absolute_path.exists():
             logger.warning(f"数据库记录了弹幕文件路径，但文件不存在: {absolute_path}")
             return []
-            
+
         xml_content = absolute_path.read_text(encoding='utf-8')
         return parse_dandan_xml_to_comments(xml_content)
     except Exception as e:
         logger.error(f"读取或解析弹幕文件失败: {episode.danmakuFilePath}。错误: {e}", exc_info=True)
         return []
+
+
+async def fetch_merged_comments(session: AsyncSession, episode_id: int) -> List[Dict[str, Any]]:
+    """
+    获取合并后的弹幕：查找同一 anime 同一集数的所有源的弹幕并合并。
+    用于合并输出功能。
+    """
+    from .danmaku import _get_fs_path_from_web_path
+
+    # 1. 获取当前 episode 的信息
+    episode_stmt = select(Episode).options(
+        joinedload(Episode.source)
+    ).where(Episode.id == episode_id)
+    episode_result = await session.execute(episode_stmt)
+    episode = episode_result.scalar_one_or_none()
+
+    if not episode:
+        return []
+
+    episode_index = episode.episodeIndex
+    anime_id = episode.source.animeId
+
+    # 2. 查找同一 anime 同一集数的所有 episode
+    related_episodes_stmt = (
+        select(Episode)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .where(
+            AnimeSource.animeId == anime_id,
+            Episode.episodeIndex == episode_index,
+            Episode.danmakuFilePath.isnot(None)
+        )
+    )
+    related_result = await session.execute(related_episodes_stmt)
+    related_episodes = related_result.scalars().all()
+
+    if not related_episodes:
+        return []
+
+    # 3. 合并所有源的弹幕
+    all_comments = []
+    seen_cids = set()  # 用于去重（基于弹幕内容和时间）
+
+    for ep in related_episodes:
+        try:
+            absolute_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
+            if not absolute_path or not absolute_path.exists():
+                continue
+
+            xml_content = absolute_path.read_text(encoding='utf-8')
+            comments = parse_dandan_xml_to_comments(xml_content)
+
+            for comment in comments:
+                # 使用 p 属性（时间+类型+颜色）和 m（内容）作为去重键
+                dedup_key = f"{comment.get('p', '')}_{comment.get('m', '')}"
+                if dedup_key not in seen_cids:
+                    seen_cids.add(dedup_key)
+                    all_comments.append(comment)
+
+        except Exception as e:
+            logger.error(f"读取弹幕文件失败: {ep.danmakuFilePath}。错误: {e}")
+            continue
+
+    logger.info(f"合并输出: episodeId={episode_id}, 集数={episode_index}, "
+                f"源数量={len(related_episodes)}, 合并后弹幕数={len(all_comments)}")
+
+    return all_comments
 
 
 async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_content: str) -> int:

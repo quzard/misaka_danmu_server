@@ -120,6 +120,7 @@ class MetadataDetailsResponse(BaseModel):
     nameJp: Optional[str] = None
     nameRomaji: Optional[str] = None
     aliasesCn: List[str] = []
+    aliasesJp: List[str] = []  # 新增：日文别名列表
     imageUrl: Optional[str] = None
     details: Optional[str] = None
     year: Optional[int] = None
@@ -219,6 +220,14 @@ class MetadataSourceSettingUpdate(BaseModel):
 
 
 # --- 媒体库（弹幕情况）模型 ---
+class LibrarySourceBrief(BaseModel):
+    """媒体库列表中的简化源信息，用于快速操作标记和追更。"""
+    sourceId: int
+    providerName: str
+    isFavorited: bool
+    incrementalRefreshEnabled: bool
+
+
 class LibraryAnimeInfo(BaseModel):
     """代表媒体库中的一个番剧条目。"""
     animeId: int
@@ -231,6 +240,8 @@ class LibraryAnimeInfo(BaseModel):
     episodeCount: int
     sourceCount: int
     createdAt: datetime
+    sources: List[LibrarySourceBrief] = []  # 简化的源列表，用于快速操作
+
 
 class LibraryResponse(BaseModel):
     total: int

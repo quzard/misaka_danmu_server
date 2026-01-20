@@ -3319,6 +3319,48 @@ async def get_comments_for_dandan(
                     )
                     logger.info(f"已提交匹配后备弹幕下载任务: {task_id}")
 
+                    # 用于标记是否已触发预下载（避免重复触发）
+                    predownload_triggered = False
+                    predownload_lock = asyncio.Lock()
+
+                    # 添加后台任务完成回调，用于超时场景下触发预下载
+                    def handle_task_completion(event):
+                        """后台任务完成时的回调，仅在超时场景下触发预下载"""
+                        async def trigger_predownload():
+                            nonlocal predownload_triggered
+                            try:
+                                # 等待任务完成
+                                await event.wait()
+
+                                # 检查是否已经触发过预下载（30秒内完成的情况）
+                                async with predownload_lock:
+                                    if predownload_triggered:
+                                        logger.info(f"预下载已在30秒内触发，跳过回调触发 (episodeId={episodeId})")
+                                        return
+                                    predownload_triggered = True
+
+                                logger.info(f"匹配后备任务已完成（超时后），检查是否需要触发预下载 (episodeId={episodeId})")
+
+                                # 创建新的session检查弹幕是否下载成功
+                                async with request.app.state.db_session_factory() as check_session:
+                                    check_comments = await crud.fetch_comments(check_session, episodeId)
+                                    if check_comments:
+                                        logger.info(f"匹配后备任务成功，触发预下载下一集 (episodeId={episodeId})")
+                                        await _try_predownload_next_episode(
+                                            episodeId, request.app.state.db_session_factory, config_manager,
+                                            task_manager, scraper_manager, rate_limiter
+                                        )
+                                    else:
+                                        logger.warning(f"匹配后备任务完成但未找到弹幕，跳过预下载 (episodeId={episodeId})")
+                            except Exception as e:
+                                logger.error(f"匹配后备完成回调异常 (episodeId={episodeId}): {e}", exc_info=True)
+
+                        # 在后台执行预下载触发逻辑
+                        asyncio.create_task(trigger_predownload())
+
+                    # 注册完成回调
+                    handle_task_completion(done_event)
+
                     # 等待任务完成，但设置较短的超时时间（30秒）
                     try:
                         await asyncio.wait_for(done_event.wait(), timeout=30.0)
@@ -3330,23 +3372,26 @@ async def get_comments_for_dandan(
                         if comments_data:
                             logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
 
-                            # 匹配后备弹幕下载完成后，触发预下载下一集
-                            predownload_task = asyncio.create_task(_try_predownload_next_episode(
-                                episodeId, request.app.state.db_session_factory, config_manager, task_manager,
-                                scraper_manager, rate_limiter
-                            ))
-                            def handle_predownload_exception(task):
-                                try:
-                                    task.result()
-                                except Exception as e:
-                                    logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
-                            predownload_task.add_done_callback(handle_predownload_exception)
-                            logger.info(f"匹配后备场景：已触发预下载下一集")
+                            # 30秒内完成，立即触发预下载
+                            async with predownload_lock:
+                                if not predownload_triggered:
+                                    predownload_triggered = True
+                                    predownload_task = asyncio.create_task(_try_predownload_next_episode(
+                                        episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+                                        scraper_manager, rate_limiter
+                                    ))
+                                    def handle_predownload_exception(task):
+                                        try:
+                                            task.result()
+                                        except Exception as e:
+                                            logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+                                    predownload_task.add_done_callback(handle_predownload_exception)
+                                    logger.info(f"匹配后备场景：已触发预下载下一集")
                         else:
                             logger.warning(f"任务完成但数据库中未找到弹幕数据")
                     except asyncio.TimeoutError:
-                        logger.warning(f"匹配后备弹幕下载任务超时，任务将在后台继续执行")
-                        # 超时后返回空结果，让用户稍后再试
+                        logger.info(f"匹配后备弹幕下载任务超时（30秒），任务将在后台继续执行，完成后会自动触发预下载")
+                        # 超时后返回空结果，但任务继续在后台运行，完成后会通过回调触发预下载
                         return models.CommentResponse(count=0, comments=[])
 
                 except HTTPException as e:
@@ -3718,6 +3763,48 @@ async def get_comments_for_dandan(
                         )
                         logger.info(f"已提交弹幕下载任务: {task_id}")
 
+                        # 用于标记是否已触发预下载（避免重复触发）
+                        predownload_triggered = False
+                        predownload_lock = asyncio.Lock()
+
+                        # 添加后台任务完成回调，用于超时场景下触发预下载
+                        def handle_task_completion(event):
+                            """后台任务完成时的回调，仅在超时场景下触发预下载"""
+                            async def trigger_predownload():
+                                nonlocal predownload_triggered
+                                try:
+                                    # 等待任务完成
+                                    await event.wait()
+
+                                    # 检查是否已经触发过预下载（30秒内完成的情况）
+                                    async with predownload_lock:
+                                        if predownload_triggered:
+                                            logger.info(f"预下载已在30秒内触发，跳过回调触发 (episodeId={episodeId})")
+                                            return
+                                        predownload_triggered = True
+
+                                    logger.info(f"后备搜索任务已完成（超时后），检查是否需要触发预下载 (episodeId={episodeId})")
+
+                                    # 创建新的session检查弹幕是否下载成功
+                                    async with request.app.state.db_session_factory() as check_session:
+                                        check_comments = await crud.fetch_comments(check_session, episodeId)
+                                        if check_comments:
+                                            logger.info(f"后备搜索任务成功，触发预下载下一集 (episodeId={episodeId})")
+                                            await _try_predownload_next_episode(
+                                                episodeId, request.app.state.db_session_factory, config_manager,
+                                                task_manager, scraper_manager, rate_limiter
+                                            )
+                                        else:
+                                            logger.warning(f"后备搜索任务完成但未找到弹幕，跳过预下载 (episodeId={episodeId})")
+                                except Exception as e:
+                                    logger.error(f"后备搜索完成回调异常 (episodeId={episodeId}): {e}", exc_info=True)
+
+                            # 在后台执行预下载触发逻辑
+                            asyncio.create_task(trigger_predownload())
+
+                        # 注册完成回调
+                        handle_task_completion(done_event)
+
                         # 等待任务完成，但设置较短的超时时间（30秒）
                         try:
                             await asyncio.wait_for(done_event.wait(), timeout=30.0)
@@ -3729,23 +3816,26 @@ async def get_comments_for_dandan(
                             if comments_data:
                                 logger.info(f"从数据库读取到 {len(comments_data)} 条弹幕")
 
-                                # 后备搜索弹幕下载完成后，触发预下载下一集
-                                predownload_task = asyncio.create_task(_try_predownload_next_episode(
-                                    episodeId, request.app.state.db_session_factory, config_manager, task_manager,
-                                    scraper_manager, rate_limiter
-                                ))
-                                def handle_predownload_exception(task):
-                                    try:
-                                        task.result()
-                                    except Exception as e:
-                                        logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
-                                predownload_task.add_done_callback(handle_predownload_exception)
-                                logger.info(f"后备搜索场景：已触发预下载下一集")
+                                # 30秒内完成，立即触发预下载
+                                async with predownload_lock:
+                                    if not predownload_triggered:
+                                        predownload_triggered = True
+                                        predownload_task = asyncio.create_task(_try_predownload_next_episode(
+                                            episodeId, request.app.state.db_session_factory, config_manager, task_manager,
+                                            scraper_manager, rate_limiter
+                                        ))
+                                        def handle_predownload_exception(task):
+                                            try:
+                                                task.result()
+                                            except Exception as e:
+                                                logger.error(f"预下载任务异常 (episodeId={episodeId}): {e}", exc_info=True)
+                                        predownload_task.add_done_callback(handle_predownload_exception)
+                                        logger.info(f"后备搜索场景：已触发预下载下一集")
                             else:
                                 logger.warning(f"任务完成但数据库中未找到弹幕数据")
                         except asyncio.TimeoutError:
-                            logger.info(f"弹幕下载任务未在30秒内完成，任务将继续在后台运行")
-                            # 任务继续在后台运行，下次访问时就能从数据库获取
+                            logger.info(f"后备搜索弹幕下载任务超时（30秒），任务将在后台继续执行，完成后会自动触发预下载")
+                            # 任务继续在后台运行，完成后会通过回调触发预下载
 
                     except HTTPException as e:
                         if e.status_code == 409:  # 任务已在运行中
@@ -3781,10 +3871,20 @@ async def get_comments_for_dandan(
     except (ValueError, TypeError):
         limit = -1
 
+    # 检查是否启用合并输出
+    merge_output_enabled = await config_manager.get('danmakuMergeOutputEnabled', 'false')
+    if merge_output_enabled.lower() == 'true' and comments_data:
+        # 获取合并后的弹幕（包含同一 anime 同一集数的所有源）
+        merged_comments = await crud.fetch_merged_comments(session, episodeId)
+        if merged_comments and len(merged_comments) > len(comments_data):
+            logger.info(f"合并输出已启用: 原始 {len(comments_data)} 条 -> 合并后 {len(merged_comments)} 条")
+            comments_data = merged_comments
+
     # 应用限制：按时间段均匀采样
     if limit > 0 and len(comments_data) > limit:
-        # 检查缓存
-        cache_key = f"sampled_{episodeId}_{limit}"
+        # 检查缓存（合并输出时使用不同的缓存key）
+        merge_suffix = "_merged" if merge_output_enabled.lower() == 'true' else ""
+        cache_key = f"sampled_{episodeId}_{limit}{merge_suffix}"
         current_time = time.time()
 
         # 尝试从数据库缓存获取

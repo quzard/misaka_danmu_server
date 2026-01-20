@@ -177,6 +177,41 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
     result = await session.execute(data_stmt)
     items = [dict(row) for row in result.mappings()]
 
+    # ============================================================
+    # 步骤 5: 获取每个 anime 的源列表（用于快速操作标记和追更）
+    # ============================================================
+    if anime_ids:
+        sources_stmt = (
+            select(
+                AnimeSource.animeId.label("animeId"),
+                AnimeSource.id.label("sourceId"),
+                AnimeSource.providerName.label("providerName"),
+                AnimeSource.isFavorited.label("isFavorited"),
+                AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
+            )
+            .where(AnimeSource.animeId.in_(anime_ids))
+            .order_by(AnimeSource.animeId, AnimeSource.createdAt)
+        )
+        sources_result = await session.execute(sources_stmt)
+        sources_rows = sources_result.mappings().all()
+
+        # 按 animeId 分组
+        sources_by_anime = {}
+        for row in sources_rows:
+            anime_id = row["animeId"]
+            if anime_id not in sources_by_anime:
+                sources_by_anime[anime_id] = []
+            sources_by_anime[anime_id].append({
+                "sourceId": row["sourceId"],
+                "providerName": row["providerName"],
+                "isFavorited": row["isFavorited"],
+                "incrementalRefreshEnabled": row["incrementalRefreshEnabled"],
+            })
+
+        # 将源列表添加到每个 item
+        for item in items:
+            item["sources"] = sources_by_anime.get(item["animeId"], [])
+
     # 性能日志
     elapsed = time.time() - start_time
     logger.debug(f"[get_library_anime] 查询完成: total={total_count}, page={page}, page_size={page_size}, 耗时={elapsed*1000:.1f}ms")
