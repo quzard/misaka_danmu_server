@@ -220,6 +220,14 @@ class MetadataSourceSettingUpdate(BaseModel):
 
 
 # --- 媒体库（弹幕情况）模型 ---
+class LibrarySourceBrief(BaseModel):
+    """媒体库列表中的简化源信息，用于快速操作标记和追更。"""
+    sourceId: int
+    providerName: str
+    isFavorited: bool
+    incrementalRefreshEnabled: bool
+
+
 class LibraryAnimeInfo(BaseModel):
     """代表媒体库中的一个番剧条目。"""
     animeId: int
@@ -232,6 +240,8 @@ class LibraryAnimeInfo(BaseModel):
     episodeCount: int
     sourceCount: int
     createdAt: datetime
+    sources: List[LibrarySourceBrief] = []  # 简化的源列表，用于快速操作
+
 
 class LibraryResponse(BaseModel):
     total: int

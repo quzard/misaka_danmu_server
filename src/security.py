@@ -259,7 +259,18 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                     expires_minutes=db_expire_minutes
                 )
             except Exception as e:
-                logger.error(f"创建白名单会话记录失败: {e}")
+                # 可能是并发请求导致的重复键错误，尝试复用已存在的会话
+                if "Duplicate entry" in str(e) or "UNIQUE constraint" in str(e):
+                    logger.debug(f"白名单会话已被其他请求创建，尝试复用: {jti}")
+                    # 更新最后使用时间
+                    try:
+                        await session_crud.update_session_last_used(session, jti)
+                    except Exception:
+                        pass
+                    _whitelist_session_cache[cache_key] = (user, current_time, ttl_seconds, jti)
+                    return user
+                else:
+                    logger.error(f"创建白名单会话记录失败: {e}")
                 # 即使数据库记录失败，仍然允许访问（但不缓存）
                 return user
 

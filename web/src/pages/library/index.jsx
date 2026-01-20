@@ -9,6 +9,7 @@ import {
   List,
   message,
   Modal,
+  Radio,
   Select,
   Space,
   Switch,
@@ -32,6 +33,8 @@ import {
   getTvdbSearch,
   refreshPoster,
   setAnimeDetail,
+  toggleSourceFavorite,
+  toggleSourceIncremental,
 } from '../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
@@ -114,6 +117,13 @@ export const Library = () => {
   const modalApi = useModal()
   const messageApi = useMessage()
   const deleteFilesRef = useRef(true) // 删除时是否同时删除弹幕文件，默认为 true
+
+  // 源选择弹窗状态（用于标记和追更操作）
+  const [sourceSelectOpen, setSourceSelectOpen] = useState(false)
+  const [sourceSelectAction, setSourceSelectAction] = useState(null) // 'favorite' | 'incremental'
+  const [sourceSelectSources, setSourceSelectSources] = useState([])
+  const [sourceSelectTitle, setSourceSelectTitle] = useState('')
+  const [selectedSourceId, setSelectedSourceId] = useState(null)
 
   const getList = async () => {
     try {
@@ -259,7 +269,7 @@ export const Library = () => {
       title: '收录时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
-      width: 200,
+      width: 150,
       render: (_, record) => {
         return (
           <div>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}</div>
@@ -268,9 +278,12 @@ export const Library = () => {
     },
     {
       title: '操作',
-      width: 100,
+      width: 150,
       fixed: 'right',
       render: (_, record) => {
+        // 判断是否有已标记或已追更的源
+        const hasFavorited = record.sources?.some(s => s.isFavorited)
+        const hasIncremental = record.sources?.some(s => s.incrementalRefreshEnabled)
         return (
           <Space>
             <Tooltip title="编辑影视信息">
@@ -288,6 +301,24 @@ export const Library = () => {
                 }}
               >
                 <MyIcon icon="edit" size={20}></MyIcon>
+              </span>
+            </Tooltip>
+
+            <Tooltip title={hasFavorited ? "已标记（点击管理）" : "标记精确源"}>
+              <span
+                className={`cursor-pointer hover:text-primary ${hasFavorited ? 'text-yellow-500' : ''}`}
+                onClick={() => handleFavorite(record)}
+              >
+                <MyIcon icon={hasFavorited ? "favorites-fill" : "favorites"} size={20}></MyIcon>
+              </span>
+            </Tooltip>
+
+            <Tooltip title={hasIncremental ? "追更中（点击管理）" : "开启追更"}>
+              <span
+                className={`cursor-pointer hover:text-primary ${hasIncremental ? 'text-green-500' : ''}`}
+                onClick={() => handleIncremental(record)}
+              >
+                <MyIcon icon={hasIncremental ? "zengliang" : "clock"} size={20}></MyIcon>
               </span>
             </Tooltip>
 
@@ -320,6 +351,79 @@ export const Library = () => {
       },
     },
   ]
+
+  // 处理标记操作
+  const handleFavorite = async (record) => {
+    const sources = record.sources || []
+    if (sources.length === 0) {
+      messageApi.warning('该作品没有数据源')
+      return
+    }
+    if (sources.length === 1) {
+      // 只有一个源，直接切换
+      try {
+        await toggleSourceFavorite({ sourceId: sources[0].sourceId })
+        messageApi.success('标记状态已更新')
+        getList()
+      } catch (error) {
+        messageApi.error('操作失败')
+      }
+    } else {
+      // 多个源，弹窗选择
+      setSourceSelectAction('favorite')
+      setSourceSelectSources(sources)
+      setSourceSelectTitle(record.title)
+      setSelectedSourceId(sources.find(s => s.isFavorited)?.sourceId || sources[0].sourceId)
+      setSourceSelectOpen(true)
+    }
+  }
+
+  // 处理追更操作
+  const handleIncremental = async (record) => {
+    const sources = record.sources || []
+    if (sources.length === 0) {
+      messageApi.warning('该作品没有数据源')
+      return
+    }
+    if (sources.length === 1) {
+      // 只有一个源，直接切换
+      try {
+        await toggleSourceIncremental({ sourceId: sources[0].sourceId })
+        messageApi.success('追更状态已更新')
+        getList()
+      } catch (error) {
+        messageApi.error('操作失败')
+      }
+    } else {
+      // 多个源，弹窗选择
+      setSourceSelectAction('incremental')
+      setSourceSelectSources(sources)
+      setSourceSelectTitle(record.title)
+      setSelectedSourceId(sources.find(s => s.incrementalRefreshEnabled)?.sourceId || sources[0].sourceId)
+      setSourceSelectOpen(true)
+    }
+  }
+
+  // 确认源选择
+  const handleSourceSelectConfirm = async () => {
+    if (!selectedSourceId) {
+      messageApi.warning('请选择一个数据源')
+      return
+    }
+    try {
+      if (sourceSelectAction === 'favorite') {
+        await toggleSourceFavorite({ sourceId: selectedSourceId })
+        messageApi.success('标记状态已更新')
+      } else if (sourceSelectAction === 'incremental') {
+        await toggleSourceIncremental({ sourceId: selectedSourceId })
+        messageApi.success('追更状态已更新')
+      }
+      setSourceSelectOpen(false)
+      getList()
+    } catch (error) {
+      messageApi.error('操作失败')
+    }
+  }
 
   const handleDelete = async record => {
     deleteFilesRef.current = true // 重置为默认值
@@ -822,48 +926,63 @@ export const Library = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-center gap-3 pt-2 border-t border-gray-200 dark:border-gray-700">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon="edit" size={16} />}
-                  title="编辑影视信息"
-                  onClick={async () => {
-                    const res = await getAnimeDetail({ animeId: record.animeId })
-                    form.setFieldsValue({
-                      ...(res.data || {}),
-                      animeId: record.animeId,
-                    })
-                    setEditOpen(true)
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon="book" size={16} />}
-                  title="查看详情"
-                  onClick={() => {
-                    if (!record.animeId || record.animeId === 0) {
-                      messageApi.error('无效的作品ID')
-                      return
-                    }
-                    navigate(`/anime/${record.animeId}`)
-                  }}
-                >
-                  详情
-                </Button>
-                <Button
-                  size="small"
-                  type="text"
-                  danger
-                  icon={<MyIcon icon="delete" size={16} />}
-                  title="删除影视条目"
-                  onClick={() => handleDelete(record)}
-                >
-                  删除
-                </Button>
+              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                <Tooltip title="编辑影视信息">
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<MyIcon icon="edit" size={18} />}
+                    onClick={async () => {
+                      const res = await getAnimeDetail({ animeId: record.animeId })
+                      form.setFieldsValue({
+                        ...(res.data || {}),
+                        animeId: record.animeId,
+                      })
+                      setEditOpen(true)
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title={record.sources?.some(s => s.isFavorited) ? "已标记（点击管理）" : "标记精确源"}>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<MyIcon icon={record.sources?.some(s => s.isFavorited) ? "favorites-fill" : "favorites"} size={18} />}
+                    className={record.sources?.some(s => s.isFavorited) ? 'text-yellow-500' : ''}
+                    onClick={() => handleFavorite(record)}
+                  />
+                </Tooltip>
+                <Tooltip title={record.sources?.some(s => s.incrementalRefreshEnabled) ? "追更中（点击管理）" : "开启追更"}>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? "zengliang" : "clock"} size={18} />}
+                    className={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'text-green-500' : ''}
+                    onClick={() => handleIncremental(record)}
+                  />
+                </Tooltip>
+                <Tooltip title="查看详情">
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={<MyIcon icon="book" size={18} />}
+                    onClick={() => {
+                      if (!record.animeId || record.animeId === 0) {
+                        messageApi.error('无效的作品ID')
+                        return
+                      }
+                      navigate(`/anime/${record.animeId}`)
+                    }}
+                  />
+                </Tooltip>
+                <Tooltip title="删除影视条目">
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    icon={<MyIcon icon="delete" size={18} />}
+                    onClick={() => handleDelete(record)}
+                  />
+                </Tooltip>
               </div>
             </div>
           )}
@@ -1565,6 +1684,46 @@ export const Library = () => {
             )
           }}
         />
+      </Modal>
+      {/* 源选择弹窗 */}
+      <Modal
+        title={`${sourceSelectAction === 'favorite' ? '选择要标记的源' : '选择要追更的源'} - ${sourceSelectTitle}`}
+        open={sourceSelectOpen}
+        onOk={handleSourceSelectConfirm}
+        onCancel={() => setSourceSelectOpen(false)}
+        okText="确认"
+        cancelText="取消"
+        zIndex={110}
+      >
+        <div className="py-4">
+          <Radio.Group
+            value={selectedSourceId}
+            onChange={(e) => setSelectedSourceId(e.target.value)}
+            className="w-full"
+          >
+            <Space direction="vertical" className="w-full">
+              {sourceSelectSources.map((source) => (
+                <Radio key={source.sourceId} value={source.sourceId} className="w-full">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{source.providerName}</span>
+                    {source.isFavorited && (
+                      <Tag color="gold" className="ml-2">已标记</Tag>
+                    )}
+                    {source.incrementalRefreshEnabled && (
+                      <Tag color="green" className="ml-2">追更中</Tag>
+                    )}
+                  </div>
+                </Radio>
+              ))}
+            </Space>
+          </Radio.Group>
+          <div className="mt-4 text-gray-500 text-sm">
+            {sourceSelectAction === 'favorite'
+              ? '提示：每个作品只能有一个标记的源，选择后其他源的标记会被取消。'
+              : '提示：每个作品只能有一个追更的源，选择后其他源的追更会被取消。'
+            }
+          </div>
+        </div>
       </Modal>
     </div>
   )
