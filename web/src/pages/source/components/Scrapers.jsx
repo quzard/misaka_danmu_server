@@ -471,33 +471,43 @@ export const Scrapers = () => {
               const skippedCount = data.skipped_count || 0
               const failedCount = data.failed_count || 0
 
-              setDownloadProgress(prev => ({
-                ...prev,
-                progress: 100,
-                message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
-              }))
-
-              if (downloadedCount > 0) {
-                messageApi.success('资源加载成功')
+              // 如果需要重启，不在这里刷新，等待 done 消息中的 checkServiceReady() 处理
+              if (data.need_restart) {
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 100,
+                  message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，等待容器重启...`
+                }))
+                // 不刷新，等待 done 消息
               } else {
-                messageApi.success('所有弹幕源都是最新的')
-              }
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 100,
+                  message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
+                }))
 
-              // 延迟刷新
-              setTimeout(() => {
-                setDownloadProgress({
-                  visible: false,
-                  current: 0,
-                  total: 0,
-                  progress: 0,
-                  message: '',
-                  scraper: '',
-                  isRestarting: false
-                })
-                getInfo()
-                loadVersionInfo()
-                setLoadingResources(false)
-              }, downloadedCount > 0 ? 2000 : 1000)
+                if (downloadedCount > 0) {
+                  messageApi.success('资源加载成功')
+                } else {
+                  messageApi.success('所有弹幕源都是最新的')
+                }
+
+                // 只有不需要重启时才延迟刷新
+                setTimeout(() => {
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  getInfo()
+                  loadVersionInfo()
+                  setLoadingResources(false)
+                }, downloadedCount > 0 ? 2000 : 1000)
+              }
             }
 
             if (data.status === 'failed') {
