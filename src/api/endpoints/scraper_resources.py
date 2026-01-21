@@ -450,9 +450,15 @@ async def save_resource_repo(
 
 @router.post("/scrapers/backup", summary="备份当前弹幕源")
 async def backup_scrapers(
-    current_user: models.User = Depends(get_current_user)
+    current_user: models.User = Depends(get_current_user),
+    new_versions_data: Optional[Dict] = None,  # 新增：可选的新版本信息
+    new_hashes_data: Optional[Dict] = None,    # 新增：可选的新哈希值
+    package_data: Optional[Dict] = None        # 新增：可选的 package.json 数据
 ):
-    """备份当前 scrapers 目录下的编译文件到持久化目录"""
+    """备份当前 scrapers 目录下的编译文件到持久化目录
+
+    如果提供了 new_versions_data，会将新版本信息合并到备份的 versions.json 中
+    """
     try:
         scrapers_dir = _get_scrapers_dir()
 
@@ -466,6 +472,26 @@ async def backup_scrapers(
                 versions = json.loads(SCRAPERS_VERSIONS_FILE.read_text())
             except Exception as e:
                 logger.warning(f"读取版本信息失败: {e}")
+
+        # 如果提供了新版本信息，合并到 versions 中
+        if new_versions_data:
+            if 'scrapers' in versions:
+                versions['scrapers'].update(new_versions_data)
+            else:
+                versions['scrapers'] = new_versions_data
+
+            # 更新哈希值
+            if new_hashes_data:
+                if 'hashes' in versions:
+                    versions['hashes'].update(new_hashes_data)
+                else:
+                    versions['hashes'] = new_hashes_data
+
+            # 更新 package 版本
+            if package_data and 'version' in package_data:
+                versions['version'] = package_data['version']
+
+            logger.info(f"合并了 {len(new_versions_data)} 个新版本信息到备份")
 
         # 清空旧备份文件（保留metadata.json）
         for file in BACKUP_DIR.glob("*"):
@@ -507,16 +533,25 @@ async def backup_scrapers(
             shutil.copy2(SCRAPERS_PACKAGE_FILE, BACKUP_DIR / "package.json")
             logger.info("已备份 package.json")
 
-        if SCRAPERS_VERSIONS_FILE.exists():
+        # 保存 versions.json（如果有新版本信息，保存合并后的版本）
+        if new_versions_data and versions:
+            # 有新版本信息，保存合并后的版本到备份目录
+            backup_versions_file = BACKUP_DIR / "versions.json"
+            backup_versions_file.write_text(json.dumps(versions, indent=2, ensure_ascii=False))
+            logger.info(f"已保存合并后的 versions.json 到备份目录（包含 {len(new_versions_data)} 个新版本）")
+        elif SCRAPERS_VERSIONS_FILE.exists():
+            # 没有新版本信息，直接复制原文件
             shutil.copy2(SCRAPERS_VERSIONS_FILE, BACKUP_DIR / "versions.json")
             logger.info("已备份 versions.json")
 
         # 读取 package.json 的版本号
         package_version = None
-        if SCRAPERS_PACKAGE_FILE.exists():
+        if package_data and 'version' in package_data:
+            package_version = package_data['version']
+        elif SCRAPERS_PACKAGE_FILE.exists():
             try:
-                package_data = json.loads(SCRAPERS_PACKAGE_FILE.read_text())
-                package_version = package_data.get("version")
+                local_package_data = json.loads(SCRAPERS_PACKAGE_FILE.read_text())
+                package_version = local_package_data.get("version")
             except Exception as e:
                 logger.warning(f"读取 package.json 失败: {e}")
 
@@ -1284,45 +1319,8 @@ async def load_resources_stream(
 
                     logger.info(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-                    # 保存版本信息和哈希值
-                    if versions_data:
-                        try:
-                            # 如果有下载失败的文件，合并旧版本信息而不是完全覆盖
-                            # 这样可以保留失败文件的旧版本信息，避免版本信息丢失
-                            existing_scrapers = {}
-                            existing_hashes = {}
-                            if failed_downloads and SCRAPERS_VERSIONS_FILE.exists():
-                                try:
-                                    existing_versions = json.loads(await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.read_text))
-                                    existing_scrapers = existing_versions.get('scrapers', {})
-                                    existing_hashes = existing_versions.get('hashes', {})
-                                    logger.info(f"检测到 {len(failed_downloads)} 个下载失败，将合并旧版本信息")
-                                except Exception as e:
-                                    logger.debug(f"读取旧版本信息失败: {e}")
-
-                            # 合并版本信息：新成功的覆盖旧的，失败的保留旧的
-                            merged_scrapers = {**existing_scrapers, **versions_data}
-                            merged_hashes = {**existing_hashes, **hashes_data}
-
-                            # 构建完整的版本信息
-                            full_versions_data = {
-                                "platform": platform_info['platform'],
-                                "type": platform_info['arch'],
-                                "version": package_data.get("version", "unknown"),
-                                "scrapers": merged_scrapers
-                            }
-
-                            # 只有当有哈希值数据时才添加 hashes 字段(兼容旧版本)
-                            if merged_hashes:
-                                full_versions_data["hashes"] = merged_hashes
-                                logger.info(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息和 {len(merged_hashes)} 个哈希值")
-                            else:
-                                logger.info(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息(无哈希值)")
-
-                            versions_json_str = json.dumps(full_versions_data, indent=2, ensure_ascii=False)
-                            await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
-                        except Exception as e:
-                            logger.warning(f"保存版本信息失败: {e}")
+                    # 注意：版本信息的保存移到后台任务中，只有首次下载时才保存到 scrapers 目录
+                    # 非首次下载时，版本信息只保存在备份目录中
 
                     # 检查下载结果
                     if download_count == 0 and skip_count == 0:
@@ -1341,22 +1339,10 @@ async def load_resources_stream(
                     logger.info(f"下载完成: 成功 {download_count} 个, 跳过 {skip_count} 个, 失败 {len(failed_downloads)} 个")
                     yield f"data: {json.dumps({'type': 'complete', 'downloaded': download_count, 'skipped': skip_count, 'failed': len(failed_downloads), 'failed_list': failed_downloads}, ensure_ascii=False)}\n\n"
 
-                    # 检查是否有下载失败的文件 - 有失败则不触发重启，只热加载成功的部分
+                    # 检查是否有下载失败的文件 - 有失败则不触发任何操作
                     if failed_downloads:
                         logger.warning(f"有 {len(failed_downloads)} 个文件下载失败: {failed_downloads}")
-                        yield f"data: {json.dumps({'type': 'warning', 'message': f'有 {len(failed_downloads)} 个文件下载失败，跳过重启，仅热加载已成功下载的源'}, ensure_ascii=False)}\n\n"
-
-                        # 尝试热加载已成功下载的源
-                        if download_count > 0:
-                            try:
-                                logger.info("正在备份已成功下载的资源...")
-                                await backup_scrapers(current_user)
-                                await manager.load_and_sync_scrapers()
-                                logger.info(f"部分更新完成（热加载）: 下载 {download_count}, 跳过 {skip_count}, 失败 {len(failed_downloads)}")
-                                yield f"data: {json.dumps({'type': 'info', 'message': '已热加载成功下载的源'}, ensure_ascii=False)}\n\n"
-                            except Exception as e:
-                                logger.error(f"热加载失败: {e}")
-                                yield f"data: {json.dumps({'type': 'error', 'message': f'热加载失败: {str(e)}'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'warning', 'message': f'有 {len(failed_downloads)} 个文件下载失败，不更新版本信息，不执行重启'}, ensure_ascii=False)}\n\n"
 
                         # 清除版本缓存
                         global _version_cache, _version_cache_time
@@ -1365,15 +1351,14 @@ async def load_resources_stream(
 
                         # 发送流结束信号
                         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
-                        return  # 有失败则不继续执行重启逻辑
+                        return  # 有失败则不继续执行
 
-                    # 根据下载类型决定后续操作
-                    # - 如果只有新增源：软件重启（热加载）即可
-                    # - 如果有更新已有源：需要重启容器（.so 文件被占用无法热更新）
+                    # 判断是否是首次下载（本地没有任何弹幕源）
+                    is_first_download = len(manager.scrapers) == 0
+
                     from ...docker_utils import is_docker_socket_available, restart_container
                     import sys
 
-                    need_container_restart = has_updates and download_count > 0
                     docker_available = is_docker_socket_available()
 
                     # ========== 先备份新下载的资源到持久化目录（在 SSE 流中同步执行）==========
@@ -1381,7 +1366,16 @@ async def load_resources_stream(
                         yield f"data: {json.dumps({'type': 'info', 'message': '正在备份新下载的资源...'}, ensure_ascii=False)}\n\n"
                         try:
                             logger.info("正在备份新下载的资源到持久化目录...")
-                            await backup_scrapers(current_user)
+                            # 非首次下载时，传入新版本信息以保存到备份目录
+                            if not is_first_download:
+                                await backup_scrapers(
+                                    current_user,
+                                    new_versions_data=versions_data,
+                                    new_hashes_data=hashes_data,
+                                    package_data=package_data
+                                )
+                            else:
+                                await backup_scrapers(current_user)
                             logger.info("新资源备份完成")
                             yield f"data: {json.dumps({'type': 'info', 'message': '✓ 新资源备份完成'}, ensure_ascii=False)}\n\n"
                         except Exception as backup_error:
@@ -1390,15 +1384,17 @@ async def load_resources_stream(
 
                     # ========== 根据情况提示用户 ==========
                     if download_count > 0:
-                        if need_container_restart:
-                            if docker_available:
-                                yield f"data: {json.dumps({'type': 'info', 'message': '检测到更新已有源，将在 2 秒后重启容器以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
-                                yield f"data: {json.dumps({'type': 'container_restart_required', 'message': '需要重启容器'}, ensure_ascii=False)}\n\n"
-                            else:
-                                yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 更新已有源需要重启容器，但未检测到 Docker 套接字，请手动重启容器'}, ensure_ascii=False)}\n\n"
-                                yield f"data: {json.dumps({'type': 'restart_suggested', 'message': '建议手动重启容器'}, ensure_ascii=False)}\n\n"
+                        if is_first_download:
+                            # 首次下载：保存版本信息并热加载
+                            yield f"data: {json.dumps({'type': 'info', 'message': '首次下载弹幕源，正在热加载...'}, ensure_ascii=False)}\n\n"
+                        elif docker_available:
+                            # 非首次下载且有 Docker socket：提示将重启容器
+                            yield f"data: {json.dumps({'type': 'info', 'message': '检测到弹幕源更新，将在 2 秒后重启容器以确保 .so 文件更新生效'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'container_restart_required', 'message': '需要重启容器'}, ensure_ascii=False)}\n\n"
                         else:
-                            yield f"data: {json.dumps({'type': 'info', 'message': '新增源已下载，正在热加载...'}, ensure_ascii=False)}\n\n"
+                            # 非首次下载且没有 Docker socket：提示手动重启
+                            yield f"data: {json.dumps({'type': 'info', 'message': '⚠️ 弹幕源更新需要重启容器，但未检测到 Docker 套接字，请手动重启容器'}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'restart_suggested', 'message': '建议手动重启容器'}, ensure_ascii=False)}\n\n"
 
                     # 发送流结束信号
                     yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
@@ -1415,11 +1411,32 @@ async def load_resources_stream(
                         # 等待 SSE 流完全关闭和日志刷新
                         await asyncio.sleep(1.0)
                         try:
-                            # 根据情况决定是重启容器还是热加载
-                            if need_container_restart and docker_available:
-                                # 有更新已有源且有 Docker socket：重启容器
-                                # 容器重启后会自动从备份恢复新的源文件
-                                logger.info("检测到更新已有源，准备重启容器...")
+                            if is_first_download:
+                                # 首次下载：保存版本信息并执行热加载
+                                # 保存版本信息
+                                if versions_data:
+                                    try:
+                                        full_versions_data = {
+                                            "platform": platform_info['platform'],
+                                            "type": platform_info['arch'],
+                                            "version": package_data.get("version", "unknown"),
+                                            "scrapers": versions_data
+                                        }
+                                        if hashes_data:
+                                            full_versions_data["hashes"] = hashes_data
+                                        versions_json_str = json.dumps(full_versions_data, indent=2, ensure_ascii=False)
+                                        await asyncio.to_thread(SCRAPERS_VERSIONS_FILE.write_text, versions_json_str)
+                                        logger.info(f"已保存 {len(versions_data)} 个弹幕源的版本信息")
+                                    except Exception as e:
+                                        logger.warning(f"保存版本信息失败: {e}")
+
+                                logger.info("首次下载，开始热加载弹幕源...")
+                                await manager.load_and_sync_scrapers()
+                                logger.info(f"用户 '{current_user.username}' 首次下载并成功加载了 {download_count} 个弹幕源")
+                            elif docker_available:
+                                # 非首次下载且有 Docker socket：重启容器
+                                # 版本信息只在备份中，不保存到 scrapers 目录
+                                logger.info("检测到弹幕源更新，准备重启容器...")
 
                                 # 再次刷新日志，确保上面的日志输出
                                 for handler in logging.getLogger().handlers:
@@ -1434,14 +1451,13 @@ async def load_resources_stream(
                                 if result.get("success"):
                                     logger.info(f"已向容器 '{container_name}' 发送重启指令")
                                 else:
-                                    logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                                    # 降级到热加载
-                                    await manager.load_and_sync_scrapers()
+                                    logger.warning(f"重启容器失败: {result.get('message')}")
+                                    logger.warning("⚠️ 请手动重启容器以加载新的弹幕源")
                             else:
-                                # 只有新增源或没有 Docker socket：热加载
-                                logger.info("开始热加载弹幕源...")
-                                await manager.load_and_sync_scrapers()
-                                logger.info(f"用户 '{current_user.username}' 成功加载了 {download_count} 个弹幕源")
+                                # 非首次下载且没有 Docker socket：仅提示，不执行热加载
+                                # 版本信息只在备份中，不保存到 scrapers 目录
+                                logger.info(f"用户 '{current_user.username}' 下载了 {download_count} 个弹幕源，需要手动重启容器")
+                                logger.warning("⚠️ 未检测到 Docker 套接字，请手动重启容器以加载新的弹幕源")
 
                             _version_cache = None
                             _version_cache_time = None

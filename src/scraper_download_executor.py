@@ -470,63 +470,63 @@ class ScraperDownloadExecutor:
         await backup_scrapers(self.current_user)
         self._log("✓ 新资源备份完成")
 
-        # 检查是否有 Docker socket，决定重启方式
-        from .docker_utils import is_docker_socket_available, restart_container
-        docker_available = is_docker_socket_available()
+        # 判断是否是首次下载（本地没有任何弹幕源）
+        existing_scrapers = set(self.scraper_manager.scrapers.keys())
+        is_first_download = len(existing_scrapers) == 0
 
-        if docker_available:
-            # 有 Docker socket，执行容器级别重启
-            from .docker_utils import get_current_container_id
-            detected_id = get_current_container_id()
-
-            self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
-            if detected_id:
-                self._log(f"检测到当前容器 ID: {detected_id}")
-                logger.info(f"自动检测到当前容器 ID: {detected_id}")
-            else:
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-
-            self._log("将在 3 秒后重启容器...")
-            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
-
-            # 先设置任务状态为完成
-            self.task.status = TaskStatus.COMPLETED
-
-            # 持久化任务状态到缓存（容器重启后前端可查询）
-            await self._persist_task_status("completed", need_restart=True)
-
-            # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-            await asyncio.sleep(3.0)
-
-            fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-            result = await restart_container(fallback_name)
-            if result.get("success"):
-                container_id = result.get("container_id", "unknown")
-                self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-            else:
-                self._log(f"重启容器失败: {result.get('message')}")
-                logger.warning(f"重启容器失败: {result.get('message')}")
-                # 重启失败时提示用户手动重启
-                self._log("⚠️ 请手动重启容器以加载新的弹幕源")
-
-            # 任务状态已在上面设置，直接返回
-            return
+        if is_first_download:
+            # 首次下载：执行热加载
+            self._log("检测到首次下载弹幕源，正在热加载...")
+            logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
+            await self.scraper_manager.load_and_sync_scrapers()
+            self._log("✓ 弹幕源加载完成")
         else:
-            # 判断是否是首次下载（本地没有任何弹幕源）
-            existing_scrapers = set(self.scraper_manager.scrapers.keys())
-            is_first_download = len(existing_scrapers) == 0
+            # 非首次下载：检查是否有 Docker socket，决定重启方式
+            from .docker_utils import is_docker_socket_available, restart_container
+            docker_available = is_docker_socket_available()
 
-            if is_first_download:
-                # 首次下载：执行热加载
-                self._log("检测到首次下载弹幕源，正在热加载...")
-                logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
-                await self.scraper_manager.load_and_sync_scrapers()
-                self._log("✓ 弹幕源加载完成")
+            if docker_available:
+                # 有 Docker socket，执行容器级别重启
+                from .docker_utils import get_current_container_id
+                detected_id = get_current_container_id()
+
+                self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
+                if detected_id:
+                    self._log(f"检测到当前容器 ID: {detected_id}")
+                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                else:
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                self._log("将在 3 秒后重启容器...")
+                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
+
+                # 先设置任务状态为完成
+                self.task.status = TaskStatus.COMPLETED
+
+                # 持久化任务状态到缓存（容器重启后前端可查询）
+                await self._persist_task_status("completed", need_restart=True)
+
+                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                await asyncio.sleep(3.0)
+
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                result = await restart_container(fallback_name)
+                if result.get("success"):
+                    container_id = result.get("container_id", "unknown")
+                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
+                else:
+                    self._log(f"重启容器失败: {result.get('message')}")
+                    logger.warning(f"重启容器失败: {result.get('message')}")
+                    # 重启失败时提示用户手动重启
+                    self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+
+                # 任务状态已在上面设置，直接返回
+                return
             else:
-                # 非首次下载且没有 Docker socket：提示手动重启
+                # 非首次下载且没有 Docker socket：提示手动重启，不执行热加载
                 self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
                 self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，需要手动重启容器")
@@ -648,78 +648,87 @@ class ScraperDownloadExecutor:
             self.task.status = TaskStatus.COMPLETED
             return
 
-        # 全部成功，保存版本信息
-        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
-
-        # 清除版本缓存，让前端能获取到最新版本号
-        self._clear_version_cache()
+        # 判断是否是首次下载（本地没有任何弹幕源）
+        existing_scrapers = set(self.scraper_manager.scrapers.keys())
+        is_first_download = len(existing_scrapers) == 0
 
         # 热加载或容器重启
         if download_count > 0:
             # 全部成功才备份新下载的资源
             self._log("正在备份新下载的资源...")
-            await backup_scrapers(self.current_user)
+            # 非首次下载时，传入新版本信息以保存到备份目录
+            if not is_first_download:
+                await backup_scrapers(
+                    self.current_user,
+                    new_versions_data=versions_data,
+                    new_hashes_data=hashes_data,
+                    package_data=package_data
+                )
+            else:
+                await backup_scrapers(self.current_user)
             self._log("✓ 新资源备份完成")
 
-            # 检查是否有 Docker socket，决定重启方式
-            from .docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
+            if is_first_download:
+                # 首次下载（本地没有弹幕源）：保存版本信息并执行热加载
+                await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
+                # 清除版本缓存，让前端能获取到最新版本号
+                self._clear_version_cache()
 
-            # 判断是否是首次下载（本地没有任何弹幕源）
-            existing_scrapers = set(self.scraper_manager.scrapers.keys())
-            is_first_download = len(existing_scrapers) == 0
-
-            if docker_available:
-                # 有 Docker socket，执行容器级别重启（确保 .so 文件正确加载）
-                from .docker_utils import get_current_container_id
-                detected_id = get_current_container_id()
-
-                self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
-                if detected_id:
-                    self._log(f"检测到当前容器 ID: {detected_id}")
-                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
-                else:
-                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-
-                self._log("将在 3 秒后重启容器...")
-                logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
-
-                # 先设置任务状态为完成
-                self.task.status = TaskStatus.COMPLETED
-
-                # 持久化任务状态到缓存（容器重启后前端可查询）
-                await self._persist_task_status("completed", need_restart=True)
-
-                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-                await asyncio.sleep(3.0)
-
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(fallback_name)
-                if result.get("success"):
-                    container_id = result.get("container_id", "unknown")
-                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-                else:
-                    self._log(f"重启容器失败: {result.get('message')}")
-                    logger.warning(f"重启容器失败: {result.get('message')}")
-                    # 重启失败时不再尝试热加载，提示用户手动重启
-                    self._log("⚠️ 请手动重启容器以加载新的弹幕源")
-
-                # 任务状态已在上面设置，直接返回
-                return
-            elif is_first_download:
-                # 首次下载（本地没有弹幕源）：执行热加载
                 self._log("检测到首次下载弹幕源，正在热加载...")
                 logger.info(f"用户 '{self.current_user.username}' 首次下载了 {download_count} 个弹幕源，正在热加载")
                 await self.scraper_manager.load_and_sync_scrapers()
                 self._log(f"✓ 成功加载了 {download_count} 个弹幕源")
             else:
-                # 非首次下载且没有 Docker socket：提示手动重启
-                self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
-                self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
-                logger.info(f"用户 '{self.current_user.username}' 更新了 {download_count} 个弹幕源，需要手动重启容器")
+                # 非首次下载：不保存版本信息到 scrapers 目录，版本信息只在备份中
+                # 检查是否有 Docker socket，决定重启方式
+                from .docker_utils import is_docker_socket_available, restart_container
+                docker_available = is_docker_socket_available()
+
+                if docker_available:
+                    # 有 Docker socket，执行容器级别重启（确保 .so 文件正确加载）
+                    from .docker_utils import get_current_container_id
+                    detected_id = get_current_container_id()
+
+                    self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
+                    if detected_id:
+                        self._log(f"检测到当前容器 ID: {detected_id}")
+                        logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                    else:
+                        fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                        self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                        logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                    self._log("将在 3 秒后重启容器...")
+                    logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
+
+                    # 先设置任务状态为完成
+                    self.task.status = TaskStatus.COMPLETED
+
+                    # 持久化任务状态到缓存（容器重启后前端可查询）
+                    await self._persist_task_status("completed", need_restart=True)
+
+                    # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                    await asyncio.sleep(3.0)
+
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                    result = await restart_container(fallback_name)
+                    if result.get("success"):
+                        container_id = result.get("container_id", "unknown")
+                        self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                        logger.info(f"已向容器发送重启指令 (ID: {container_id})")
+                    else:
+                        self._log(f"重启容器失败: {result.get('message')}")
+                        logger.warning(f"重启容器失败: {result.get('message')}")
+                        # 重启失败时提示用户手动重启
+                        self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+
+                    # 任务状态已在上面设置，直接返回
+                    return
+                else:
+                    # 非首次下载且没有 Docker socket：提示手动重启，不执行热加载
+                    self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
+                    self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                    logger.info(f"用户 '{self.current_user.username}' 更新了 {download_count} 个弹幕源，需要手动重启容器")
 
         # 全部成功，清理可能存在的临时目录
         await self._cleanup_temp_dir(self.task.task_id)
