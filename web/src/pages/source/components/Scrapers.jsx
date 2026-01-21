@@ -555,11 +555,25 @@ export const Scrapers = () => {
               const checkServiceReady = async () => {
                 const maxAttempts = 60  // 最多尝试 60 次
                 const interval = 2000   // 每 2 秒检测一次
+                let waitSeconds = 0
 
                 // 先等待 5 秒，让容器有时间开始重启
-                await new Promise(resolve => setTimeout(resolve, 5000))
+                for (let i = 0; i < 5; i++) {
+                  waitSeconds++
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    message: `容器正在重启中，请稍候... (${waitSeconds}秒)`
+                  }))
+                  await new Promise(resolve => setTimeout(resolve, 1000))
+                }
 
                 for (let i = 0; i < maxAttempts; i++) {
+                  // 更新等待状态
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    message: `正在等待服务恢复... (${waitSeconds}秒)`
+                  }))
+
                   try {
                     // 使用 /api/ui/version 接口检测服务是否完全启动
                     const response = await fetch('/api/ui/version', {
@@ -568,6 +582,11 @@ export const Scrapers = () => {
                     })
                     if (response.ok) {
                       // 服务恢复，刷新界面
+                      setDownloadProgress(prev => ({
+                        ...prev,
+                        message: '服务已恢复，正在刷新...'
+                      }))
+                      await new Promise(resolve => setTimeout(resolve, 500))
                       setDownloadProgress({
                         visible: false,
                         current: 0,
@@ -584,9 +603,18 @@ export const Scrapers = () => {
                     }
                   } catch (e) {
                     // 服务还未恢复，继续等待
-                    console.log(`等待服务恢复... (${i + 1}/${maxAttempts})`)
+                    console.log(`等待服务恢复... (${waitSeconds}秒)`)
                   }
-                  await new Promise(resolve => setTimeout(resolve, interval))
+
+                  // 等待 interval 毫秒，同时更新秒数
+                  for (let j = 0; j < interval / 1000; j++) {
+                    await new Promise(resolve => setTimeout(resolve, 1000))
+                    waitSeconds++
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      message: `正在等待服务恢复... (${waitSeconds}秒)`
+                    }))
+                  }
                 }
 
                 // 超时，关闭进度条并提示用户手动刷新
