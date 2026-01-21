@@ -550,8 +550,43 @@ export const Scrapers = () => {
                 progress: 100,
                 message: '弹幕源更新完成，容器正在重启中...'
               }))
-              // 延迟关闭进度条并刷新界面
-              setTimeout(() => {
+
+              // 轮询检测服务是否恢复，最多等待 60 秒
+              const checkServiceReady = async () => {
+                const maxAttempts = 30  // 最多尝试 30 次
+                const interval = 2000   // 每 2 秒检测一次
+
+                for (let i = 0; i < maxAttempts; i++) {
+                  await new Promise(resolve => setTimeout(resolve, interval))
+                  try {
+                    // 尝试请求健康检查接口
+                    const response = await fetch('/api/health', {
+                      method: 'GET',
+                      signal: AbortSignal.timeout(3000)
+                    })
+                    if (response.ok) {
+                      // 服务恢复，刷新界面
+                      setDownloadProgress({
+                        visible: false,
+                        current: 0,
+                        total: 0,
+                        progress: 0,
+                        message: '',
+                        scraper: ''
+                      })
+                      messageApi.success('容器重启完成')
+                      getInfo()
+                      loadVersionInfo()
+                      setLoadingResources(false)
+                      return
+                    }
+                  } catch (e) {
+                    // 服务还未恢复，继续等待
+                    console.log(`等待服务恢复... (${i + 1}/${maxAttempts})`)
+                  }
+                }
+
+                // 超时，关闭进度条并提示用户手动刷新
                 setDownloadProgress({
                   visible: false,
                   current: 0,
@@ -560,11 +595,11 @@ export const Scrapers = () => {
                   message: '',
                   scraper: ''
                 })
-                // 刷新界面
-                getInfo()
-                loadVersionInfo()
+                messageApi.warning('容器重启超时，请手动刷新页面')
                 setLoadingResources(false)
-              }, 3000)
+              }
+
+              checkServiceReady()
             }
 
             // SSE 流正常结束
