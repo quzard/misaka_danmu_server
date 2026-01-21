@@ -451,13 +451,10 @@ async def save_resource_repo(
 @router.post("/scrapers/backup", summary="备份当前弹幕源")
 async def backup_scrapers(
     current_user: models.User = Depends(get_current_user),
-    new_versions_data: Optional[Dict] = None,  # 新增：可选的新版本信息
-    new_hashes_data: Optional[Dict] = None,    # 新增：可选的新哈希值
-    package_data: Optional[Dict] = None        # 新增：可选的 package.json 数据
 ):
     """备份当前 scrapers 目录下的编译文件到持久化目录
 
-    如果提供了 new_versions_data，会将新版本信息合并到备份的 versions.json 中
+    直接从 scrapers 目录复制所有 .so/.pyd 文件和 versions.json 到备份目录
     """
     try:
         scrapers_dir = _get_scrapers_dir()
@@ -465,33 +462,13 @@ async def backup_scrapers(
         # 创建备份目录
         BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-        # 读取版本信息
+        # 读取版本信息（用于元数据）
         versions = {}
         if SCRAPERS_VERSIONS_FILE.exists():
             try:
                 versions = json.loads(SCRAPERS_VERSIONS_FILE.read_text())
             except Exception as e:
                 logger.warning(f"读取版本信息失败: {e}")
-
-        # 如果提供了新版本信息，合并到 versions 中
-        if new_versions_data:
-            if 'scrapers' in versions:
-                versions['scrapers'].update(new_versions_data)
-            else:
-                versions['scrapers'] = new_versions_data
-
-            # 更新哈希值
-            if new_hashes_data:
-                if 'hashes' in versions:
-                    versions['hashes'].update(new_hashes_data)
-                else:
-                    versions['hashes'] = new_hashes_data
-
-            # 更新 package 版本
-            if package_data and 'version' in package_data:
-                versions['version'] = package_data['version']
-
-            logger.info(f"合并了 {len(new_versions_data)} 个新版本信息到备份")
 
         # 清空旧备份文件（保留metadata.json）
         for file in BACKUP_DIR.glob("*"):
@@ -528,27 +505,19 @@ async def backup_scrapers(
                 backed_files.append(file_info)
                 backup_count += 1
 
-        # 备份 package.json 和 versions.json
+        # 备份 package.json
         if SCRAPERS_PACKAGE_FILE.exists():
             shutil.copy2(SCRAPERS_PACKAGE_FILE, BACKUP_DIR / "package.json")
             logger.info("已备份 package.json")
 
-        # 保存 versions.json（如果有新版本信息，保存合并后的版本）
-        if new_versions_data and versions:
-            # 有新版本信息，保存合并后的版本到备份目录
-            backup_versions_file = BACKUP_DIR / "versions.json"
-            backup_versions_file.write_text(json.dumps(versions, indent=2, ensure_ascii=False))
-            logger.info(f"已保存合并后的 versions.json 到备份目录（包含 {len(new_versions_data)} 个新版本）")
-        elif SCRAPERS_VERSIONS_FILE.exists():
-            # 没有新版本信息，直接复制原文件
+        # 备份 versions.json（直接复制，因为版本信息已经保存到 scrapers 目录了）
+        if SCRAPERS_VERSIONS_FILE.exists():
             shutil.copy2(SCRAPERS_VERSIONS_FILE, BACKUP_DIR / "versions.json")
             logger.info("已备份 versions.json")
 
-        # 读取 package.json 的版本号
+        # 读取 package.json 的版本号（用于元数据）
         package_version = None
-        if package_data and 'version' in package_data:
-            package_version = package_data['version']
-        elif SCRAPERS_PACKAGE_FILE.exists():
+        if SCRAPERS_PACKAGE_FILE.exists():
             try:
                 local_package_data = json.loads(SCRAPERS_PACKAGE_FILE.read_text())
                 package_version = local_package_data.get("version")
