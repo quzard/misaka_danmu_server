@@ -3941,6 +3941,26 @@ async def get_comments_for_dandan(
     except Exception as e:
         logger.error(f"应用随机颜色失败: {e}", exc_info=True)
 
+    # 应用服务端简繁转换配置（优先级高于客户端参数）
+    try:
+        server_ch_convert = await config_manager.get('danmakuChConvert', '0')
+        # 服务端配置优先，如果服务端配置为0（关闭），则使用客户端参数
+        effective_ch_convert = int(server_ch_convert) if server_ch_convert != '0' else chConvert
+        if effective_ch_convert in [1, 2] and comments_data:
+            converter = None
+            if effective_ch_convert == 1:
+                converter = OpenCC('t2s')  # 繁转简
+            elif effective_ch_convert == 2:
+                converter = OpenCC('s2t')  # 简转繁
+
+            if converter:
+                for comment in comments_data:
+                    if 'm' in comment and comment['m']:
+                        comment['m'] = converter.convert(comment['m'])
+                logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 模式={effective_ch_convert}, 处理 {len(comments_data)} 条")
+    except Exception as e:
+        logger.error(f"应用简繁转换失败: {e}", exc_info=True)
+
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
 

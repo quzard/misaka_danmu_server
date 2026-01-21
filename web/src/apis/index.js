@@ -267,6 +267,12 @@ export const getDanmakuBlacklistPatterns = () =>
 /** 弹幕输出配置 黑名单规则 */
 export const setDanmakuBlacklistPatterns = data =>
   api.put('/api/ui/config/danmakuBlacklistPatterns', data)
+/** 弹幕输出配置 简繁转换 */
+export const getDanmakuChConvert = () =>
+  api.get('/api/ui/config/danmakuChConvert')
+/** 弹幕输出配置 简繁转换 */
+export const setDanmakuChConvert = data =>
+  api.put('/api/ui/config/danmakuChConvert', data)
 
 /** 获取匹配后备机制状态 */
 export const getMatchFallback = () =>
