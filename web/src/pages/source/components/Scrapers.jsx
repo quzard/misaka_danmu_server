@@ -733,13 +733,17 @@ export const Scrapers = () => {
                   const failedCount = data.failed_count || 0
 
                   if (data.need_restart) {
-                    // 容器正在重启
-                    messageApi.info('弹幕源更新完成，容器正在重启中...')
+                    // 容器正在重启，不在这里刷新，让 checkServiceReady() 处理
+                    // 只更新提示信息，不触发刷新
+                    console.log('SSE 断开后查询到任务完成且需要重启，等待 checkServiceReady() 处理')
                     setDownloadProgress(prev => ({
                       ...prev,
                       progress: 100,
-                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，容器正在重启...`
+                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，容器正在重启...`,
+                      isRestarting: true
                     }))
+                    // 不刷新，直接返回
+                    return
                   } else {
                     messageApi.success(`下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}`)
                     setDownloadProgress(prev => ({
@@ -749,7 +753,7 @@ export const Scrapers = () => {
                     }))
                   }
 
-                  // 延迟刷新
+                  // 只有不需要重启时才延迟刷新
                   setTimeout(() => {
                     setDownloadProgress({
                       visible: false,
