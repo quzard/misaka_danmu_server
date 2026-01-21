@@ -561,19 +561,51 @@ export const Scrapers = () => {
                 const maxWaitSeconds = 120  // 最大等待时间
                 const checkInterval = 2000   // 每 2 秒检测一次
                 let waitSeconds = 0
+                let serviceWentDown = false  // 标记服务是否已经停止过
 
-                // 先等待 5 秒，让容器有时间开始重启
-                for (let i = 0; i < 5; i++) {
+                // 第一阶段：等待服务停止（最多等待 30 秒）
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 0,
+                  message: '等待容器停止...'
+                }))
+
+                for (let i = 0; i < 30; i++) {
                   waitSeconds++
                   const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
                   setDownloadProgress(prev => ({
                     ...prev,
-                    progress: restartProgress,
-                    message: `容器正在重启中，请稍候... (${waitSeconds}秒)`
+                    progress: Math.min(restartProgress, 25),  // 第一阶段最多 25%
+                    message: `等待容器停止... (${waitSeconds}秒)`
                   }))
+
+                  try {
+                    const response = await fetch('/api/ui/version', {
+                      method: 'GET',
+                      signal: AbortSignal.timeout(2000)
+                    })
+                    if (!response.ok) {
+                      // 服务返回错误，认为已停止
+                      serviceWentDown = true
+                      console.log('服务已停止（返回错误）')
+                      break
+                    }
+                  } catch (e) {
+                    // 服务不可用，认为已停止
+                    serviceWentDown = true
+                    console.log('服务已停止（连接失败）')
+                    break
+                  }
+
                   await new Promise(resolve => setTimeout(resolve, 1000))
                 }
 
+                // 如果服务一直没停止，可能重启很快，继续等待恢复
+                if (!serviceWentDown) {
+                  console.log('服务似乎没有停止，可能重启非常快，继续检测...')
+                }
+
+                // 第二阶段：等待服务恢复
                 for (let i = 0; i < 60; i++) {  // 最多尝试 60 次
                   // 更新等待状态和进度
                   const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
