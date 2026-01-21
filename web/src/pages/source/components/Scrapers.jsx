@@ -562,16 +562,115 @@ export const Scrapers = () => {
           throw new Error('任务已完成，停止重试')
         }
         if (error.name !== 'AbortError') {
-          messageApi.error('进度连接出错，请刷新页面查看状态')
-          setDownloadProgress({
-            visible: false,
-            current: 0,
-            total: 0,
-            progress: 0,
-            message: '',
-            scraper: ''
+          // SSE 断开时，尝试查询缓存的任务状态（可能是容器重启导致的断开）
+          console.log('SSE 断开，尝试查询缓存的任务状态...')
+
+          // 使用 fetch 直接查询，避免 axios 拦截器的影响
+          const token = Cookies.get('danmu_token')
+          fetch(`/api/ui/scrapers/download/cached-status/${taskId}`, {
+            headers: { Authorization: `Bearer ${token}` }
           })
-          setLoadingResources(false)
+            .then(res => res.json())
+            .then(result => {
+              if (result.found && result.data) {
+                const data = result.data
+                if (data.status === 'completed') {
+                  // 任务已完成，可能是容器重启前完成的
+                  taskCompleted = true
+                  const downloadedCount = data.downloaded_count || 0
+                  const skippedCount = data.skipped_count || 0
+                  const failedCount = data.failed_count || 0
+
+                  if (data.need_restart) {
+                    // 容器正在重启
+                    messageApi.info('弹幕源更新完成，容器正在重启中...')
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      progress: 100,
+                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，容器正在重启...`
+                    }))
+                  } else {
+                    messageApi.success(`下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}`)
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      progress: 100,
+                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}`
+                    }))
+                  }
+
+                  // 延迟刷新
+                  setTimeout(() => {
+                    setDownloadProgress({
+                      visible: false,
+                      current: 0,
+                      total: 0,
+                      progress: 0,
+                      message: '',
+                      scraper: ''
+                    })
+                    getInfo()
+                    loadVersionInfo()
+                    setLoadingResources(false)
+                  }, 2000)
+                } else if (data.status === 'failed') {
+                  messageApi.error(data.error_message || '下载失败')
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: ''
+                  })
+                  setLoadingResources(false)
+                } else {
+                  // 任务状态未知，显示错误
+                  messageApi.error('进度连接出错，请刷新页面查看状态')
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: ''
+                  })
+                  setLoadingResources(false)
+                }
+              } else {
+                // 缓存中没有找到任务状态，显示错误
+                messageApi.error('进度连接出错，请刷新页面查看状态')
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: ''
+                })
+                setLoadingResources(false)
+              }
+            })
+            .catch(fetchError => {
+              console.error('查询缓存状态失败:', fetchError)
+              // 查询失败，可能是容器正在重启，显示友好提示
+              messageApi.warning('连接已断开，可能是容器正在重启，请稍后刷新页面')
+              setDownloadProgress(prev => ({
+                ...prev,
+                message: '连接已断开，可能是容器正在重启...'
+              }))
+              // 不立即关闭进度条，让用户看到提示
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: ''
+                })
+                setLoadingResources(false)
+              }, 3000)
+            })
         }
         throw error
       },

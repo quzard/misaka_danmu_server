@@ -508,6 +508,13 @@ class ScraperDownloadExecutor:
                 # 持久化任务状态到缓存（容器重启后前端可查询）
                 await self._persist_task_status("completed", need_restart=True)
 
+                # 刷新日志缓冲区，确保日志输出
+                import sys
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+
                 # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
                 await asyncio.sleep(3.0)
 
@@ -706,6 +713,13 @@ class ScraperDownloadExecutor:
 
                     # 持久化任务状态到缓存（容器重启后前端可查询）
                     await self._persist_task_status("completed", need_restart=True)
+
+                    # 刷新日志缓冲区，确保日志输出
+                    import sys
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
 
                     # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
                     await asyncio.sleep(3.0)
