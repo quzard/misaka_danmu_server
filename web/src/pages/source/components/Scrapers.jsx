@@ -550,7 +550,7 @@ export const Scrapers = () => {
                 progress: 100,
                 message: '弹幕源更新完成，容器正在重启中...'
               }))
-              // 延迟关闭进度条
+              // 延迟关闭进度条并刷新界面
               setTimeout(() => {
                 setDownloadProgress({
                   visible: false,
@@ -560,6 +560,9 @@ export const Scrapers = () => {
                   message: '',
                   scraper: ''
                 })
+                // 刷新界面
+                getInfo()
+                loadVersionInfo()
                 setLoadingResources(false)
               }, 3000)
             }

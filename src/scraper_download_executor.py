@@ -522,11 +522,24 @@ class ScraperDownloadExecutor:
                 # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
                 # 增加等待时间，确保前端收到终止消息
                 logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
                 await asyncio.sleep(3.0)
                 logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
 
                 fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+
+                # 在重启前再次刷新所有日志
+                logger.info(f"[任务 {self.task.task_id}] 正在发送容器重启指令...")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+
                 result = await restart_container(fallback_name)
+                # 注意：如果重启成功，下面的代码可能不会执行（进程被杀死）
                 if result.get("success"):
                     container_id = result.get("container_id", "unknown")
                     logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
@@ -741,11 +754,24 @@ class ScraperDownloadExecutor:
                     # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
                     # 增加等待时间，确保前端收到终止消息
                     logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
                     await asyncio.sleep(3.0)
                     logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
 
                     fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+
+                    # 在重启前再次刷新所有日志
+                    logger.info(f"[任务 {self.task.task_id}] 正在发送容器重启指令...")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+
                     result = await restart_container(fallback_name)
+                    # 注意：如果重启成功，下面的代码可能不会执行（进程被杀死）
                     if result.get("success"):
                         container_id = result.get("container_id", "unknown")
                         logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
