@@ -232,7 +232,8 @@ export const Scrapers = () => {
     total: 0,
     progress: 0,
     message: '',
-    scraper: ''
+    scraper: '',
+    isRestarting: false  // 是否正在等待重启
   })
   const currentDownloadTaskId = useRef(null)  // 当前下载任务 ID
 
@@ -490,7 +491,8 @@ export const Scrapers = () => {
                   total: 0,
                   progress: 0,
                   message: '',
-                  scraper: ''
+                  scraper: '',
+                  isRestarting: false
                 })
                 getInfo()
                 loadVersionInfo()
@@ -507,7 +509,8 @@ export const Scrapers = () => {
                 total: 0,
                 progress: 0,
                 message: '',
-                scraper: ''
+                scraper: '',
+                isRestarting: false
               })
               setLoadingResources(false)
             }
@@ -521,7 +524,8 @@ export const Scrapers = () => {
                 total: 0,
                 progress: 0,
                 message: '',
-                scraper: ''
+                scraper: '',
+                isRestarting: false
               })
               setLoadingResources(false)
             }
@@ -547,30 +551,35 @@ export const Scrapers = () => {
               messageApi.info('弹幕源更新完成，容器正在重启中...')
               setDownloadProgress(prev => ({
                 ...prev,
-                progress: 100,
-                message: '弹幕源更新完成，容器正在重启中...'
+                progress: 0,  // 重置进度，用于显示重启等待进度
+                message: '弹幕源更新完成，容器正在重启中...',
+                isRestarting: true
               }))
 
               // 轮询检测服务是否恢复，最多等待 120 秒
               const checkServiceReady = async () => {
-                const maxAttempts = 60  // 最多尝试 60 次
-                const interval = 2000   // 每 2 秒检测一次
+                const maxWaitSeconds = 120  // 最大等待时间
+                const checkInterval = 2000   // 每 2 秒检测一次
                 let waitSeconds = 0
 
                 // 先等待 5 秒，让容器有时间开始重启
                 for (let i = 0; i < 5; i++) {
                   waitSeconds++
+                  const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
                   setDownloadProgress(prev => ({
                     ...prev,
+                    progress: restartProgress,
                     message: `容器正在重启中，请稍候... (${waitSeconds}秒)`
                   }))
                   await new Promise(resolve => setTimeout(resolve, 1000))
                 }
 
-                for (let i = 0; i < maxAttempts; i++) {
-                  // 更新等待状态
+                for (let i = 0; i < 60; i++) {  // 最多尝试 60 次
+                  // 更新等待状态和进度
+                  const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
                   setDownloadProgress(prev => ({
                     ...prev,
+                    progress: Math.min(restartProgress, 95),  // 最多显示 95%，留 5% 给完成
                     message: `正在等待服务恢复... (${waitSeconds}秒)`
                   }))
 
@@ -584,6 +593,7 @@ export const Scrapers = () => {
                       // 服务恢复，刷新界面
                       setDownloadProgress(prev => ({
                         ...prev,
+                        progress: 100,
                         message: '服务已恢复，正在刷新...'
                       }))
                       await new Promise(resolve => setTimeout(resolve, 500))
@@ -593,7 +603,8 @@ export const Scrapers = () => {
                         total: 0,
                         progress: 0,
                         message: '',
-                        scraper: ''
+                        scraper: '',
+                        isRestarting: false
                       })
                       messageApi.success('容器重启完成')
                       getInfo()
@@ -606,12 +617,14 @@ export const Scrapers = () => {
                     console.log(`等待服务恢复... (${waitSeconds}秒)`)
                   }
 
-                  // 等待 interval 毫秒，同时更新秒数
-                  for (let j = 0; j < interval / 1000; j++) {
+                  // 等待 checkInterval 毫秒，同时更新秒数
+                  for (let j = 0; j < checkInterval / 1000; j++) {
                     await new Promise(resolve => setTimeout(resolve, 1000))
                     waitSeconds++
+                    const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
                     setDownloadProgress(prev => ({
                       ...prev,
+                      progress: Math.min(restartProgress, 95),
                       message: `正在等待服务恢复... (${waitSeconds}秒)`
                     }))
                   }
@@ -624,7 +637,8 @@ export const Scrapers = () => {
                   total: 0,
                   progress: 0,
                   message: '',
-                  scraper: ''
+                  scraper: '',
+                  isRestarting: false
                 })
                 messageApi.warning('容器重启超时，请手动刷新页面')
                 setLoadingResources(false)
@@ -646,7 +660,8 @@ export const Scrapers = () => {
               total: 0,
               progress: 0,
               message: '',
-              scraper: ''
+              scraper: '',
+              isRestarting: false
             })
             setLoadingResources(false)
             throw new Error('任务失败，停止 SSE')
@@ -710,7 +725,8 @@ export const Scrapers = () => {
                       total: 0,
                       progress: 0,
                       message: '',
-                      scraper: ''
+                      scraper: '',
+                      isRestarting: false
                     })
                     getInfo()
                     loadVersionInfo()
@@ -724,7 +740,8 @@ export const Scrapers = () => {
                     total: 0,
                     progress: 0,
                     message: '',
-                    scraper: ''
+                    scraper: '',
+                    isRestarting: false
                   })
                   setLoadingResources(false)
                 } else {
@@ -736,7 +753,8 @@ export const Scrapers = () => {
                     total: 0,
                     progress: 0,
                     message: '',
-                    scraper: ''
+                    scraper: '',
+                    isRestarting: false
                   })
                   setLoadingResources(false)
                 }
@@ -749,7 +767,8 @@ export const Scrapers = () => {
                   total: 0,
                   progress: 0,
                   message: '',
-                  scraper: ''
+                  scraper: '',
+                  isRestarting: false
                 })
                 setLoadingResources(false)
               }
@@ -770,7 +789,8 @@ export const Scrapers = () => {
                   total: 0,
                   progress: 0,
                   message: '',
-                  scraper: ''
+                  scraper: '',
+                  isRestarting: false
                 })
                 setLoadingResources(false)
               }, 3000)
@@ -804,7 +824,8 @@ export const Scrapers = () => {
         total: 0,
         progress: 0,
         message: '正在启动下载任务...',
-        scraper: ''
+        scraper: '',
+        isRestarting: false
       })
 
       // 启动后台下载任务
@@ -838,7 +859,8 @@ export const Scrapers = () => {
         total: 0,
         progress: 0,
         message: '',
-        scraper: ''
+        scraper: '',
+        isRestarting: false
       })
       setLoadingResources(false)
     }
@@ -1511,38 +1533,49 @@ export const Scrapers = () => {
           {downloadProgress.visible && (
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm text-gray-600">{downloadProgress.message}</span>
-                <Button
-                  size="small"
-                  danger
-                  onClick={async () => {
-                    if (currentDownloadTaskId.current) {
-                      try {
-                        await cancelScraperDownload(currentDownloadTaskId.current)
-                        messageApi.warning('已取消下载')
-                      } catch (e) {
-                        console.error('取消下载失败:', e)
+                <span className="text-sm text-gray-600">
+                  {downloadProgress.isRestarting && (
+                    <span className="inline-block mr-2 animate-spin">⏳</span>
+                  )}
+                  {downloadProgress.message}
+                </span>
+                {!downloadProgress.isRestarting && (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={async () => {
+                      if (currentDownloadTaskId.current) {
+                        try {
+                          await cancelScraperDownload(currentDownloadTaskId.current)
+                          messageApi.warning('已取消下载')
+                        } catch (e) {
+                          console.error('取消下载失败:', e)
+                        }
+                        currentDownloadTaskId.current = null
                       }
-                      currentDownloadTaskId.current = null
-                    }
-                    setDownloadProgress({
-                      visible: false,
-                      current: 0,
-                      total: 0,
-                      progress: 0,
-                      message: '',
-                      scraper: ''
-                    })
-                    setLoadingResources(false)
-                  }}
-                >
-                  取消
-                </Button>
+                      setDownloadProgress({
+                        visible: false,
+                        current: 0,
+                        total: 0,
+                        progress: 0,
+                        message: '',
+                        scraper: '',
+                        isRestarting: false
+                      })
+                      setLoadingResources(false)
+                    }}
+                  >
+                    取消
+                  </Button>
+                )}
               </div>
               <Progress
                 percent={downloadProgress.progress}
-                status={downloadProgress.progress === 100 ? 'success' : 'active'}
-                strokeColor={{
+                status={downloadProgress.isRestarting ? 'active' : (downloadProgress.progress === 100 ? 'success' : 'active')}
+                strokeColor={downloadProgress.isRestarting ? {
+                  '0%': '#faad14',
+                  '100%': '#52c41a',
+                } : {
                   '0%': '#108ee9',
                   '100%': '#87d068',
                 }}
