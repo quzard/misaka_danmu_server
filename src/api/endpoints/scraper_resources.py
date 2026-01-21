@@ -1585,6 +1585,7 @@ async def download_progress_stream(
                 "skipped_count": len(current_task.progress.skipped),
                 "failed_count": len(current_task.progress.failed),
                 "error_message": current_task.error_message,
+                "need_restart": current_task.need_restart or current_task.restart_pending,  # 添加重启标记
             }
 
             # 发送新消息
