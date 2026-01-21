@@ -551,16 +551,18 @@ export const Scrapers = () => {
                 message: '弹幕源更新完成，容器正在重启中...'
               }))
 
-              // 轮询检测服务是否恢复，最多等待 60 秒
+              // 轮询检测服务是否恢复，最多等待 120 秒
               const checkServiceReady = async () => {
-                const maxAttempts = 30  // 最多尝试 30 次
+                const maxAttempts = 60  // 最多尝试 60 次
                 const interval = 2000   // 每 2 秒检测一次
 
+                // 先等待 5 秒，让容器有时间开始重启
+                await new Promise(resolve => setTimeout(resolve, 5000))
+
                 for (let i = 0; i < maxAttempts; i++) {
-                  await new Promise(resolve => setTimeout(resolve, interval))
                   try {
-                    // 尝试请求健康检查接口
-                    const response = await fetch('/api/health', {
+                    // 使用 /api/ui/version 接口检测服务是否完全启动
+                    const response = await fetch('/api/ui/version', {
                       method: 'GET',
                       signal: AbortSignal.timeout(3000)
                     })
@@ -584,6 +586,7 @@ export const Scrapers = () => {
                     // 服务还未恢复，继续等待
                     console.log(`等待服务恢复... (${i + 1}/${maxAttempts})`)
                   }
+                  await new Promise(resolve => setTimeout(resolve, interval))
                 }
 
                 // 超时，关闭进度条并提示用户手动刷新
