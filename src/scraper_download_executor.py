@@ -502,6 +502,10 @@ class ScraperDownloadExecutor:
                 self._log("将在 3 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
 
+                # 设置重启标记，让 SSE 发送终止消息
+                self.task.need_restart = True
+                self.task.restart_pending = True
+
                 # 先设置任务状态为完成
                 self.task.status = TaskStatus.COMPLETED
 
@@ -516,19 +520,28 @@ class ScraperDownloadExecutor:
                 sys.stderr.flush()
 
                 # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                # 增加等待时间，确保前端收到终止消息
+                logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
                 await asyncio.sleep(3.0)
+                logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
 
                 fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
                 result = await restart_container(fallback_name)
                 if result.get("success"):
                     container_id = result.get("container_id", "unknown")
-                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
+                    logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                    # 刷新日志
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
                 else:
                     self._log(f"重启容器失败: {result.get('message')}")
                     logger.warning(f"重启容器失败: {result.get('message')}")
                     # 重启失败时提示用户手动重启
                     self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+                    # 清除重启标记
+                    self.task.restart_pending = False
 
                 # 任务状态已在上面设置，直接返回
                 return
@@ -708,6 +721,10 @@ class ScraperDownloadExecutor:
                     self._log("将在 3 秒后重启容器...")
                     logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
 
+                    # 设置重启标记，让 SSE 发送终止消息
+                    self.task.need_restart = True
+                    self.task.restart_pending = True
+
                     # 先设置任务状态为完成
                     self.task.status = TaskStatus.COMPLETED
 
@@ -722,19 +739,28 @@ class ScraperDownloadExecutor:
                     sys.stderr.flush()
 
                     # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
+                    # 增加等待时间，确保前端收到终止消息
+                    logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
                     await asyncio.sleep(3.0)
+                    logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
 
                     fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
                     result = await restart_container(fallback_name)
                     if result.get("success"):
                         container_id = result.get("container_id", "unknown")
-                        self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                        logger.info(f"已向容器发送重启指令 (ID: {container_id})")
+                        logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                        # 刷新日志
+                        for handler in logging.getLogger().handlers:
+                            handler.flush()
+                        sys.stdout.flush()
+                        sys.stderr.flush()
                     else:
                         self._log(f"重启容器失败: {result.get('message')}")
                         logger.warning(f"重启容器失败: {result.get('message')}")
                         # 重启失败时提示用户手动重启
                         self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+                        # 清除重启标记
+                        self.task.restart_pending = False
 
                     # 任务状态已在上面设置，直接返回
                     return

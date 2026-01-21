@@ -1626,9 +1626,17 @@ async def download_progress_stream(
 
             yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
 
+            # 检测是否需要重启容器（在任务完成前发送特殊消息）
+            if current_task.restart_pending:
+                # 发送重启通知，让前端知道即将重启
+                yield f"data: {json.dumps({'type': 'restart', 'message': '弹幕源更新完成，容器即将重启...'}, ensure_ascii=False)}\n\n"
+                # 发送 done 消息并退出，让前端正常关闭连接
+                yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': True}, ensure_ascii=False)}\n\n"
+                break
+
             # 任务完成则退出
             if current_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
-                yield f"data: {json.dumps({'type': 'done', 'status': current_task.status.value}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'status': current_task.status.value, 'need_restart': current_task.need_restart}, ensure_ascii=False)}\n\n"
                 break
 
             await asyncio.sleep(0.5)  # 每 0.5 秒更新一次

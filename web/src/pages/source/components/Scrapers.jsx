@@ -527,8 +527,43 @@ export const Scrapers = () => {
             }
           }
 
+          // 处理重启通知
+          if (data.type === 'restart') {
+            taskCompleted = true
+            messageApi.info(data.message || '弹幕源更新完成，容器即将重启...')
+            setDownloadProgress(prev => ({
+              ...prev,
+              progress: 100,
+              message: data.message || '弹幕源更新完成，容器即将重启...'
+            }))
+            // 不立即关闭进度条，等待 done 消息
+          }
+
           if (data.type === 'done') {
             taskCompleted = true
+
+            // 检查是否需要重启
+            if (data.need_restart) {
+              messageApi.info('弹幕源更新完成，容器正在重启中...')
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: 100,
+                message: '弹幕源更新完成，容器正在重启中...'
+              }))
+              // 延迟关闭进度条
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: ''
+                })
+                setLoadingResources(false)
+              }, 3000)
+            }
+
             // SSE 流正常结束
             throw new Error('任务完成，停止 SSE')
           }

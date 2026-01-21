@@ -54,6 +54,8 @@ class DownloadTask:
     repo_url: str = ""
     use_full_replace: bool = False
     branch: str = "main"  # 添加分支字段
+    need_restart: bool = False  # 是否需要重启容器
+    restart_pending: bool = False  # 是否正在等待重启（用于 SSE 发送终止消息）
     # 内部使用
     _cancel_event: asyncio.Event = field(default_factory=asyncio.Event)
     _asyncio_task: Optional[asyncio.Task] = None
@@ -79,6 +81,8 @@ class DownloadTask:
             "error_message": self.error_message,
             "repo_url": self.repo_url,
             "use_full_replace": self.use_full_replace,
+            "need_restart": self.need_restart,
+            "restart_pending": self.restart_pending,
         }
 
     def add_message(self, message: str):
