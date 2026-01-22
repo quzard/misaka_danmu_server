@@ -412,17 +412,48 @@ class BangumiMetadataSource(BaseMetadataSource):
         return all_results
 
     async def _perform_network_search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        """Performs the actual network search for Bangumi."""
+        """Performs the actual network search for Bangumi.
+
+        智能过滤逻辑：
+        1. 获取第一个结果的 name 和 name_cn 作为基准
+        2. 后续结果只有当其 name 包含基准 name，或 name_cn 包含基准 name_cn 时才认为是相关系列
+        3. 只对相关的结果获取详情，避免不相关结果的别名污染
+        """
         async with await self._create_client(user) as client:
+            # 只搜索动画类型 (type=2)
             search_payload = {"keyword": keyword, "filter": {"type": [2]}}
             search_response = await client.post("/v0/search/subjects", json=search_payload)
             if search_response.status_code == 404: return []
             search_response.raise_for_status()
-            
+
             search_result = BangumiSearchResponse.model_validate(search_response.json())
             if not search_result.data: return []
 
-            tasks = [self.get_details(str(subject.id), user) for subject in search_result.data]
+            # 获取第一个结果作为基准
+            first_result = search_result.data[0]
+            base_name = first_result.name or ""
+            base_name_cn = first_result.name_cn or ""
+
+            # 过滤出相关的系列作品
+            related_subjects = [first_result]  # 第一个结果一定是相关的
+
+            for subject in search_result.data[1:]:
+                subject_name = subject.name or ""
+                subject_name_cn = subject.name_cn or ""
+
+                # 检查是否是相关系列：name 包含基准 name，或 name_cn 包含基准 name_cn
+                is_related = False
+                if base_name and subject_name and base_name in subject_name:
+                    is_related = True
+                if base_name_cn and subject_name_cn and base_name_cn in subject_name_cn:
+                    is_related = True
+
+                if is_related:
+                    related_subjects.append(subject)
+
+            self.logger.info(f"Bangumi: 搜索返回 {len(search_result.data)} 个结果，过滤后保留 {len(related_subjects)} 个相关系列")
+
+            tasks = [self.get_details(str(subject.id), user) for subject in related_subjects]
             detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
             return [res for res in detailed_results if isinstance(res, models.MetadataDetailsResponse)]
 
@@ -455,11 +486,16 @@ class BangumiMetadataSource(BaseMetadataSource):
                 except (ValueError, TypeError):
                     pass
 
+            # 确保 name_cn 也被加入到 aliasesCn 中
+            aliases_cn = aliases.get("aliases_cn", [])
+            if subject.name_cn and subject.name_cn not in aliases_cn:
+                aliases_cn = [subject.name_cn] + aliases_cn
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
                 type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
-                aliasesCn=aliases.get("aliases_cn", []), year=year
+                aliasesCn=aliases_cn, year=year
             )
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
