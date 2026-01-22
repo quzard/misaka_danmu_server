@@ -417,7 +417,7 @@ class BangumiMetadataSource(BaseMetadataSource):
         智能过滤逻辑：
         1. 获取第一个结果的 name 和 name_cn 作为基准
         2. 后续结果只有当其 name 包含基准 name，或 name_cn 包含基准 name_cn 时才认为是相关系列
-        3. 只对相关的结果获取详情，避免不相关结果的别名污染
+        3. 直接从搜索结果中提取 name 和 name_cn 作为别名，不需要调用 get_details
         """
         async with await self._create_client(user) as client:
             # 只搜索动画类型 (type=2)
@@ -453,9 +453,24 @@ class BangumiMetadataSource(BaseMetadataSource):
 
             self.logger.info(f"Bangumi: 搜索返回 {len(search_result.data)} 个结果，过滤后保留 {len(related_subjects)} 个相关系列")
 
-            tasks = [self.get_details(str(subject.id), user) for subject in related_subjects]
-            detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
-            return [res for res in detailed_results if isinstance(res, models.MetadataDetailsResponse)]
+            # 直接从搜索结果中提取别名，不需要调用 get_details
+            # 每个结果有 name（日文名）和 name_cn（中文名），直接构建返回结果
+            results = []
+            for subject in related_subjects:
+                # 收集别名：name_cn 作为 aliasesCn
+                aliases_cn = [subject.name_cn] if subject.name_cn else []
+
+                results.append(models.MetadataDetailsResponse(
+                    id=str(subject.id),
+                    bangumiId=str(subject.id),
+                    title=subject.name_cn or subject.name,
+                    type="tv_series",
+                    nameJp=subject.name,
+                    imageUrl=subject.image_url,
+                    aliasesCn=aliases_cn
+                ))
+
+            return results
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         async with await self._create_client(user) as client:

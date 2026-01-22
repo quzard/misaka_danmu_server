@@ -236,9 +236,10 @@ class MetadataSourceManager:
             if isinstance(res, list):
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
 
-                # 对于 TMDB/Bangumi 等源，搜索结果不包含完整别名
+                # 对于 TMDB/TVDB/IMDB 等源，搜索结果不包含完整别名
                 # 需要对前几个结果调用 get_details 获取完整别名
-                needs_detail_fetch = provider_name in ['tmdb', 'bangumi', 'tvdb', 'imdb']
+                # 注意：Bangumi 的 search 方法内部已经调用了 get_details，不需要再次获取
+                needs_detail_fetch = provider_name in ['tmdb', 'tvdb', 'imdb']
                 detail_fetch_count = 0
                 max_detail_fetch = 3  # 最多获取前3个结果的详情
 
