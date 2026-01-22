@@ -502,15 +502,18 @@ class ScraperDownloadExecutor:
                 self._log("将在 3 秒后重启容器...")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
 
-                # 设置重启标记，让 SSE 发送终止消息
+                # 先设置任务状态为完成（但不设置 restart_pending，让 SSE 继续发送日志）
                 self.task.need_restart = True
-                self.task.restart_pending = True
-
-                # 先设置任务状态为完成
                 self.task.status = TaskStatus.COMPLETED
 
                 # 持久化任务状态到缓存（容器重启后前端可查询）
                 await self._persist_task_status("completed", need_restart=True)
+
+                # 等待 1 秒让 SSE 发送最新的日志消息（SSE 每 0.5 秒轮询一次）
+                await asyncio.sleep(1.0)
+
+                # 现在设置 restart_pending，让 SSE 发送终止消息并退出
+                self.task.restart_pending = True
 
                 # 刷新日志缓冲区，确保日志输出
                 import sys
@@ -519,12 +522,11 @@ class ScraperDownloadExecutor:
                 sys.stdout.flush()
                 sys.stderr.flush()
 
-                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-                # 增加等待时间，确保前端收到终止消息
+                # 等待 SSE 发送 done 消息（再等 2 秒）
                 logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
                 for handler in logging.getLogger().handlers:
                     handler.flush()
-                await asyncio.sleep(3.0)
+                await asyncio.sleep(2.0)
                 logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
                 for handler in logging.getLogger().handlers:
                     handler.flush()
@@ -688,6 +690,13 @@ class ScraperDownloadExecutor:
             deploy_count = len(deployed)
             self._log(f"✓ 成功部署 {deploy_count} 个弹幕源")
 
+            # 刷新日志缓冲区，确保部署完成日志输出
+            import sys
+            for handler in logging.getLogger().handlers:
+                handler.flush()
+            sys.stdout.flush()
+            sys.stderr.flush()
+
             # 部署成功后，更新 package.json 和 versions.json 到 scrapers 目录
             self._log("正在更新版本信息...")
 
@@ -748,15 +757,18 @@ class ScraperDownloadExecutor:
                     self._log("将在 3 秒后重启容器...")
                     logger.info(f"用户 '{self.current_user.username}' 增量更新了 {deploy_count} 个弹幕源，即将重启容器")
 
-                    # 设置重启标记，让 SSE 发送终止消息
+                    # 先设置任务状态为完成（但不设置 restart_pending，让 SSE 继续发送日志）
                     self.task.need_restart = True
-                    self.task.restart_pending = True
-
-                    # 先设置任务状态为完成
                     self.task.status = TaskStatus.COMPLETED
 
                     # 持久化任务状态到缓存（容器重启后前端可查询）
                     await self._persist_task_status("completed", need_restart=True)
+
+                    # 等待 1 秒让 SSE 发送最新的日志消息（SSE 每 0.5 秒轮询一次）
+                    await asyncio.sleep(1.0)
+
+                    # 现在设置 restart_pending，让 SSE 发送终止消息并退出
+                    self.task.restart_pending = True
 
                     # 刷新日志缓冲区，确保日志输出
                     import sys
@@ -765,12 +777,11 @@ class ScraperDownloadExecutor:
                     sys.stdout.flush()
                     sys.stderr.flush()
 
-                    # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-                    # 增加等待时间，确保前端收到终止消息
+                    # 等待 SSE 发送 done 消息（再等 2 秒）
                     logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
                     for handler in logging.getLogger().handlers:
                         handler.flush()
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(2.0)
                     logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
                     for handler in logging.getLogger().handlers:
                         handler.flush()
@@ -1044,6 +1055,13 @@ class ScraperDownloadExecutor:
 
             deployed.append(scraper_name)
             self._log(f"✓ 已部署: {scraper_name}")
+
+        # 刷新日志缓冲区，确保部署日志输出
+        import sys
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        sys.stdout.flush()
+        sys.stderr.flush()
 
         return deployed, failed
 
