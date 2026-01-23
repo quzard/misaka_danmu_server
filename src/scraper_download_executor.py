@@ -866,9 +866,37 @@ class ScraperDownloadExecutor:
         hashes_data = {}
 
         # 读取本地 versions.json
+        # 优先从 backup 目录读取（因为非首次下载时只更新 backup 目录）
+        # 如果 backup 目录没有，再从 scrapers 目录读取
         local_hashes = {}
-        versions_file = scrapers_dir / "versions.json"
-        if versions_file.exists():
+        from .api.endpoints.scraper_resources import BACKUP_DIR
+        backup_versions_file = BACKUP_DIR / "versions.json"
+        scrapers_versions_file = scrapers_dir / "versions.json"
+
+        # 选择更新的 versions.json 文件
+        versions_file = None
+        if backup_versions_file.exists() and scrapers_versions_file.exists():
+            # 两个都存在，比较 updated_at 时间戳，选择更新的
+            try:
+                backup_data = json.loads(await asyncio.to_thread(backup_versions_file.read_text))
+                scrapers_data = json.loads(await asyncio.to_thread(scrapers_versions_file.read_text))
+                backup_time = backup_data.get('updated_at', '')
+                scrapers_time = scrapers_data.get('updated_at', '')
+                if backup_time >= scrapers_time:
+                    versions_file = backup_versions_file
+                    self._log("使用备份目录的版本信息（更新）")
+                else:
+                    versions_file = scrapers_versions_file
+                    self._log("使用 scrapers 目录的版本信息")
+            except Exception:
+                versions_file = backup_versions_file if backup_versions_file.exists() else scrapers_versions_file
+        elif backup_versions_file.exists():
+            versions_file = backup_versions_file
+            self._log("使用备份目录的版本信息")
+        elif scrapers_versions_file.exists():
+            versions_file = scrapers_versions_file
+
+        if versions_file and versions_file.exists():
             try:
                 local_versions = json.loads(await asyncio.to_thread(versions_file.read_text))
                 local_hashes = local_versions.get('hashes', {})
