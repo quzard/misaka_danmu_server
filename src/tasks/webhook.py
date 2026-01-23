@@ -22,6 +22,7 @@ from ..utils import parse_search_keyword
 from ..ai.ai_matcher_manager import AIMatcherManager
 from ..season_mapper import ai_type_and_season_mapping_and_correction
 from ..search_timer import SearchTimer, SEARCH_TYPE_WEBHOOK
+from ..name_converter import convert_to_chinese_title
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,20 @@ async def webhook_search_and_dispatch_task(
         webhook_tmdb_enabled = await config_manager.get("webhookEnableTmdbSeasonMapping", "true")
         if webhook_tmdb_enabled.lower() != "true":
             logger.info("○ Webhook 统一AI映射: 功能未启用")
+
+        # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在预处理规则之前执行）
+        # 创建一个虚拟用户用于元数据调用
+        webhook_user = models.User(id=0, username="webhook")
+        converted_title, conversion_applied = await convert_to_chinese_title(
+            original_title,
+            config_manager,
+            metadata_manager,
+            ai_matcher_manager,
+            webhook_user
+        )
+        if conversion_applied:
+            logger.info(f"✓ Webhook 名称转换: '{original_title}' → '{converted_title}'")
+            original_title = converted_title  # 更新 original_title 用于后续处理
 
         # 应用与 WebUI 一致的标题预处理规则
         search_title = original_title

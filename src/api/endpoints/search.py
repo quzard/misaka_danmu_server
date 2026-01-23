@@ -10,7 +10,6 @@ import hashlib
 import importlib
 import string
 import time
-import json
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
@@ -45,6 +44,7 @@ from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
 from ...search_timer import SearchTimer, SEARCH_TYPE_HOME
+from ...name_converter import convert_to_chinese_title
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +116,26 @@ async def search_anime_provider(
         episode_to_filter = parsed_keyword["episode"]
         timer.step_end()
 
+        # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在所有处理之前执行）
+        timer.step_start("名称转换")
+        converted_original_title, conversion_applied = await convert_to_chinese_title(
+            original_title,
+            config_manager,
+            metadata_manager,
+            ai_matcher_manager,
+            current_user
+        )
+        timer.step_end()
+
         # 应用搜索预处理规则
         timer.step_start("预处理规则应用")
-        search_title = original_title
+        search_title = converted_original_title  # 使用转换后的标题作为基础
         search_season = season_to_filter
         if title_recognition_manager:
-            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter, season_to_filter)
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(converted_original_title, episode_to_filter, season_to_filter)
             if preprocessing_applied:
                 search_title = processed_title
-                logger.info(f"✓ WebUI搜索预处理: '{original_title}' -> '{search_title}'")
+                logger.info(f"✓ WebUI搜索预处理: '{converted_original_title}' -> '{search_title}'")
                 # 如果集数发生了变化，更新episode_to_filter
                 if processed_episode != episode_to_filter:
                     episode_to_filter = processed_episode
@@ -135,7 +146,7 @@ async def search_anime_provider(
                     season_to_filter = processed_season
                     logger.info(f"✓ WebUI季度预处理: {parsed_keyword['season']} -> {season_to_filter}")
             else:
-                logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
+                logger.info(f"○ WebUI搜索预处理未生效: '{converted_original_title}'")
         timer.step_end()
 
         # 🚀 新增：季度名称映射 - 如果指定了季度，尝试获取该季度的实际名称
