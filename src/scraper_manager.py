@@ -111,12 +111,46 @@ class ScraperManager:
             if f.is_file()
         )
 
-        # 如果没有弹幕源文件但有备份,自动恢复
+        # 检查是否需要从备份恢复
+        # 情况1: scrapers 目录为空但有备份
+        # 情况2: 备份目录有更新的文件（通过比较 versions.json 的 updated_at 时间戳）
+        should_restore = False
+        restore_reason = ""
+
         if not has_scrapers and backup_dir.exists():
             backup_files = list(backup_dir.glob("*.so")) + list(backup_dir.glob("*.pyd"))
             if backup_files:
+                should_restore = True
+                restore_reason = f"scrapers 目录为空但存在备份 ({len(backup_files)} 个文件)"
+        elif has_scrapers and backup_dir.exists():
+            # 检查备份是否比当前更新（通过 versions.json 的 updated_at 字段）
+            import json
+            scrapers_versions_file = scrapers_dir / "versions.json"
+            backup_versions_file = backup_dir / "versions.json"
+
+            if backup_versions_file.exists():
+                try:
+                    backup_data = json.loads(backup_versions_file.read_text())
+                    backup_updated_at = backup_data.get("updated_at", "")
+
+                    scrapers_updated_at = ""
+                    if scrapers_versions_file.exists():
+                        scrapers_data = json.loads(scrapers_versions_file.read_text())
+                        scrapers_updated_at = scrapers_data.get("updated_at", "")
+
+                    # 如果备份的更新时间比 scrapers 的更新时间新，则恢复
+                    if backup_updated_at and backup_updated_at > scrapers_updated_at:
+                        should_restore = True
+                        restore_reason = f"备份目录有更新 (backup: {backup_updated_at}, scrapers: {scrapers_updated_at or 'N/A'})"
+                except Exception as e:
+                    logging.getLogger(__name__).debug(f"比较版本信息失败: {e}")
+
+        if should_restore:
+            backup_files = list(backup_dir.glob("*.so")) + list(backup_dir.glob("*.pyd"))
+            if backup_files:
                 import shutil
-                logging.getLogger(__name__).info(f"检测到 scrapers 目录为空但存在备份,正在自动恢复 {len(backup_files)} 个文件...")
+                logging.getLogger(__name__).info(f"检测到需要从备份恢复: {restore_reason}")
+                logging.getLogger(__name__).info(f"正在恢复 {len(backup_files)} 个弹幕源文件...")
                 for file in backup_files:
                     shutil.copy2(file, scrapers_dir / file.name)
 
