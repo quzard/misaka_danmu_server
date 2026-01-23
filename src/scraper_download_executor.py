@@ -873,6 +873,9 @@ class ScraperDownloadExecutor:
                 local_versions = json.loads(await asyncio.to_thread(versions_file.read_text))
                 local_hashes = local_versions.get('hashes', {})
                 self._log(f"已读取本地版本信息，包含 {len(local_hashes)} 个哈希值")
+                # 调试：显示本地哈希值的 key
+                if local_hashes:
+                    self._log(f"本地哈希值 keys: {list(local_hashes.keys())[:5]}...", "debug")
             except Exception as e:
                 self._log(f"读取本地版本文件失败: {e}", "warning")
 
@@ -896,6 +899,13 @@ class ScraperDownloadExecutor:
                 hashes_data[scraper_name] = remote_hash
             else:
                 to_download.append((scraper_name, scraper_info, file_path, filename, remote_hash))
+                # 调试日志：显示哈希不匹配的原因
+                if not remote_hash:
+                    self._log(f"  {scraper_name}: 远程无哈希值", "debug")
+                elif not local_hash:
+                    self._log(f"  {scraper_name}: 本地无哈希值", "debug")
+                else:
+                    self._log(f"  {scraper_name}: 哈希不匹配 (本地: {local_hash[:16]}..., 远程: {remote_hash[:16]}...)", "debug")
 
         return to_download, to_skip, unsupported, versions_data, hashes_data
 
@@ -1192,7 +1202,8 @@ class ScraperDownloadExecutor:
 
         # 构建完整的 versions.json
         versions_json = {
-            "platform": platform_info,
+            "platform": platform_info.get('platform', 'unknown'),
+            "type": platform_info.get('arch', 'unknown'),
             "scrapers": existing_scrapers,
             "hashes": existing_hashes,
             "updated_at": datetime.now().isoformat()
@@ -1231,6 +1242,7 @@ class ScraperDownloadExecutor:
                 "type": platform_info['arch'],
                 "version": package_data.get("version", "unknown"),
                 "scrapers": merged_scrapers,
+                "updated_at": datetime.now().isoformat()
             }
 
             if merged_hashes:
@@ -1252,7 +1264,7 @@ class ScraperDownloadExecutor:
         except Exception as e:
             logger.warning(f"清除版本缓存失败: {e}")
 
-    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):  # noqa: ARG002
+    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):
         """全量替换后更新 versions.json"""
         try:
             platform_info = get_platform_info()
@@ -1273,12 +1285,11 @@ class ScraperDownloadExecutor:
                             version = scraper_info.get('version')
                             if version:
                                 scrapers_versions[scraper_name] = version
-                            # 提取哈希值
+                            # 提取哈希值 - 使用 platform_key (如 linux-x86) 而不是 platform_arch 组合
                             hashes = scraper_info.get('hashes', {})
-                            hash_key = f"{platform_info['platform']}_{platform_info['arch']}"
-                            if hash_key in hashes:
-                                scrapers_hashes[scraper_name] = hashes[hash_key]
-                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息")
+                            if platform_key in hashes:
+                                scrapers_hashes[scraper_name] = hashes[platform_key]
+                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息, {len(scrapers_hashes)} 个哈希值")
                 except Exception as e:
                     logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
 
@@ -1290,14 +1301,25 @@ class ScraperDownloadExecutor:
                 "scrapers": scrapers_versions,
                 "hashes": scrapers_hashes,
                 "full_replace": True,
-                "update_time": datetime.now().isoformat()
+                "updated_at": datetime.now().isoformat()  # 使用 updated_at 与其他地方保持一致
             }
 
-            # 写入 versions.json
+            # 写入 versions.json 到 scrapers 目录
             versions_file = scrapers_dir / "versions.json"
             versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
             await asyncio.to_thread(versions_file.write_text, versions_json_str)
             logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
+
+            # 同步到 backup 目录
+            from .api.endpoints.scraper_resources import BACKUP_DIR
+            import shutil
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            backup_versions_file = BACKUP_DIR / "versions.json"
+            backup_package_file = BACKUP_DIR / "package.json"
+            shutil.copy2(versions_file, backup_versions_file)
+            if local_package_file.exists():
+                shutil.copy2(local_package_file, backup_package_file)
+            logger.info("已同步版本信息到备份目录")
 
             # 同时更新 package.json 的版本号（前端从这里读取整体版本）
             try:
