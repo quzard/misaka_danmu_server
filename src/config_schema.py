@@ -234,6 +234,43 @@ CONFIG_SCHEMA = [
             },
         ],
     },
+    {
+        "key": "name_conversion",
+        "label": "名称转换",
+        "items": [
+            {
+                "key": "nameConversionEnabled",
+                "label": "启用名称转换",
+                "type": "boolean",
+                "description": "搜索时自动将非中文名称转换为中文，提高在中文弹幕源中的搜索准确率。元数据源都失败时，若启用了AI名称转换则使用AI兜底。",
+            },
+        ],
+        "customComponent": {
+            "type": "SortablePriorityList",
+            "props": {
+                "configKey": "nameConversionSourcePriority",
+                "title": "元数据源查询优先级",
+                "titleIcon": "🔢",
+                "description": "名称转换时会并行查询所有启用的元数据源，按优先级顺序返回第一个有结果的中文名称。",
+                "availableItems": [
+                    {"key": "bangumi", "name": "Bangumi", "description": "动漫数据库，中文名称准确"},
+                    {"key": "tmdb", "name": "TMDB", "description": "影视数据库，覆盖范围广"},
+                    {"key": "tvdb", "name": "TVDB", "description": "电视剧数据库"},
+                    {"key": "douban", "name": "Douban", "description": "豆瓣，国产剧/电影中文名称准确"},
+                    {"key": "imdb", "name": "IMDB", "description": "国际电影数据库"},
+                ],
+                "tips": [
+                    "拖拽调整优先级顺序，排在前面的源优先使用",
+                    "关闭开关可禁用该源的查询",
+                    "Bangumi 对动漫的中文名称更准确",
+                    "Douban 对国产剧/电影的中文名称更准确",
+                    "TMDB 覆盖范围更广，包含电影和电视剧",
+                    "元数据源都失败时，若启用了AI名称转换则使用AI兜底",
+                ],
+                "showSwitch": True,
+            },
+        },
+    },
 ]
 
 

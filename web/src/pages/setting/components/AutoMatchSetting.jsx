@@ -22,6 +22,7 @@ const AutoMatchSetting = () => {
   const [fallbackEnabled, setFallbackEnabled] = useState(false)
   const [recognitionEnabled, setRecognitionEnabled] = useState(false)
   const [aliasExpansionEnabled, setAliasExpansionEnabled] = useState(false)
+  const [nameConversionEnabled, setNameConversionEnabled] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [selectedMetadataSource, setSelectedMetadataSource] = useState('tmdb')
@@ -32,6 +33,7 @@ const AutoMatchSetting = () => {
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
   const [dynamicModels, setDynamicModels] = useState({}) // 动态获取的模型列表，按提供商ID存储
   const [refreshingModels, setRefreshingModels] = useState(false) // 是否正在刷新模型列表
+  const [selectedPromptType, setSelectedPromptType] = useState('aiRecognitionPrompt') // 当前选中的提示词类型
   const isMobile = useAtomValue(isMobileAtom)
 
   // 加载配置
@@ -52,6 +54,8 @@ const AutoMatchSetting = () => {
         aliasCorrectionEnabledRes,
         aliasExpansionEnabledRes,
         aliasExpansionPromptRes,
+        nameConversionEnabledRes,
+        nameConversionPromptRes,
         logRawResponseRes,
         homeSearchSeasonMappingRes,
         fallbackSearchSeasonMappingRes,
@@ -75,6 +79,8 @@ const AutoMatchSetting = () => {
         getConfig('aiAliasCorrectionEnabled'),
         getConfig('aiAliasExpansionEnabled'),
         getConfig('aiAliasExpansionPrompt'),
+        getConfig('aiNameConversionEnabled'),
+        getConfig('aiNameConversionPrompt'),
         getConfig('aiLogRawResponse'),
         getConfig('homeSearchEnableTmdbSeasonMapping'),
         getConfig('fallbackSearchEnableTmdbSeasonMapping'),
@@ -91,11 +97,13 @@ const AutoMatchSetting = () => {
       const recognition = recognitionEnabledRes.data.value === 'true'
       const aliasCorrection = aliasCorrectionEnabledRes.data.value === 'true'
       const aliasExpansion = aliasExpansionEnabledRes.data.value === 'true'
+      const nameConversion = nameConversionEnabledRes.data.value === 'true'
       const logRawResponse = logRawResponseRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
       setRecognitionEnabled(recognition)
       setAliasExpansionEnabled(aliasExpansion)
+      setNameConversionEnabled(nameConversion)
       setSelectedMetadataSource(seasonMappingSourceRes.data.value || 'tmdb')
 
       const providerValue = providerRes.data.value || 'deepseek'
@@ -114,6 +122,8 @@ const AutoMatchSetting = () => {
         aiAliasCorrectionEnabled: aliasCorrection,
         aiAliasExpansionEnabled: aliasExpansion,
         aiAliasExpansionPrompt: aliasExpansionPromptRes.data.value || '',
+        aiNameConversionEnabled: nameConversion,
+        aiNameConversionPrompt: nameConversionPromptRes.data.value || '',
         aiLogRawResponse: logRawResponse,
         homeSearchEnableTmdbSeasonMapping: homeSearchSeasonMappingRes.data.value === 'true',
         fallbackSearchEnableTmdbSeasonMapping: fallbackSearchSeasonMappingRes.data.value === 'true',
@@ -301,7 +311,9 @@ const AutoMatchSetting = () => {
         setConfig('aiAliasValidationPrompt', values.aiAliasValidationPrompt || ''),
         setConfig('aiAliasCorrectionEnabled', values.aiAliasCorrectionEnabled ? 'true' : 'false'),
         setConfig('aiAliasExpansionEnabled', values.aiAliasExpansionEnabled ? 'true' : 'false'),
-        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || '')
+        setConfig('aiAliasExpansionPrompt', values.aiAliasExpansionPrompt || ''),
+        setConfig('aiNameConversionEnabled', values.aiNameConversionEnabled ? 'true' : 'false'),
+        setConfig('aiNameConversionPrompt', values.aiNameConversionPrompt || '')
       ])
 
       message.success('AI识别增强配置保存成功')
@@ -976,7 +988,7 @@ const AutoMatchSetting = () => {
             {/* 标签页3: AI识别增强 */}
             <TabPane tab="AI识别增强" key="recognition">
               <Row gutter={[16, 16]}>
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={6}>
                   <Card size="small" style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -986,12 +998,15 @@ const AutoMatchSetting = () => {
                         </Tooltip>
                       </div>
                       <Form.Item name="aiRecognitionEnabled" valuePropName="checked" noStyle>
-                        <CustomSwitch disabled={matchMode !== 'ai'} />
+                        <CustomSwitch
+                          disabled={matchMode !== 'ai'}
+                          onChange={(checked) => setRecognitionEnabled(checked)}
+                        />
                       </Form.Item>
                     </div>
                   </Card>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={6}>
                   <Card size="small" style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1006,7 +1021,7 @@ const AutoMatchSetting = () => {
                     </div>
                   </Card>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={6}>
                   <Card size="small" style={{ marginBottom: '16px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1016,108 +1031,146 @@ const AutoMatchSetting = () => {
                         </Tooltip>
                       </div>
                       <Form.Item name="aiAliasExpansionEnabled" valuePropName="checked" noStyle>
-                        <CustomSwitch disabled={matchMode !== 'ai'} />
+                        <CustomSwitch
+                          disabled={matchMode !== 'ai'}
+                          onChange={(checked) => setAliasExpansionEnabled(checked)}
+                        />
+                      </Form.Item>
+                    </div>
+                  </Card>
+                </Col>
+                <Col xs={24} sm={6}>
+                  <Card size="small" style={{ marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontWeight: 500 }}>AI名称转换</span>
+                        <Tooltip title="在搜索前将非中文搜索词（英文、日文、罗马音等）转换为中文名称，提高在中文弹幕源中的搜索准确率。当元数据源查询失败时作为兜底方案。">
+                          <QuestionCircleOutlined />
+                        </Tooltip>
+                      </div>
+                      <Form.Item name="aiNameConversionEnabled" valuePropName="checked" noStyle>
+                        <CustomSwitch
+                          disabled={matchMode !== 'ai'}
+                          onChange={(checked) => setNameConversionEnabled(checked)}
+                        />
                       </Form.Item>
                     </div>
                   </Card>
                 </Col>
               </Row>
 
+              {/* 提示词配置区域 - 下拉框切换 */}
               <Card size="small" style={{ marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <Space>
+                    <span style={{ fontWeight: 500 }}>提示词配置</span>
+                    <Select
+                      value={selectedPromptType}
+                      onChange={setSelectedPromptType}
+                      style={{ width: 200 }}
+                      disabled={matchMode !== 'ai'}
+                    >
+                      <Option value="aiRecognitionPrompt">AI识别提示词</Option>
+                      <Option value="aiAliasValidationPrompt">AI别名验证提示词</Option>
+                      <Option value="aiAliasExpansionPrompt">AI别名扩展提示词</Option>
+                      <Option value="aiNameConversionPrompt">AI名称转换提示词</Option>
+                    </Select>
+                    <Tooltip title={
+                      selectedPromptType === 'aiRecognitionPrompt'
+                        ? "用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。"
+                        : selectedPromptType === 'aiAliasValidationPrompt'
+                        ? "用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型并验证是否真正属于该作品。"
+                        : selectedPromptType === 'aiAliasExpansionPrompt'
+                        ? "用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名。"
+                        : "用于指导AI如何将非中文名称转换为中文名称的提示词。"
+                    }>
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </Space>
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={() => handleFillDefaultPrompt(selectedPromptType)}
+                    disabled={matchMode !== 'ai' || (
+                      (selectedPromptType === 'aiRecognitionPrompt' && !recognitionEnabled) ||
+                      (selectedPromptType === 'aiAliasValidationPrompt' && !recognitionEnabled) ||
+                      (selectedPromptType === 'aiAliasExpansionPrompt' && !aliasExpansionEnabled) ||
+                      (selectedPromptType === 'aiNameConversionPrompt' && !nameConversionEnabled)
+                    )}
+                  >
+                    填充默认提示词
+                  </Button>
+                </div>
+
+                {/* AI识别提示词 */}
                 <Form.Item
                   name="aiRecognitionPrompt"
-                  label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI识别提示词</span>
-                        <Tooltip title="用于指导AI如何从标题中提取结构化信息的提示词。留空使用默认提示词。高级用户可自定义以优化识别效果。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
-                      <Button
-                        size="small"
-                        icon={<ReloadOutlined />}
-                        onClick={() => handleFillDefaultPrompt('aiRecognitionPrompt')}
-                        disabled={matchMode !== 'ai' || !recognitionEnabled}
-                      >
-                        填充默认提示词
-                      </Button>
-                    </div>
-                  }
-                  labelCol={{ span: 24 }}
-                  wrapperCol={{ span: 24 }}
+                  noStyle
+                  style={{ display: selectedPromptType === 'aiRecognitionPrompt' ? 'block' : 'none' }}
                 >
                   <TextArea
-                    rows={6}
+                    rows={10}
                     placeholder="留空使用默认提示词..."
-                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      display: selectedPromptType === 'aiRecognitionPrompt' ? 'block' : 'none'
+                    }}
                     disabled={matchMode !== 'ai' || !recognitionEnabled}
                   />
                 </Form.Item>
-              </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+                {/* AI别名验证提示词 */}
                 <Form.Item
                   name="aiAliasValidationPrompt"
-                  label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI别名验证提示词</span>
-                        <Tooltip title="用于指导AI如何验证和分类别名的提示词。AI会识别别名的语言类型(英文/日文/罗马音/中文)并验证是否真正属于该作品。留空使用默认提示词。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
-                      <Button
-                        size="small"
-                        icon={<ReloadOutlined />}
-                        onClick={() => handleFillDefaultPrompt('aiAliasValidationPrompt')}
-                        disabled={matchMode !== 'ai' || !recognitionEnabled}
-                      >
-                        填充默认提示词
-                      </Button>
-                    </div>
-                  }
-                  labelCol={{ span: 24 }}
-                  wrapperCol={{ span: 24 }}
+                  noStyle
+                  style={{ display: selectedPromptType === 'aiAliasValidationPrompt' ? 'block' : 'none' }}
                 >
                   <TextArea
-                    rows={6}
+                    rows={10}
                     placeholder="留空使用默认提示词..."
-                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      display: selectedPromptType === 'aiAliasValidationPrompt' ? 'block' : 'none'
+                    }}
                     disabled={matchMode !== 'ai' || !recognitionEnabled}
                   />
                 </Form.Item>
-              </Card>
 
-              <Card size="small" style={{ marginTop: '16px' }}>
+                {/* AI别名扩展提示词 */}
                 <Form.Item
                   name="aiAliasExpansionPrompt"
-                  label={
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-                      <Space>
-                        <span>AI别名扩展提示词</span>
-                        <Tooltip title="用于指导AI如何生成可能的别名的提示词。AI会生成中文译名、罗马音、英文缩写等别名，用于在中文元数据源中搜索。留空使用默认提示词。">
-                          <QuestionCircleOutlined />
-                        </Tooltip>
-                      </Space>
-                      <Button
-                        size="small"
-                        icon={<ReloadOutlined />}
-                        onClick={() => handleFillDefaultPrompt('aiAliasExpansionPrompt')}
-                        disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
-                      >
-                        填充默认提示词
-                      </Button>
-                    </div>
-                  }
-                  labelCol={{ span: 24 }}
-                  wrapperCol={{ span: 24 }}
+                  noStyle
+                  style={{ display: selectedPromptType === 'aiAliasExpansionPrompt' ? 'block' : 'none' }}
                 >
                   <TextArea
-                    rows={6}
+                    rows={10}
                     placeholder="留空使用默认提示词..."
-                    style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      display: selectedPromptType === 'aiAliasExpansionPrompt' ? 'block' : 'none'
+                    }}
                     disabled={matchMode !== 'ai' || !aliasExpansionEnabled}
+                  />
+                </Form.Item>
+
+                {/* AI名称转换提示词 */}
+                <Form.Item
+                  name="aiNameConversionPrompt"
+                  noStyle
+                  style={{ display: selectedPromptType === 'aiNameConversionPrompt' ? 'block' : 'none' }}
+                >
+                  <TextArea
+                    rows={10}
+                    placeholder="留空使用默认提示词..."
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '12px',
+                      display: selectedPromptType === 'aiNameConversionPrompt' ? 'block' : 'none'
+                    }}
+                    disabled={matchMode !== 'ai' || !nameConversionEnabled}
                   />
                 </Form.Item>
               </Card>
@@ -1164,6 +1217,9 @@ const AutoMatchSetting = () => {
               <strong>AI别名扩展</strong>: 当元数据源返回非中文标题时,使用AI生成可能的别名(中文译名、罗马音、英文缩写等),然后在Bangumi/Douban中搜索以获取中文标题
             </li>
             <li>
+              <strong>AI名称转换</strong>: 在搜索前将非中文搜索词(英文、日文、罗马音等)转换为中文名称,提高在中文弹幕源中的搜索准确率。当元数据源查询失败时作为兜底方案
+            </li>
+            <li>
               <strong>传统匹配兜底</strong>: 当AI匹配失败时,自动降级到传统匹配算法,确保功能可用性(仅AI模式下可用)
             </li>
             <li>
@@ -1172,6 +1228,7 @@ const AutoMatchSetting = () => {
                 <li>AI智能匹配: 外部控制API全自动导入、Webhook自动导入、匹配后备机制</li>
                 <li>AI辅助识别: TMDB自动刮削与剧集组映射定时任务</li>
                 <li>AI别名扩展: 外部控制API全自动导入、Webhook自动导入等场景（当元数据源返回非中文标题时）</li>
+                <li>AI名称转换: 弹幕搜索时将非中文搜索词转换为中文（元数据源查询失败时的兜底）</li>
               </ul>
             </li>
             <li>
