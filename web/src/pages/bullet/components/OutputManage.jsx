@@ -178,20 +178,22 @@ export const OutputManage = () => {
       <Card loading={loading} title="弹幕输出配置">
         <div>在这里调整弹幕 API 的输出行为。</div>
         <div className="my-4">
-          <div className="flex items-center justify-start gap-4 mb-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span>弹幕输出上限</span>
-              <InputNumber value={limit} onChange={v => setLimit(v)} />
-            </div>
-            <div className="flex items-center gap-2">
-              <span>合并输出</span>
-              <Switch
-                checked={mergeEnabled}
-                onChange={setMergeEnabled}
-              />
-              <Tooltip title="启用后，将所有源的弹幕合并后再进行均衡采样输出，而不是每个源单独采样">
-                <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-              </Tooltip>
+          <div className="flex items-center justify-between gap-4 mb-2 flex-wrap">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span>弹幕输出上限</span>
+                <InputNumber value={limit} onChange={v => setLimit(v)} />
+              </div>
+              <div className="flex items-center gap-2">
+                <span>合并输出</span>
+                <Switch
+                  checked={mergeEnabled}
+                  onChange={setMergeEnabled}
+                />
+                <Tooltip title="启用后，将所有源的弹幕合并后再进行均衡采样输出，而不是每个源单独采样">
+                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+                </Tooltip>
+              </div>
             </div>
           </div>
           <div className="text-sm text-gray-600">

@@ -412,19 +412,65 @@ class BangumiMetadataSource(BaseMetadataSource):
         return all_results
 
     async def _perform_network_search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        """Performs the actual network search for Bangumi."""
+        """Performs the actual network search for Bangumi.
+
+        智能过滤逻辑：
+        1. 获取第一个结果的 name 和 name_cn 作为基准
+        2. 后续结果只有当其 name 包含基准 name，或 name_cn 包含基准 name_cn 时才认为是相关系列
+        3. 直接从搜索结果中提取 name 和 name_cn 作为别名，不需要调用 get_details
+        """
         async with await self._create_client(user) as client:
+            # 只搜索动画类型 (type=2)
             search_payload = {"keyword": keyword, "filter": {"type": [2]}}
             search_response = await client.post("/v0/search/subjects", json=search_payload)
             if search_response.status_code == 404: return []
             search_response.raise_for_status()
-            
+
             search_result = BangumiSearchResponse.model_validate(search_response.json())
             if not search_result.data: return []
 
-            tasks = [self.get_details(str(subject.id), user) for subject in search_result.data]
-            detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
-            return [res for res in detailed_results if isinstance(res, models.MetadataDetailsResponse)]
+            # 获取第一个结果作为基准
+            first_result = search_result.data[0]
+            base_name = first_result.name or ""
+            base_name_cn = first_result.name_cn or ""
+
+            # 过滤出相关的系列作品
+            related_subjects = [first_result]  # 第一个结果一定是相关的
+
+            for subject in search_result.data[1:]:
+                subject_name = subject.name or ""
+                subject_name_cn = subject.name_cn or ""
+
+                # 检查是否是相关系列：name 包含基准 name，或 name_cn 包含基准 name_cn
+                is_related = False
+                if base_name and subject_name and base_name in subject_name:
+                    is_related = True
+                if base_name_cn and subject_name_cn and base_name_cn in subject_name_cn:
+                    is_related = True
+
+                if is_related:
+                    related_subjects.append(subject)
+
+            self.logger.info(f"Bangumi: 搜索返回 {len(search_result.data)} 个结果，过滤后保留 {len(related_subjects)} 个相关系列")
+
+            # 直接从搜索结果中提取别名，不需要调用 get_details
+            # 每个结果有 name（日文名）和 name_cn（中文名），直接构建返回结果
+            results = []
+            for subject in related_subjects:
+                # 收集别名：name_cn 作为 aliasesCn
+                aliases_cn = [subject.name_cn] if subject.name_cn else []
+
+                results.append(models.MetadataDetailsResponse(
+                    id=str(subject.id),
+                    bangumiId=str(subject.id),
+                    title=subject.name_cn or subject.name,
+                    type="tv_series",
+                    nameJp=subject.name,
+                    imageUrl=subject.image_url,
+                    aliasesCn=aliases_cn
+                ))
+
+            return results
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         async with await self._create_client(user) as client:
@@ -455,11 +501,16 @@ class BangumiMetadataSource(BaseMetadataSource):
                 except (ValueError, TypeError):
                     pass
 
+            # 确保 name_cn 也被加入到 aliasesCn 中
+            aliases_cn = aliases.get("aliases_cn", [])
+            if subject.name_cn and subject.name_cn not in aliases_cn:
+                aliases_cn = [subject.name_cn] + aliases_cn
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
                 type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
-                aliasesCn=aliases.get("aliases_cn", []), year=year
+                aliasesCn=aliases_cn, year=year
             )
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:

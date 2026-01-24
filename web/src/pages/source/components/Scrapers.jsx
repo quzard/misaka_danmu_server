@@ -232,7 +232,8 @@ export const Scrapers = () => {
     total: 0,
     progress: 0,
     message: '',
-    scraper: ''
+    scraper: '',
+    isRestarting: false  // 是否正在等待重启
   })
   const currentDownloadTaskId = useRef(null)  // 当前下载任务 ID
 
@@ -470,32 +471,43 @@ export const Scrapers = () => {
               const skippedCount = data.skipped_count || 0
               const failedCount = data.failed_count || 0
 
-              setDownloadProgress(prev => ({
-                ...prev,
-                progress: 100,
-                message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
-              }))
-
-              if (downloadedCount > 0) {
-                messageApi.success('资源加载成功')
+              // 如果需要重启，不在这里刷新，等待 done 消息中的 checkServiceReady() 处理
+              if (data.need_restart) {
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 100,
+                  message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，等待容器重启...`
+                }))
+                // 不刷新，等待 done 消息
               } else {
-                messageApi.success('所有弹幕源都是最新的')
-              }
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 100,
+                  message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
+                }))
 
-              // 延迟刷新
-              setTimeout(() => {
-                setDownloadProgress({
-                  visible: false,
-                  current: 0,
-                  total: 0,
-                  progress: 0,
-                  message: '',
-                  scraper: ''
-                })
-                getInfo()
-                loadVersionInfo()
-                setLoadingResources(false)
-              }, downloadedCount > 0 ? 2000 : 1000)
+                if (downloadedCount > 0) {
+                  messageApi.success('资源加载成功')
+                } else {
+                  messageApi.success('所有弹幕源都是最新的')
+                }
+
+                // 只有不需要重启时才延迟刷新
+                setTimeout(() => {
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  getInfo()
+                  loadVersionInfo()
+                  setLoadingResources(false)
+                }, downloadedCount > 0 ? 2000 : 1000)
+              }
             }
 
             if (data.status === 'failed') {
@@ -507,7 +519,8 @@ export const Scrapers = () => {
                 total: 0,
                 progress: 0,
                 message: '',
-                scraper: ''
+                scraper: '',
+                isRestarting: false
               })
               setLoadingResources(false)
             }
@@ -521,14 +534,161 @@ export const Scrapers = () => {
                 total: 0,
                 progress: 0,
                 message: '',
-                scraper: ''
+                scraper: '',
+                isRestarting: false
               })
               setLoadingResources(false)
             }
           }
 
+          // 处理重启通知
+          if (data.type === 'restart') {
+            taskCompleted = true
+            messageApi.info(data.message || '弹幕源更新完成，容器即将重启...')
+            setDownloadProgress(prev => ({
+              ...prev,
+              progress: 100,
+              message: data.message || '弹幕源更新完成，容器即将重启...'
+            }))
+            // 不立即关闭进度条，等待 done 消息
+          }
+
           if (data.type === 'done') {
             taskCompleted = true
+
+            // 检查是否需要重启
+            if (data.need_restart) {
+              messageApi.info('弹幕源更新完成，容器正在重启中...')
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: 0,  // 重置进度，用于显示重启等待进度
+                message: '弹幕源更新完成，容器正在重启中...',
+                isRestarting: true
+              }))
+
+              // 轮询检测服务是否恢复，最多等待 120 秒
+              const checkServiceReady = async () => {
+                const maxWaitSeconds = 120  // 最大等待时间
+                const checkInterval = 2000   // 每 2 秒检测一次
+                let waitSeconds = 0
+                let serviceWentDown = false  // 标记服务是否已经停止过
+
+                // 第一阶段：等待服务停止（最多等待 30 秒）
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: 0,
+                  message: '等待容器停止...'
+                }))
+
+                for (let i = 0; i < 30; i++) {
+                  waitSeconds++
+                  const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    progress: Math.min(restartProgress, 25),  // 第一阶段最多 25%
+                    message: `等待容器停止... (${waitSeconds}秒)`
+                  }))
+
+                  try {
+                    const response = await fetch('/api/ui/version', {
+                      method: 'GET',
+                      signal: AbortSignal.timeout(2000)
+                    })
+                    if (!response.ok) {
+                      // 服务返回错误，认为已停止
+                      serviceWentDown = true
+                      console.log('服务已停止（返回错误）')
+                      break
+                    }
+                  } catch (e) {
+                    // 服务不可用，认为已停止
+                    serviceWentDown = true
+                    console.log('服务已停止（连接失败）')
+                    break
+                  }
+
+                  await new Promise(resolve => setTimeout(resolve, 1000))
+                }
+
+                // 如果服务一直没停止，可能重启很快，继续等待恢复
+                if (!serviceWentDown) {
+                  console.log('服务似乎没有停止，可能重启非常快，继续检测...')
+                }
+
+                // 第二阶段：等待服务恢复
+                for (let i = 0; i < 60; i++) {  // 最多尝试 60 次
+                  // 更新等待状态和进度
+                  const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    progress: Math.min(restartProgress, 95),  // 最多显示 95%，留 5% 给完成
+                    message: `正在等待服务恢复... (${waitSeconds}秒)`
+                  }))
+
+                  try {
+                    // 使用 /api/ui/version 接口检测服务是否完全启动
+                    const response = await fetch('/api/ui/version', {
+                      method: 'GET',
+                      signal: AbortSignal.timeout(3000)
+                    })
+                    if (response.ok) {
+                      // 服务恢复，刷新界面
+                      setDownloadProgress(prev => ({
+                        ...prev,
+                        progress: 100,
+                        message: '服务已恢复，正在刷新...'
+                      }))
+                      await new Promise(resolve => setTimeout(resolve, 500))
+                      setDownloadProgress({
+                        visible: false,
+                        current: 0,
+                        total: 0,
+                        progress: 0,
+                        message: '',
+                        scraper: '',
+                        isRestarting: false
+                      })
+                      messageApi.success('容器重启完成')
+                      getInfo()
+                      loadVersionInfo()
+                      setLoadingResources(false)
+                      return
+                    }
+                  } catch (e) {
+                    // 服务还未恢复，继续等待
+                    console.log(`等待服务恢复... (${waitSeconds}秒)`)
+                  }
+
+                  // 等待 checkInterval 毫秒，同时更新秒数
+                  for (let j = 0; j < checkInterval / 1000; j++) {
+                    await new Promise(resolve => setTimeout(resolve, 1000))
+                    waitSeconds++
+                    const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      progress: Math.min(restartProgress, 95),
+                      message: `正在等待服务恢复... (${waitSeconds}秒)`
+                    }))
+                  }
+                }
+
+                // 超时，关闭进度条并提示用户手动刷新
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: '',
+                  isRestarting: false
+                })
+                messageApi.warning('容器重启超时，请手动刷新页面')
+                setLoadingResources(false)
+              }
+
+              checkServiceReady()
+            }
+
             // SSE 流正常结束
             throw new Error('任务完成，停止 SSE')
           }
@@ -542,7 +702,8 @@ export const Scrapers = () => {
               total: 0,
               progress: 0,
               message: '',
-              scraper: ''
+              scraper: '',
+              isRestarting: false
             })
             setLoadingResources(false)
             throw new Error('任务失败，停止 SSE')
@@ -562,16 +723,124 @@ export const Scrapers = () => {
           throw new Error('任务已完成，停止重试')
         }
         if (error.name !== 'AbortError') {
-          messageApi.error('进度连接出错，请刷新页面查看状态')
-          setDownloadProgress({
-            visible: false,
-            current: 0,
-            total: 0,
-            progress: 0,
-            message: '',
-            scraper: ''
+          // SSE 断开时，尝试查询缓存的任务状态（可能是容器重启导致的断开）
+          console.log('SSE 断开，尝试查询缓存的任务状态...')
+
+          // 使用 fetch 直接查询，避免 axios 拦截器的影响
+          const token = Cookies.get('danmu_token')
+          fetch(`/api/ui/scrapers/download/cached-status/${taskId}`, {
+            headers: { Authorization: `Bearer ${token}` }
           })
-          setLoadingResources(false)
+            .then(res => res.json())
+            .then(result => {
+              if (result.found && result.data) {
+                const data = result.data
+                if (data.status === 'completed') {
+                  // 任务已完成，可能是容器重启前完成的
+                  taskCompleted = true
+                  const downloadedCount = data.downloaded_count || 0
+                  const skippedCount = data.skipped_count || 0
+                  const failedCount = data.failed_count || 0
+
+                  if (data.need_restart) {
+                    // 容器正在重启，不在这里刷新，让 checkServiceReady() 处理
+                    // 只更新提示信息，不触发刷新
+                    console.log('SSE 断开后查询到任务完成且需要重启，等待 checkServiceReady() 处理')
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      progress: 100,
+                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，容器正在重启...`,
+                      isRestarting: true
+                    }))
+                    // 不刷新，直接返回
+                    return
+                  } else {
+                    messageApi.success(`下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}`)
+                    setDownloadProgress(prev => ({
+                      ...prev,
+                      progress: 100,
+                      message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}`
+                    }))
+                  }
+
+                  // 只有不需要重启时才延迟刷新
+                  setTimeout(() => {
+                    setDownloadProgress({
+                      visible: false,
+                      current: 0,
+                      total: 0,
+                      progress: 0,
+                      message: '',
+                      scraper: '',
+                      isRestarting: false
+                    })
+                    getInfo()
+                    loadVersionInfo()
+                    setLoadingResources(false)
+                  }, 2000)
+                } else if (data.status === 'failed') {
+                  messageApi.error(data.error_message || '下载失败')
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  setLoadingResources(false)
+                } else {
+                  // 任务状态未知，显示错误
+                  messageApi.error('进度连接出错，请刷新页面查看状态')
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  setLoadingResources(false)
+                }
+              } else {
+                // 缓存中没有找到任务状态，显示错误
+                messageApi.error('进度连接出错，请刷新页面查看状态')
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: '',
+                  isRestarting: false
+                })
+                setLoadingResources(false)
+              }
+            })
+            .catch(fetchError => {
+              console.error('查询缓存状态失败:', fetchError)
+              // 查询失败，可能是容器正在重启，显示友好提示
+              messageApi.warning('连接已断开，可能是容器正在重启，请稍后刷新页面')
+              setDownloadProgress(prev => ({
+                ...prev,
+                message: '连接已断开，可能是容器正在重启...'
+              }))
+              // 不立即关闭进度条，让用户看到提示
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: '',
+                  isRestarting: false
+                })
+                setLoadingResources(false)
+              }, 3000)
+            })
         }
         throw error
       },
@@ -601,7 +870,8 @@ export const Scrapers = () => {
         total: 0,
         progress: 0,
         message: '正在启动下载任务...',
-        scraper: ''
+        scraper: '',
+        isRestarting: false
       })
 
       // 启动后台下载任务
@@ -635,7 +905,8 @@ export const Scrapers = () => {
         total: 0,
         progress: 0,
         message: '',
-        scraper: ''
+        scraper: '',
+        isRestarting: false
       })
       setLoadingResources(false)
     }
@@ -1308,38 +1579,49 @@ export const Scrapers = () => {
           {downloadProgress.visible && (
             <div className="mt-4">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm text-gray-600">{downloadProgress.message}</span>
-                <Button
-                  size="small"
-                  danger
-                  onClick={async () => {
-                    if (currentDownloadTaskId.current) {
-                      try {
-                        await cancelScraperDownload(currentDownloadTaskId.current)
-                        messageApi.warning('已取消下载')
-                      } catch (e) {
-                        console.error('取消下载失败:', e)
+                <span className="text-sm text-gray-600">
+                  {downloadProgress.isRestarting && (
+                    <span className="inline-block mr-2 animate-spin">⏳</span>
+                  )}
+                  {downloadProgress.message}
+                </span>
+                {!downloadProgress.isRestarting && (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={async () => {
+                      if (currentDownloadTaskId.current) {
+                        try {
+                          await cancelScraperDownload(currentDownloadTaskId.current)
+                          messageApi.warning('已取消下载')
+                        } catch (e) {
+                          console.error('取消下载失败:', e)
+                        }
+                        currentDownloadTaskId.current = null
                       }
-                      currentDownloadTaskId.current = null
-                    }
-                    setDownloadProgress({
-                      visible: false,
-                      current: 0,
-                      total: 0,
-                      progress: 0,
-                      message: '',
-                      scraper: ''
-                    })
-                    setLoadingResources(false)
-                  }}
-                >
-                  取消
-                </Button>
+                      setDownloadProgress({
+                        visible: false,
+                        current: 0,
+                        total: 0,
+                        progress: 0,
+                        message: '',
+                        scraper: '',
+                        isRestarting: false
+                      })
+                      setLoadingResources(false)
+                    }}
+                  >
+                    取消
+                  </Button>
+                )}
               </div>
               <Progress
                 percent={downloadProgress.progress}
-                status={downloadProgress.progress === 100 ? 'success' : 'active'}
-                strokeColor={{
+                status={downloadProgress.isRestarting ? 'active' : (downloadProgress.progress === 100 ? 'success' : 'active')}
+                strokeColor={downloadProgress.isRestarting ? {
+                  '0%': '#faad14',
+                  '100%': '#52c41a',
+                } : {
                   '0%': '#108ee9',
                   '100%': '#87d068',
                 }}

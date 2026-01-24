@@ -8,6 +8,7 @@ import {
 } from '../../../apis'
 import { GenericConfigItem } from './GenericConfigItem'
 import { DatabaseBackupManager } from './DatabaseBackupManager'
+import { SortablePriorityList } from '../../../components/SortablePriorityList'
 
 // GitHub Token 的特殊配置（使用自定义 API）
 const GITHUB_TOKEN_CONFIG = {
@@ -17,9 +18,15 @@ const GITHUB_TOKEN_CONFIG = {
   verifyApi: verifyGithubToken,
 }
 
-// 需要渲染自定义组件的分组
-const CUSTOM_COMPONENTS = {
+// 需要渲染自定义组件的分组（旧格式兼容）
+const CUSTOM_COMPONENTS_BY_KEY = {
   database: DatabaseBackupManager,
+}
+
+// 通用组件类型映射（新格式）
+const CUSTOM_COMPONENT_TYPES = {
+  SortablePriorityList: SortablePriorityList,
+  DatabaseBackupManager: DatabaseBackupManager,
 }
 
 export const Parameters = () => {
@@ -70,8 +77,23 @@ export const Parameters = () => {
 
   // 构建 Tabs 的 items
   const tabItems = schema.map((group) => {
-    // 检查是否有自定义组件
-    const CustomComponent = CUSTOM_COMPONENTS[group.key] || (group.customComponent && CUSTOM_COMPONENTS[group.customComponent])
+    // 解析自定义组件配置
+    let CustomComponent = null
+    let customComponentProps = {}
+
+    // 新格式：customComponent 是对象 { type, props }
+    if (group.customComponent && typeof group.customComponent === 'object') {
+      CustomComponent = CUSTOM_COMPONENT_TYPES[group.customComponent.type]
+      customComponentProps = group.customComponent.props || {}
+    }
+    // 旧格式兼容：通过 group.key 匹配
+    else if (CUSTOM_COMPONENTS_BY_KEY[group.key]) {
+      CustomComponent = CUSTOM_COMPONENTS_BY_KEY[group.key]
+    }
+    // 旧格式兼容：customComponent 是字符串
+    else if (typeof group.customComponent === 'string') {
+      CustomComponent = CUSTOM_COMPONENT_TYPES[group.customComponent]
+    }
 
     return {
       key: group.key,
@@ -82,7 +104,7 @@ export const Parameters = () => {
             <GenericConfigItem key={item.key} config={enrichConfig(item)} />
           ))}
           {/* 渲染自定义组件 */}
-          {CustomComponent && <CustomComponent />}
+          {CustomComponent && <CustomComponent {...customComponentProps} />}
         </div>
       ),
     }

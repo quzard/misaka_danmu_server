@@ -285,8 +285,19 @@ async def _perform_update(
                     import sys
                     docker_available = is_docker_socket_available()
 
-                    if docker_available:
-                        # 有 Docker socket：重启容器
+                    # 判断是否是首次下载（本地没有任何弹幕源）
+                    existing_scrapers = set(scraper_manager.scrapers.keys())
+                    is_first_download = len(existing_scrapers) == 0
+
+                    if is_first_download:
+                        # 首次下载：执行热加载
+                        try:
+                            await scraper_manager.load_and_sync_scrapers()
+                            logger.info(f"弹幕源首次下载完成（热加载）: {release_version}")
+                        except Exception as e:
+                            logger.error(f"热加载失败: {e}")
+                    elif docker_available:
+                        # 非首次下载且有 Docker socket：重启容器
                         logger.info("全量替换完成，准备重启容器...")
 
                         # 刷新日志缓冲，确保日志输出
@@ -303,20 +314,12 @@ async def _perform_update(
                         if result.get("success"):
                             logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}，已向容器 '{container_name}' 发送重启指令")
                         else:
-                            logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                            try:
-                                await scraper_manager.load_and_sync_scrapers()
-                                logger.info(f"弹幕源全量替换完成（热加载）: {local_version} -> {release_version}")
-                            except Exception as e:
-                                logger.error(f"热加载失败: {e}")
+                            logger.warning(f"重启容器失败: {result.get('message')}")
+                            logger.warning("⚠️ 请手动重启容器以加载新的弹幕源")
                     else:
-                        # 没有 Docker socket：热加载并提示
-                        try:
-                            await scraper_manager.load_and_sync_scrapers()
-                            logger.info(f"弹幕源全量替换完成: {local_version} -> {release_version}")
-                            logger.warning("⚠️ 全量替换完成但未检测到 Docker 套接字，建议手动重启容器以确保 .so 文件更新生效")
-                        except Exception as e:
-                            logger.error(f"重载弹幕源失败: {e}")
+                        # 非首次下载且没有 Docker socket：仅提示手动重启，不执行热加载
+                        logger.info(f"弹幕源全量替换下载完成: {local_version} -> {release_version}")
+                        logger.warning("⚠️ 未检测到 Docker 套接字，请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
 
                     # 清除版本缓存
                     import src.api.endpoints.scraper_resources as sr
@@ -369,24 +372,15 @@ async def _perform_update(
                 elif result == "failed":
                     failed_downloads.append(scraper_name)
 
-        # 保存版本信息
-        await _save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
-
         # 检查是否有下载失败的文件
         if failed_downloads:
             logger.warning(f"有 {len(failed_downloads)} 个文件下载失败: {failed_downloads}")
-            logger.warning("由于存在下载失败，跳过重启，仅尝试热加载已成功下载的源")
-            # 尝试热加载已成功下载的源
-            try:
-                await scraper_manager.load_and_sync_scrapers()
-                logger.info(f"部分更新完成（热加载）: 下载 {download_count}, 跳过 {skip_count}, 失败 {len(failed_downloads)}")
-            except Exception as e:
-                logger.error(f"热加载失败: {e}")
+            logger.warning("由于存在下载失败，不更新版本信息，不执行重启")
             # 清除版本缓存
             import src.api.endpoints.scraper_resources as sr
             sr._version_cache = None
             sr._version_cache_time = None
-            return  # 有失败则不继续执行重启逻辑
+            return  # 有失败则不继续执行
 
         # 如果没有成功下载任何文件，直接返回
         if download_count == 0:
@@ -397,66 +391,70 @@ async def _perform_update(
             sr._version_cache_time = None
             return
 
-        # 判断是"新增源"还是"更新已有源"
-        existing_scrapers = set()
-        for f in scrapers_dir.iterdir():
-            if f.is_file() and f.suffix in ['.so', '.pyd']:
-                existing_scrapers.add(f.name.split('.')[0])
+        # 判断是否是首次下载（本地没有任何弹幕源）
+        existing_scrapers = set(scraper_manager.scrapers.keys())
+        is_first_download = len(existing_scrapers) == 0
 
-        # 检查下载的源中有多少是更新已有的
-        downloaded_scrapers = list(versions_data.keys())
-        update_count = sum(1 for s in downloaded_scrapers if s in existing_scrapers)
-        has_updates = update_count > 0 and download_count > 0
+        logger.info(f"下载完成: 下载 {download_count} 个, 跳过 {skip_count} 个")
 
-        logger.info(f"下载分类: 新增 {download_count - update_count} 个, 更新 {update_count} 个")
-
-        # 先备份新下载的资源到持久化目录
+        # 先备份新下载的资源到持久化目录（包括版本信息）
         try:
             logger.info("正在备份新下载的资源到持久化目录...")
-            await backup_scrapers(SystemUser())
+            # 非首次下载时，传入新版本信息以保存到备份目录
+            if not is_first_download:
+                await backup_scrapers(
+                    SystemUser(),
+                    new_versions_data=versions_data,
+                    new_hashes_data=hashes_data,
+                    package_data=package_data
+                )
+            else:
+                await backup_scrapers(SystemUser())
             logger.info("新资源备份完成")
         except Exception as backup_error:
             logger.warning(f"备份新资源失败: {backup_error}")
 
-        # 根据情况决定是重启容器还是热加载
-        from ..docker_utils import is_docker_socket_available, restart_container
-        import sys
-        docker_available = is_docker_socket_available()
-
-        if has_updates and docker_available:
-            # 有更新已有源且有 Docker socket：重启容器
-            logger.info("检测到更新已有源，准备重启容器...")
-
-            # 刷新日志缓冲，确保日志输出
-            for handler in logging.getLogger().handlers:
-                handler.flush()
-            sys.stdout.flush()
-            sys.stderr.flush()
-
-            # 等待日志写入完成
-            await asyncio.sleep(1.0)
-
-            container_name = await config_manager.get("containerName", "misaka-danmu-server")
-            result = await restart_container(container_name)
-            if result.get("success"):
-                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version}，已向容器 '{container_name}' 发送重启指令")
-            else:
-                logger.warning(f"重启容器失败: {result.get('message')}，尝试热加载")
-                # 降级到热加载
-                try:
-                    await scraper_manager.load_and_sync_scrapers()
-                    logger.info(f"弹幕源自动更新完成（热加载）: {local_version} -> {remote_version}")
-                except Exception as e:
-                    logger.error(f"热加载失败: {e}")
-        else:
-            # 只有新增源或没有 Docker socket：热加载
+        # 只有首次下载时才保存版本信息到 scrapers 目录并执行热加载
+        if is_first_download:
+            # 保存版本信息
+            await _save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
+            # 首次下载：执行热加载
             try:
                 await scraper_manager.load_and_sync_scrapers()
-                logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count})")
-                if has_updates and not docker_available:
-                    logger.warning("⚠️ 更新了已有源但未检测到 Docker 套接字，建议手动重启容器以确保 .so 文件更新生效")
+                logger.info(f"弹幕源首次下载完成（热加载）: {remote_version} (下载: {download_count})")
             except Exception as e:
                 logger.error(f"热加载失败: {e}")
+        else:
+            # 非首次下载：不保存版本信息到 scrapers 目录，版本信息只在备份中
+            # 根据是否有 Docker socket 决定重启方式
+            from ..docker_utils import is_docker_socket_available, restart_container
+            import sys
+            docker_available = is_docker_socket_available()
+
+            if docker_available:
+                # 有 Docker socket：重启容器
+                logger.info("检测到弹幕源更新，准备重启容器...")
+
+                # 刷新日志缓冲，确保日志输出
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+                # 等待日志写入完成
+                await asyncio.sleep(1.0)
+
+                container_name = await config_manager.get("containerName", "misaka-danmu-server")
+                result = await restart_container(container_name)
+                if result.get("success"):
+                    logger.info(f"弹幕源自动更新完成: {local_version} -> {remote_version}，已向容器 '{container_name}' 发送重启指令")
+                else:
+                    logger.warning(f"重启容器失败: {result.get('message')}")
+                    logger.warning("⚠️ 请手动重启容器以加载新的弹幕源")
+            else:
+                # 没有 Docker socket：仅提示手动重启，不执行热加载
+                logger.info(f"弹幕源自动更新下载完成: {local_version} -> {remote_version} (下载: {download_count}, 跳过: {skip_count})")
+                logger.warning("⚠️ 未检测到 Docker 套接字，请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
 
         # 清除版本缓存
         import src.api.endpoints.scraper_resources as sr

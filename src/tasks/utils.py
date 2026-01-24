@@ -86,9 +86,21 @@ def extract_short_error_message(error: Exception) -> str:
 
 
 def is_chinese_title(title: str) -> bool:
-    """检查标题是否包含中文字符"""
+    """
+    检查标题是否是中文标题（而非日文或其他语言）
+
+    判断逻辑：
+    1. 如果包含日文假名（平假名或片假名），则认为是日文标题
+    2. 如果包含中文字符且不包含日文假名，则认为是中文标题
+    """
     if not title:
         return False
+
+    # 日文假名范围：平假名 \u3040-\u309f，片假名 \u30a0-\u30ff
+    japanese_pattern = re.compile(r'[\u3040-\u309f\u30a0-\u30ff]')
+    if japanese_pattern.search(title):
+        return False  # 包含日文假名，不是中文标题
+
     # 检查是否包含中文字符（包括中文标点符号）
     chinese_pattern = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
     return bool(chinese_pattern.search(title))

@@ -17,6 +17,7 @@ from ..title_recognition import TitleRecognitionManager
 from ..search_utils import unified_search
 from ..season_mapper import ai_type_and_season_mapping_and_correction
 from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT
+from ..name_converter import convert_to_chinese_title
 
 logger = logging.getLogger(__name__)
 
@@ -399,6 +400,20 @@ async def auto_search_and_import_task(
                     logger.warning("未找到admin用户，跳过元数据源辅助搜索")
             except Exception as e:
                 logger.warning(f"元数据源辅助搜索失败: {e}")
+
+        # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在预处理规则之前执行）
+        # 创建一个虚拟用户用于元数据调用
+        auto_import_user = models.User(id=0, username="auto_import")
+        converted_title, conversion_applied = await convert_to_chinese_title(
+            main_title,
+            config_manager,
+            metadata_manager,
+            ai_matcher_manager,
+            auto_import_user
+        )
+        if conversion_applied:
+            logger.info(f"✓ 全自动导入 名称转换: '{main_title}' → '{converted_title}'")
+            main_title = converted_title  # 更新 main_title 用于后续处理
 
         # 应用搜索预处理规则
         search_title = main_title

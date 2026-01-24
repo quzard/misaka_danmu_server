@@ -419,3 +419,16 @@ a:hover {
 .dark .ant-collapse-content .source-item:hover {
   background-color: var(--color-hover) !important;
 }
+
+/* 移动端紧凑型 Select 组件 */
+.mobile-select-compact .ant-select-selector {
+  min-height: 28px !important;
+  height: 28px !important;
+  padding: 0 8px !important;
+  font-size: 12px !important;
+}
+
+.mobile-select-compact .ant-select-selection-item {
+  line-height: 26px !important;
+  font-size: 12px !important;
+}

@@ -349,13 +349,35 @@ async def restart_container(fallback_container_name: str = "misaka_danmu_server"
             return {"success": False, "message": "无法获取 Docker 客户端", "fallback": True}
 
         container = client.containers.get(container_name)
-        logger.info(f"正在重启容器: {container_name} (ID: {container.short_id})")
-        container.restart(timeout=10)
+        container_id = container.short_id
+        logger.info(f"正在重启容器: {container_name} (ID: {container_id})")
+
+        # 刷新日志，确保上面的日志被写入
+        import sys
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        # 使用线程异步执行重启，避免阻塞当前进程
+        # 这样可以让日志有时间刷新，然后容器才会被重启
+        import threading
+        def do_restart():
+            try:
+                container.restart(timeout=10)
+            except Exception as e:
+                logger.error(f"重启容器时发生错误: {e}")
+
+        restart_thread = threading.Thread(target=do_restart, daemon=True)
+        restart_thread.start()
+
+        # 不等待线程完成，直接返回
+        # 容器重启会杀死当前进程，所以我们不需要等待
 
         return {
             "success": True,
             "message": f"已向容器 '{container_name}' 发送重启指令",
-            "container_id": container.short_id
+            "container_id": container_id
         }
     except NotFound:
         return {

@@ -10,7 +10,6 @@ import hashlib
 import importlib
 import string
 import time
-import json
 from urllib.parse import urlparse, urlunparse, quote, unquote
 import logging
 
@@ -45,6 +44,7 @@ from ...timezone import get_now
 from ...database import get_db_session
 from ...search_utils import unified_search
 from ...search_timer import SearchTimer, SEARCH_TYPE_HOME
+from ...name_converter import convert_to_chinese_title
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,12 @@ async def search_anime_local(
 async def search_anime_provider(
     request: Request,
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    pageSize: int = Query(10, ge=10, le=100, description="每页数量，10-100"),
+    typeFilter: Optional[str] = Query(None, description="类型过滤: tv_series, movie"),
+    yearFilter: Optional[int] = Query(None, description="年份过滤"),
+    providerFilter: Optional[str] = Query(None, description="来源过滤: bilibili, tencent等"),
+    titleFilter: Optional[str] = Query(None, description="标题关键词过滤"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
@@ -116,15 +122,26 @@ async def search_anime_provider(
         episode_to_filter = parsed_keyword["episode"]
         timer.step_end()
 
+        # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在所有处理之前执行）
+        timer.step_start("名称转换")
+        converted_original_title, conversion_applied = await convert_to_chinese_title(
+            original_title,
+            config_manager,
+            metadata_manager,
+            ai_matcher_manager,
+            current_user
+        )
+        timer.step_end()
+
         # 应用搜索预处理规则
         timer.step_start("预处理规则应用")
-        search_title = original_title
+        search_title = converted_original_title  # 使用转换后的标题作为基础
         search_season = season_to_filter
         if title_recognition_manager:
-            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(original_title, episode_to_filter, season_to_filter)
+            processed_title, processed_episode, processed_season, preprocessing_applied = await title_recognition_manager.apply_search_preprocessing(converted_original_title, episode_to_filter, season_to_filter)
             if preprocessing_applied:
                 search_title = processed_title
-                logger.info(f"✓ WebUI搜索预处理: '{original_title}' -> '{search_title}'")
+                logger.info(f"✓ WebUI搜索预处理: '{converted_original_title}' -> '{search_title}'")
                 # 如果集数发生了变化，更新episode_to_filter
                 if processed_episode != episode_to_filter:
                     episode_to_filter = processed_episode
@@ -135,7 +152,7 @@ async def search_anime_provider(
                     season_to_filter = processed_season
                     logger.info(f"✓ WebUI季度预处理: {parsed_keyword['season']} -> {season_to_filter}")
             else:
-                logger.info(f"○ WebUI搜索预处理未生效: '{original_title}'")
+                logger.info(f"○ WebUI搜索预处理未生效: '{converted_original_title}'")
         timer.step_end()
 
         # 🚀 新增：季度名称映射 - 如果指定了季度，尝试获取该季度的实际名称
@@ -178,12 +195,32 @@ async def search_anime_provider(
             for item in results:
                 item.currentEpisodeIndex = episode_to_filter
 
+            # 过滤处理
+            filtered_results = results
+            if typeFilter:
+                filtered_results = [item for item in filtered_results if item.type == typeFilter]
+            if yearFilter:
+                filtered_results = [item for item in filtered_results if item.year == yearFilter]
+            if providerFilter:
+                filtered_results = [item for item in filtered_results if item.provider == providerFilter]
+            if titleFilter:
+                filtered_results = [item for item in filtered_results if titleFilter.lower() in item.title.lower()]
+
+            # 分页处理
+            total = len(filtered_results)
+            start_idx = (page - 1) * pageSize
+            end_idx = start_idx + pageSize
+            paginated_results = filtered_results[start_idx:end_idx]
+
             timer.finish()  # 打印计时报告
             return UIProviderSearchResponse(
-                results=[item.model_dump() for item in results],
+                results=[item.model_dump() for item in paginated_results],
                 supplemental_results=[models.ProviderSearchInfo.model_validate(item).model_dump() for item in cached_supplemental_results],
                 search_season=season_to_filter,
-                search_episode=episode_to_filter
+                search_episode=episode_to_filter,
+                total=total,
+                page=page,
+                pageSize=pageSize
             )
 
         timer.step_end(details="缓存未命中")
@@ -292,45 +329,17 @@ async def search_anime_provider(
             )
 
             timer.step_start("别名验证与过滤")
-            # 3. 智能别名过滤：中文别名使用相似度过滤，其他语种直接通过
-            # 原因：日文/英文别名可能和中文搜索词完全不同，但仍然是有效的别名
-            filter_aliases = set()
-            chinese_filtered = []  # 被过滤的中文别名
-            non_chinese_added = []  # 直接添加的非中文别名
-
-            def is_chinese(text: str) -> bool:
-                """判断文本是否主要包含中文字符"""
-                if not text:
-                    return False
-                # 统计中文字符数量
-                chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff')
-                # 如果中文字符占比超过 50%，认为是中文
-                return chinese_chars / len(text) > 0.5
-
-            for alias in all_possible_aliases:
-                if is_chinese(alias):
-                    # 中文别名：使用相似度过滤（70% 阈值）
-                    if fuzz.token_set_ratio(search_title, alias) > 70:
-                        filter_aliases.add(alias)
-                    else:
-                        chinese_filtered.append(alias)
-                        logger.debug(f"别名验证：已丢弃低相似度的中文别名 '{alias}' (与 '{search_title}' 相比)")
-                else:
-                    # 非中文别名（日文/英文/罗马音等）：直接添加
-                    filter_aliases.add(alias)
-                    non_chinese_added.append(alias)
+            # 3. 信任元数据源返回的别名，不再用相似度过滤
+            # 原因：元数据源（TMDB/Bangumi）返回的别名是可信的，
+            # 当搜索词是日文时，中文别名与日文搜索词相似度很低，但仍然是正确的别名
+            # 相似度过滤应该用在搜索结果过滤阶段，而不是别名验证阶段
+            filter_aliases = set(all_possible_aliases)
 
             # 确保所有搜索标题都在列表中
             filter_aliases.update(search_titles)
 
             # 记录统计信息
-            logger.info(f"别名过滤统计: 中文别名 {len(filter_aliases) - len(non_chinese_added)} 个, "
-                       f"非中文别名 {len(non_chinese_added)} 个, "
-                       f"过滤掉 {len(chinese_filtered)} 个低相似度中文别名")
-            if non_chinese_added:
-                logger.info(f"添加的非中文别名: {non_chinese_added[:10]}{'...' if len(non_chinese_added) > 10 else ''}")
-            if chinese_filtered:
-                logger.debug(f"过滤掉的中文别名: {chinese_filtered[:10]}{'...' if len(chinese_filtered) > 10 else ''}")
+            logger.info(f"别名验证: 共 {len(filter_aliases)} 个别名（来自元数据源，已信任）")
 
             logger.info(f"所有辅助搜索完成，最终别名集大小: {len(filter_aliases)}")
 
@@ -493,12 +502,32 @@ async def search_anime_provider(
             logger.warning(f"主页搜索 统一AI映射任务执行失败: {e}")
             timer.step_end(details=f"失败: {e}")
 
+    # 过滤处理
+    filtered_results = sorted_results
+    if typeFilter:
+        filtered_results = [item for item in filtered_results if item.type == typeFilter]
+    if yearFilter:
+        filtered_results = [item for item in filtered_results if item.year == yearFilter]
+    if providerFilter:
+        filtered_results = [item for item in filtered_results if item.provider == providerFilter]
+    if titleFilter:
+        filtered_results = [item for item in filtered_results if titleFilter.lower() in item.title.lower()]
+
+    # 分页处理
+    total = len(filtered_results)
+    start_idx = (page - 1) * pageSize
+    end_idx = start_idx + pageSize
+    paginated_results = filtered_results[start_idx:end_idx]
+
     timer.finish()  # 打印搜索计时报告
     return UIProviderSearchResponse(
-        results=[item.model_dump() for item in sorted_results],
+        results=[item.model_dump() for item in paginated_results],
         supplemental_results=[item.model_dump() for item in supplemental_results] if supplemental_results else [],
         search_season=season_to_filter,
-        search_episode=episode_to_filter
+        search_episode=episode_to_filter,
+        total=total,
+        page=page,
+        pageSize=pageSize
     )
 
 

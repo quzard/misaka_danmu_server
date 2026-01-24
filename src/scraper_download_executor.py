@@ -470,63 +470,98 @@ class ScraperDownloadExecutor:
         await backup_scrapers(self.current_user)
         self._log("✓ 新资源备份完成")
 
-        # 检查是否有 Docker socket，决定重启方式
-        from .docker_utils import is_docker_socket_available, restart_container
-        docker_available = is_docker_socket_available()
+        # 判断是否是首次下载（本地没有任何弹幕源）
+        existing_scrapers = set(self.scraper_manager.scrapers.keys())
+        is_first_download = len(existing_scrapers) == 0
 
-        if docker_available:
-            # 有 Docker socket，执行容器级别重启
-            from .docker_utils import get_current_container_id
-            detected_id = get_current_container_id()
-
-            self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
-            if detected_id:
-                self._log(f"检测到当前容器 ID: {detected_id}")
-                logger.info(f"自动检测到当前容器 ID: {detected_id}")
-            else:
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-
-            self._log("将在 3 秒后重启容器...")
-            logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
-
-            # 先设置任务状态为完成
-            self.task.status = TaskStatus.COMPLETED
-
-            # 持久化任务状态到缓存（容器重启后前端可查询）
-            await self._persist_task_status("completed", need_restart=True)
-
-            # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-            await asyncio.sleep(3.0)
-
-            fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-            result = await restart_container(fallback_name)
-            if result.get("success"):
-                container_id = result.get("container_id", "unknown")
-                self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-            else:
-                self._log(f"重启容器失败: {result.get('message')}")
-                logger.warning(f"重启容器失败: {result.get('message')}")
-                # 重启失败时提示用户手动重启
-                self._log("⚠️ 请手动重启容器以加载新的弹幕源")
-
-            # 任务状态已在上面设置，直接返回
-            return
+        if is_first_download:
+            # 首次下载：执行热加载
+            self._log("检测到首次下载弹幕源，正在热加载...")
+            logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
+            await self.scraper_manager.load_and_sync_scrapers()
+            self._log("✓ 弹幕源加载完成")
         else:
-            # 判断是否是首次下载（本地没有任何弹幕源）
-            existing_scrapers = set(self.scraper_manager.scrapers.keys())
-            is_first_download = len(existing_scrapers) == 0
+            # 非首次下载：检查是否有 Docker socket，决定重启方式
+            from .docker_utils import is_docker_socket_available, restart_container
+            docker_available = is_docker_socket_available()
 
-            if is_first_download:
-                # 首次下载：执行热加载
-                self._log("检测到首次下载弹幕源，正在热加载...")
-                logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
-                await self.scraper_manager.load_and_sync_scrapers()
-                self._log("✓ 弹幕源加载完成")
+            if docker_available:
+                # 有 Docker socket，执行容器级别重启
+                from .docker_utils import get_current_container_id
+                detected_id = get_current_container_id()
+
+                self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
+                if detected_id:
+                    self._log(f"检测到当前容器 ID: {detected_id}")
+                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                else:
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                self._log("将在 3 秒后重启容器...")
+                logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，即将重启容器")
+
+                # 先设置任务状态为完成（但不设置 restart_pending，让 SSE 继续发送日志）
+                self.task.need_restart = True
+                self.task.status = TaskStatus.COMPLETED
+
+                # 持久化任务状态到缓存（容器重启后前端可查询）
+                await self._persist_task_status("completed", need_restart=True)
+
+                # 等待 1 秒让 SSE 发送最新的日志消息（SSE 每 0.5 秒轮询一次）
+                await asyncio.sleep(1.0)
+
+                # 现在设置 restart_pending，让 SSE 发送终止消息并退出
+                self.task.restart_pending = True
+
+                # 刷新日志缓冲区，确保日志输出
+                import sys
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+                # 等待 SSE 发送 done 消息（再等 2 秒）
+                logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                await asyncio.sleep(2.0)
+                logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+
+                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+
+                # 在重启前再次刷新所有日志
+                logger.info(f"[任务 {self.task.task_id}] 正在发送容器重启指令...")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+
+                result = await restart_container(fallback_name)
+                # 注意：如果重启成功，下面的代码可能不会执行（进程被杀死）
+                if result.get("success"):
+                    container_id = result.get("container_id", "unknown")
+                    logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                    # 刷新日志
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                else:
+                    self._log(f"重启容器失败: {result.get('message')}")
+                    logger.warning(f"重启容器失败: {result.get('message')}")
+                    # 重启失败时提示用户手动重启
+                    self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+                    # 清除重启标记
+                    self.task.restart_pending = False
+
+                # 任务状态已在上面设置，直接返回
+                return
             else:
-                # 非首次下载且没有 Docker socket：提示手动重启
+                # 非首次下载且没有 Docker socket：提示手动重启，不执行热加载
                 self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
                 self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，需要手动重启容器")
@@ -535,7 +570,7 @@ class ScraperDownloadExecutor:
 
     async def _do_incremental_download(self, base_url, headers, proxy_to_use, platform_key, platform_info):
         """增量下载模式"""
-        from .api.endpoints.scraper_resources import backup_scrapers, restore_scrapers
+        from .api.endpoints.scraper_resources import backup_scrapers, restore_scrapers, BACKUP_DIR
 
         # 下载 package.json
         package_url = f"{base_url}/package.json"
@@ -568,163 +603,227 @@ class ScraperDownloadExecutor:
         self.task.progress.total = need_download_count
         self.task.progress.skipped = to_skip
 
-        # 检查临时目录中是否有可复用的已下载文件
-        to_download = await self._check_and_use_temp_files(to_download)
-        need_download_count = len(to_download)
-
-        # 更新进度
-        self.task.progress.total = need_download_count + len(self.task.progress.downloaded)
-
-        # 如果没有需要下载的文件（全部从临时目录复用或本地已是最新）
+        # 如果没有需要下载的文件
         if need_download_count == 0:
-            if len(self.task.progress.downloaded) > 0:
-                self._log(f"已从临时目录复用 {len(self.task.progress.downloaded)} 个文件，无需额外下载")
-            else:
-                self._log("所有弹幕源都是最新的，无需下载")
+            self._log("所有弹幕源都是最新的，无需下载")
             self.task.status = TaskStatus.COMPLETED
             return
 
-        # 保存 package.json
-        local_package_file = scrapers_dir / "package.json"
-        package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
-        await asyncio.to_thread(local_package_file.write_text, package_json_str)
+        # 创建临时下载目录
+        import shutil
+        temp_dir = _get_temp_download_base_dir() / f"download_{self.task.task_id}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        self._log(f"创建临时下载目录: {temp_dir}")
 
-        # 备份当前文件
-        self._log("正在备份当前弹幕源...")
-        await backup_scrapers(self.current_user)
-        self._log(f"备份完成，开始下载 {need_download_count} 个文件...")
+        try:
+            # 先备份当前文件（在修改任何文件之前备份，以便失败时恢复）
+            self._log("正在备份当前弹幕源...")
+            await backup_scrapers(self.current_user)
+            self._log("备份完成")
 
-        # 下载文件
-        download_timeout = httpx.Timeout(30.0, read=60.0)
-        failed_downloads = []
+            self._log(f"开始下载 {need_download_count} 个文件到临时目录...")
 
-        for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
-            # 检查是否被取消
-            if self.task.is_cancelled():
-                self._log("任务被取消，停止下载")
-                break
+            # 下载文件到临时目录
+            download_timeout = httpx.Timeout(30.0, read=60.0)
+            failed_downloads = []
 
-            self.task.progress.current = index
-            self.task.progress.current_file = scraper_name
-            self._log(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
+            for index, (scraper_name, scraper_info, file_path, filename, remote_hash) in enumerate(to_download, 1):
+                # 检查是否被取消
+                if self.task.is_cancelled():
+                    self._log("任务被取消，停止下载")
+                    break
 
-            try:
-                success = await self._download_single_file(
-                    scraper_name, scraper_info, file_path, filename, remote_hash,
-                    base_url, headers, proxy_to_use, download_timeout, scrapers_dir,
-                    versions_data, hashes_data
-                )
-                if success:
-                    self.task.progress.downloaded.append(scraper_name)
-                else:
+                self.task.progress.current = index
+                self.task.progress.current_file = scraper_name
+                self._log(f"正在下载 [{index}/{need_download_count}]: {scraper_name}")
+
+                try:
+                    success = await self._download_single_file(
+                        scraper_name, scraper_info, file_path, filename, remote_hash,
+                        base_url, headers, proxy_to_use, download_timeout, temp_dir,
+                        versions_data, hashes_data
+                    )
+                    if success:
+                        self.task.progress.downloaded.append(scraper_name)
+                    else:
+                        failed_downloads.append(scraper_name)
+                        self.task.progress.failed.append(scraper_name)
+                except Exception as e:
+                    self._log(f"下载 {scraper_name} 失败: {e}", "error")
                     failed_downloads.append(scraper_name)
                     self.task.progress.failed.append(scraper_name)
-            except Exception as e:
-                self._log(f"下载 {scraper_name} 失败: {e}", "error")
-                failed_downloads.append(scraper_name)
-                self.task.progress.failed.append(scraper_name)
 
-        download_count = len(self.task.progress.downloaded)
-        self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
+            download_count = len(self.task.progress.downloaded)
+            self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-        # 检查下载结果：有失败时，保存成功的到临时目录，然后还原备份
-        if failed_downloads:
-            self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
+            # 检查下载结果：有失败时还原备份
+            if failed_downloads:
+                self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
+                self._log("正在还原备份...")
+                await restore_scrapers(self.current_user, self.scraper_manager)
+                self._log("已还原备份")
+                self.task.status = TaskStatus.FAILED
+                self.task.error_message = f"下载失败: {', '.join(failed_downloads)}"
+                return
 
-            # 如果有成功下载的文件，先保存到临时目录（供下次复用）
-            if download_count > 0:
-                self._log(f"正在保存 {download_count} 个成功下载的文件到临时目录...")
-                await self._save_to_temp_dir(self.task.progress.downloaded)
-
-            self._log("正在还原备份...")
-            await restore_scrapers(self.current_user, self.scraper_manager)
-            self._log("已还原备份")
-            self.task.status = TaskStatus.FAILED
-            self.task.error_message = f"下载失败: {', '.join(failed_downloads)}"
-            return
-
-        if download_count == 0 and skip_count == 0:
-            self._log("没有需要下载的弹幕源", "warning")
-            self.task.status = TaskStatus.COMPLETED
-            return
-
-        # 全部成功，保存版本信息
-        await self._save_versions(versions_data, hashes_data, platform_info, package_data, failed_downloads)
-
-        # 清除版本缓存，让前端能获取到最新版本号
-        self._clear_version_cache()
-
-        # 热加载或容器重启
-        if download_count > 0:
-            # 全部成功才备份新下载的资源
-            self._log("正在备份新下载的资源...")
-            await backup_scrapers(self.current_user)
-            self._log("✓ 新资源备份完成")
-
-            # 检查是否有 Docker socket，决定重启方式
-            from .docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
+            if download_count == 0:
+                self._log("没有成功下载的弹幕源", "warning")
+                self.task.status = TaskStatus.COMPLETED
+                return
 
             # 判断是否是首次下载（本地没有任何弹幕源）
             existing_scrapers = set(self.scraper_manager.scrapers.keys())
             is_first_download = len(existing_scrapers) == 0
 
-            if docker_available:
-                # 有 Docker socket，执行容器级别重启（确保 .so 文件正确加载）
-                from .docker_utils import get_current_container_id
-                detected_id = get_current_container_id()
+            # 检查是否有 Docker socket
+            from .docker_utils import is_docker_socket_available, restart_container
+            docker_available = is_docker_socket_available()
 
-                self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
-                if detected_id:
-                    self._log(f"检测到当前容器 ID: {detected_id}")
-                    logger.info(f"自动检测到当前容器 ID: {detected_id}")
-                else:
-                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                    self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
-                    logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+            if is_first_download:
+                # 首次下载（本地没有弹幕源）：部署到 scrapers 和 backup 目录，然后热加载
+                self._log("正在部署下载的文件...")
+                deployed, deploy_failed = await self._deploy_downloaded_files(
+                    temp_dir, scrapers_dir, BACKUP_DIR,
+                    self.task.progress.downloaded, hashes_data
+                )
 
-                self._log("将在 3 秒后重启容器...")
-                logger.info(f"用户 '{self.current_user.username}' 增量更新了 {download_count} 个弹幕源，即将重启容器")
+                if deploy_failed:
+                    self._log(f"部署失败: {', '.join(deploy_failed)}", "error")
+                    self._log("正在还原备份...")
+                    await restore_scrapers(self.current_user, self.scraper_manager)
+                    self._log("已还原备份")
+                    self.task.status = TaskStatus.FAILED
+                    self.task.error_message = f"部署失败: {', '.join(deploy_failed)}"
+                    return
 
-                # 先设置任务状态为完成
-                self.task.status = TaskStatus.COMPLETED
+                deploy_count = len(deployed)
+                self._log(f"✓ 成功部署 {deploy_count} 个弹幕源")
 
-                # 持久化任务状态到缓存（容器重启后前端可查询）
-                await self._persist_task_status("completed", need_restart=True)
+                # 更新版本信息
+                await self._update_version_files(scrapers_dir, BACKUP_DIR, package_data, versions_data, hashes_data, platform_info)
 
-                # 等待足够时间让 SSE 进度流发送 done 消息（SSE 每 0.5 秒轮询一次）
-                await asyncio.sleep(3.0)
+                # 清除版本缓存
+                self._clear_version_cache()
 
-                fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
-                result = await restart_container(fallback_name)
-                if result.get("success"):
-                    container_id = result.get("container_id", "unknown")
-                    self._log(f"✓ 已向容器发送重启指令 (ID: {container_id})")
-                    logger.info(f"已向容器发送重启指令 (ID: {container_id})")
-                else:
-                    self._log(f"重启容器失败: {result.get('message')}")
-                    logger.warning(f"重启容器失败: {result.get('message')}")
-                    # 重启失败时不再尝试热加载，提示用户手动重启
-                    self._log("⚠️ 请手动重启容器以加载新的弹幕源")
-
-                # 任务状态已在上面设置，直接返回
-                return
-            elif is_first_download:
-                # 首次下载（本地没有弹幕源）：执行热加载
+                # 执行热加载
                 self._log("检测到首次下载弹幕源，正在热加载...")
-                logger.info(f"用户 '{self.current_user.username}' 首次下载了 {download_count} 个弹幕源，正在热加载")
+                logger.info(f"用户 '{self.current_user.username}' 首次下载了 {deploy_count} 个弹幕源，正在热加载")
                 await self.scraper_manager.load_and_sync_scrapers()
-                self._log(f"✓ 成功加载了 {download_count} 个弹幕源")
+                self._log(f"✓ 成功加载了 {deploy_count} 个弹幕源")
+
             else:
-                # 非首次下载且没有 Docker socket：提示手动重启
-                self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
-                self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
-                logger.info(f"用户 '{self.current_user.username}' 更新了 {download_count} 个弹幕源，需要手动重启容器")
+                # 非首次下载（已有弹幕源）：只部署到 backup 目录，然后重启容器
+                # 这样可以避免在运行时替换 .so 文件导致的冲突
+                self._log("检测到已有弹幕源，只部署到备份目录...")
+                deployed, deploy_failed = await self._deploy_to_backup_only(
+                    temp_dir, BACKUP_DIR,
+                    self.task.progress.downloaded, hashes_data
+                )
 
-        # 全部成功，清理可能存在的临时目录
-        await self._cleanup_temp_dir(self.task.task_id)
+                if deploy_failed:
+                    self._log(f"部署到备份目录失败: {', '.join(deploy_failed)}", "error")
+                    self.task.status = TaskStatus.FAILED
+                    self.task.error_message = f"部署失败: {', '.join(deploy_failed)}"
+                    return
 
-        self.task.status = TaskStatus.COMPLETED
+                deploy_count = len(deployed)
+                self._log(f"✓ 成功部署 {deploy_count} 个弹幕源到备份目录")
+
+                # 更新版本信息到 backup 目录（不更新 scrapers 目录，重启后会从 backup 恢复）
+                await self._update_version_files_backup_only(BACKUP_DIR, package_data, versions_data, hashes_data, platform_info)
+
+                # 清除版本缓存
+                self._clear_version_cache()
+
+                if docker_available:
+                    # 有 Docker socket，执行容器级别重启
+                    from .docker_utils import get_current_container_id
+                    detected_id = get_current_container_id()
+
+                    self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
+                    if detected_id:
+                        self._log(f"检测到当前容器 ID: {detected_id}")
+                        logger.info(f"自动检测到当前容器 ID: {detected_id}")
+                    else:
+                        fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+                        self._log(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+                        logger.info(f"未能自动检测容器 ID，将使用兜底名称: {fallback_name}")
+
+                    self._log("将在 3 秒后重启容器...")
+                    logger.info(f"用户 '{self.current_user.username}' 增量更新了 {deploy_count} 个弹幕源，即将重启容器")
+
+                    # 先设置任务状态为完成
+                    self.task.need_restart = True
+                    self.task.status = TaskStatus.COMPLETED
+
+                    # 持久化任务状态到缓存
+                    await self._persist_task_status("completed", need_restart=True)
+
+                    # 等待 1 秒让 SSE 发送最新的日志消息
+                    await asyncio.sleep(1.0)
+
+                    # 设置 restart_pending，让 SSE 发送终止消息并退出
+                    self.task.restart_pending = True
+
+                    # 刷新日志缓冲区
+                    import sys
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+
+                    # 等待 SSE 发送 done 消息
+                    logger.info(f"[任务 {self.task.task_id}] 等待 SSE 发送终止消息...")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    await asyncio.sleep(2.0)
+                    logger.info(f"[任务 {self.task.task_id}] SSE 终止消息已发送，准备重启容器")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+
+                    fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+
+                    # 在重启前再次刷新所有日志
+                    logger.info(f"[任务 {self.task.task_id}] 正在发送容器重启指令...")
+                    for handler in logging.getLogger().handlers:
+                        handler.flush()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+
+                    result = await restart_container(fallback_name)
+                    # 注意：如果重启成功，下面的代码可能不会执行（进程被杀死）
+                    if result.get("success"):
+                        container_id = result.get("container_id", "unknown")
+                        logger.info(f"✓ 已向容器发送重启指令 (ID: {container_id})")
+                        for handler in logging.getLogger().handlers:
+                            handler.flush()
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+                    else:
+                        self._log(f"重启容器失败: {result.get('message')}")
+                        logger.warning(f"重启容器失败: {result.get('message')}")
+                        self._log("⚠️ 请手动重启容器以加载新的弹幕源")
+                        self.task.restart_pending = False
+
+                    # 任务状态已在上面设置，直接返回
+                    return
+                else:
+                    # 没有 Docker socket：提示手动重启
+                    self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
+                    self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                    logger.info(f"用户 '{self.current_user.username}' 更新了 {deploy_count} 个弹幕源，需要手动重启容器")
+
+            self.task.status = TaskStatus.COMPLETED
+
+        finally:
+            # 清理临时下载目录
+            if temp_dir.exists():
+                try:
+                    import shutil
+                    shutil.rmtree(temp_dir)
+                    self._log(f"已清理临时下载目录")
+                except Exception as e:
+                    logger.warning(f"清理临时目录失败: {e}")
 
     async def _fetch_package_json(self, package_url, headers, proxy_to_use, timeout_config):
         """获取 package.json"""
@@ -767,13 +866,44 @@ class ScraperDownloadExecutor:
         hashes_data = {}
 
         # 读取本地 versions.json
+        # 优先从 backup 目录读取（因为非首次下载时只更新 backup 目录）
+        # 如果 backup 目录没有，再从 scrapers 目录读取
         local_hashes = {}
-        versions_file = scrapers_dir / "versions.json"
-        if versions_file.exists():
+        from .api.endpoints.scraper_resources import BACKUP_DIR
+        backup_versions_file = BACKUP_DIR / "versions.json"
+        scrapers_versions_file = scrapers_dir / "versions.json"
+
+        # 选择更新的 versions.json 文件
+        versions_file = None
+        if backup_versions_file.exists() and scrapers_versions_file.exists():
+            # 两个都存在，比较 updated_at 时间戳，选择更新的
+            try:
+                backup_data = json.loads(await asyncio.to_thread(backup_versions_file.read_text))
+                scrapers_data = json.loads(await asyncio.to_thread(scrapers_versions_file.read_text))
+                backup_time = backup_data.get('updated_at', '')
+                scrapers_time = scrapers_data.get('updated_at', '')
+                if backup_time >= scrapers_time:
+                    versions_file = backup_versions_file
+                    self._log("使用备份目录的版本信息（更新）")
+                else:
+                    versions_file = scrapers_versions_file
+                    self._log("使用 scrapers 目录的版本信息")
+            except Exception:
+                versions_file = backup_versions_file if backup_versions_file.exists() else scrapers_versions_file
+        elif backup_versions_file.exists():
+            versions_file = backup_versions_file
+            self._log("使用备份目录的版本信息")
+        elif scrapers_versions_file.exists():
+            versions_file = scrapers_versions_file
+
+        if versions_file and versions_file.exists():
             try:
                 local_versions = json.loads(await asyncio.to_thread(versions_file.read_text))
                 local_hashes = local_versions.get('hashes', {})
                 self._log(f"已读取本地版本信息，包含 {len(local_hashes)} 个哈希值")
+                # 调试：显示本地哈希值的 key
+                if local_hashes:
+                    self._log(f"本地哈希值 keys: {list(local_hashes.keys())[:5]}...", "debug")
             except Exception as e:
                 self._log(f"读取本地版本文件失败: {e}", "warning")
 
@@ -797,17 +927,24 @@ class ScraperDownloadExecutor:
                 hashes_data[scraper_name] = remote_hash
             else:
                 to_download.append((scraper_name, scraper_info, file_path, filename, remote_hash))
+                # 调试日志：显示哈希不匹配的原因
+                if not remote_hash:
+                    self._log(f"  {scraper_name}: 远程无哈希值", "debug")
+                elif not local_hash:
+                    self._log(f"  {scraper_name}: 本地无哈希值", "debug")
+                else:
+                    self._log(f"  {scraper_name}: 哈希不匹配 (本地: {local_hash[:16]}..., 远程: {remote_hash[:16]}...)", "debug")
 
         return to_download, to_skip, unsupported, versions_data, hashes_data
 
     async def _download_single_file(
         self, scraper_name, scraper_info, file_path, filename, remote_hash,
-        base_url, headers, proxy_to_use, timeout_config, scrapers_dir,
+        base_url, headers, proxy_to_use, timeout_config, temp_dir,
         versions_data, hashes_data
     ):
-        """下载单个文件"""
+        """下载单个文件到临时目录"""
         file_url = f"{base_url}/{file_path}"
-        target_path = scrapers_dir / filename
+        target_path = temp_dir / filename
         max_retries = 3
 
         for retry in range(max_retries + 1):
@@ -836,7 +973,7 @@ class ScraperDownloadExecutor:
                             continue
                         hashes_data[scraper_name] = remote_hash
 
-                    # 写入文件
+                    # 写入临时目录
                     await asyncio.to_thread(target_path.write_bytes, file_content)
 
                     version = scraper_info.get('version', 'unknown')
@@ -853,6 +990,257 @@ class ScraperDownloadExecutor:
 
         self._log(f"✗ 下载失败: {scraper_name} (已重试 {max_retries} 次)", "error")
         return False
+
+    async def _verify_file_hash(self, file_path: Path, expected_hash: str) -> bool:
+        """校验文件哈希值"""
+        if not file_path.exists():
+            return False
+        try:
+            content = await asyncio.to_thread(file_path.read_bytes)
+            actual_hash = hashlib.sha256(content).hexdigest()
+            return actual_hash == expected_hash
+        except Exception as e:
+            logger.warning(f"校验文件哈希失败 {file_path}: {e}")
+            return False
+
+    async def _copy_and_verify(self, src_path: Path, dst_path: Path, expected_hash: str, scraper_name: str) -> bool:
+        """复制文件并校验哈希值"""
+        import shutil
+        try:
+            # 复制文件
+            await asyncio.to_thread(shutil.copy2, src_path, dst_path)
+
+            # 校验哈希
+            if not await self._verify_file_hash(dst_path, expected_hash):
+                self._log(f"复制后校验失败: {scraper_name} -> {dst_path}", "error")
+                # 删除损坏的文件
+                if dst_path.exists():
+                    dst_path.unlink()
+                return False
+            return True
+        except Exception as e:
+            self._log(f"复制文件失败 {scraper_name}: {e}", "error")
+            return False
+
+    async def _deploy_downloaded_files(
+        self,
+        temp_dir: Path,
+        scrapers_dir: Path,
+        backup_dir: Path,
+        downloaded_scrapers: list,
+        hashes_data: dict
+    ) -> tuple[list, list]:
+        """
+        将临时目录中的文件部署到 scrapers 和 backup 目录
+
+        Returns:
+            (成功部署的列表, 部署失败的列表)
+        """
+        import shutil
+
+        deployed = []
+        failed = []
+
+        # 确保目录存在
+        scrapers_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        for scraper_name in downloaded_scrapers:
+            # 查找临时目录中的文件
+            temp_files = list(temp_dir.glob(f"{scraper_name}.*"))
+            if not temp_files:
+                self._log(f"临时目录中未找到 {scraper_name} 的文件", "warning")
+                failed.append(scraper_name)
+                continue
+
+            temp_file = temp_files[0]
+            filename = temp_file.name
+            expected_hash = hashes_data.get(scraper_name)
+
+            if not expected_hash:
+                self._log(f"{scraper_name} 没有哈希值，跳过校验", "warning")
+                failed.append(scraper_name)
+                continue
+
+            # 1. 校验临时文件哈希
+            if not await self._verify_file_hash(temp_file, expected_hash):
+                self._log(f"临时文件校验失败: {scraper_name}", "error")
+                failed.append(scraper_name)
+                continue
+
+            # 2. 复制到 scrapers 目录并校验
+            scrapers_target = scrapers_dir / filename
+            if not await self._copy_and_verify(temp_file, scrapers_target, expected_hash, scraper_name):
+                failed.append(scraper_name)
+                continue
+
+            # 3. 复制到 backup 目录并校验
+            backup_target = backup_dir / filename
+            if not await self._copy_and_verify(temp_file, backup_target, expected_hash, scraper_name):
+                # 回滚 scrapers 目录的文件
+                if scrapers_target.exists():
+                    scrapers_target.unlink()
+                failed.append(scraper_name)
+                continue
+
+            deployed.append(scraper_name)
+            self._log(f"✓ 已部署: {scraper_name}")
+
+        # 刷新日志缓冲区，确保部署日志输出
+        import sys
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        return deployed, failed
+
+    async def _deploy_to_backup_only(
+        self,
+        temp_dir: Path,
+        backup_dir: Path,
+        downloaded_scrapers: list,
+        hashes_data: dict
+    ) -> tuple[list, list]:
+        """
+        只将临时目录中的文件部署到 backup 目录（不部署到 scrapers 目录）
+        用于非首次下载时，避免在运行时替换 .so 文件导致的冲突
+
+        Returns:
+            (成功部署的列表, 部署失败的列表)
+        """
+        deployed = []
+        failed = []
+
+        # 确保目录存在
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        for scraper_name in downloaded_scrapers:
+            # 查找临时目录中的文件
+            temp_files = list(temp_dir.glob(f"{scraper_name}.*"))
+            if not temp_files:
+                self._log(f"临时目录中未找到 {scraper_name} 的文件", "warning")
+                failed.append(scraper_name)
+                continue
+
+            temp_file = temp_files[0]
+            filename = temp_file.name
+            expected_hash = hashes_data.get(scraper_name)
+
+            if not expected_hash:
+                self._log(f"{scraper_name} 没有哈希值，跳过校验", "warning")
+                failed.append(scraper_name)
+                continue
+
+            # 1. 校验临时文件哈希
+            if not await self._verify_file_hash(temp_file, expected_hash):
+                self._log(f"临时文件校验失败: {scraper_name}", "error")
+                failed.append(scraper_name)
+                continue
+
+            # 2. 只复制到 backup 目录并校验
+            backup_target = backup_dir / filename
+            if not await self._copy_and_verify(temp_file, backup_target, expected_hash, scraper_name):
+                failed.append(scraper_name)
+                continue
+
+            deployed.append(scraper_name)
+            self._log(f"✓ 已部署到备份目录: {scraper_name}")
+
+        # 刷新日志缓冲区
+        import sys
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+        return deployed, failed
+
+    async def _update_version_files(
+        self,
+        scrapers_dir: Path,
+        backup_dir: Path,
+        package_data: dict,
+        versions_data: dict,
+        hashes_data: dict,
+        platform_info: dict
+    ):
+        """更新版本信息文件到 scrapers 和 backup 目录"""
+        import shutil
+
+        self._log("正在更新版本信息...")
+
+        # 1. 保存新的 package.json 到 scrapers 目录
+        scrapers_package_file = scrapers_dir / "package.json"
+        package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(scrapers_package_file.write_text, package_json_str)
+
+        # 2. 保存 versions.json 到 scrapers 目录
+        await self._save_versions(versions_data, hashes_data, platform_info, package_data, [])
+
+        # 3. 同步 package.json 和 versions.json 到 backup 目录
+        scrapers_versions_file = scrapers_dir / "versions.json"
+        backup_versions_file = backup_dir / "versions.json"
+        backup_package_file = backup_dir / "package.json"
+
+        if scrapers_versions_file.exists():
+            shutil.copy2(scrapers_versions_file, backup_versions_file)
+
+        if scrapers_package_file.exists():
+            shutil.copy2(scrapers_package_file, backup_package_file)
+
+        self._log("✓ 版本信息已更新并同步到备份目录")
+
+    async def _update_version_files_backup_only(
+        self,
+        backup_dir: Path,
+        package_data: dict,
+        versions_data: dict,
+        hashes_data: dict,
+        platform_info: dict
+    ):
+        """只更新版本信息文件到 backup 目录（不更新 scrapers 目录）"""
+        self._log("正在更新备份目录的版本信息...")
+
+        # 确保目录存在
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. 保存 package.json 到 backup 目录
+        backup_package_file = backup_dir / "package.json"
+        package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(backup_package_file.write_text, package_json_str)
+
+        # 2. 构建并保存 versions.json 到 backup 目录
+        backup_versions_file = backup_dir / "versions.json"
+
+        # 读取现有的 versions.json（如果存在）
+        existing_scrapers = {}
+        existing_hashes = {}
+        if backup_versions_file.exists():
+            try:
+                existing_data = json.loads(await asyncio.to_thread(backup_versions_file.read_text))
+                existing_scrapers = existing_data.get("scrapers", {})
+                existing_hashes = existing_data.get("hashes", {})
+            except Exception:
+                pass
+
+        # 合并版本信息
+        existing_scrapers.update(versions_data)
+        existing_hashes.update(hashes_data)
+
+        # 构建完整的 versions.json
+        versions_json = {
+            "platform": platform_info.get('platform', 'unknown'),
+            "type": platform_info.get('arch', 'unknown'),
+            "scrapers": existing_scrapers,
+            "hashes": existing_hashes,
+            "updated_at": datetime.now().isoformat()
+        }
+
+        versions_json_str = json.dumps(versions_json, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(backup_versions_file.write_text, versions_json_str)
+
+        self._log("✓ 备份目录版本信息已更新")
 
     async def _save_versions(self, versions_data, hashes_data, platform_info, package_data, failed_downloads):
         """保存版本信息"""
@@ -882,6 +1270,7 @@ class ScraperDownloadExecutor:
                 "type": platform_info['arch'],
                 "version": package_data.get("version", "unknown"),
                 "scrapers": merged_scrapers,
+                "updated_at": datetime.now().isoformat()
             }
 
             if merged_hashes:
@@ -903,7 +1292,7 @@ class ScraperDownloadExecutor:
         except Exception as e:
             logger.warning(f"清除版本缓存失败: {e}")
 
-    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):  # noqa: ARG002
+    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):
         """全量替换后更新 versions.json"""
         try:
             platform_info = get_platform_info()
@@ -924,12 +1313,11 @@ class ScraperDownloadExecutor:
                             version = scraper_info.get('version')
                             if version:
                                 scrapers_versions[scraper_name] = version
-                            # 提取哈希值
+                            # 提取哈希值 - 使用 platform_key (如 linux-x86) 而不是 platform_arch 组合
                             hashes = scraper_info.get('hashes', {})
-                            hash_key = f"{platform_info['platform']}_{platform_info['arch']}"
-                            if hash_key in hashes:
-                                scrapers_hashes[scraper_name] = hashes[hash_key]
-                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息")
+                            if platform_key in hashes:
+                                scrapers_hashes[scraper_name] = hashes[platform_key]
+                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息, {len(scrapers_hashes)} 个哈希值")
                 except Exception as e:
                     logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
 
@@ -941,14 +1329,25 @@ class ScraperDownloadExecutor:
                 "scrapers": scrapers_versions,
                 "hashes": scrapers_hashes,
                 "full_replace": True,
-                "update_time": datetime.now().isoformat()
+                "updated_at": datetime.now().isoformat()  # 使用 updated_at 与其他地方保持一致
             }
 
-            # 写入 versions.json
+            # 写入 versions.json 到 scrapers 目录
             versions_file = scrapers_dir / "versions.json"
             versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
             await asyncio.to_thread(versions_file.write_text, versions_json_str)
             logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
+
+            # 同步到 backup 目录
+            from .api.endpoints.scraper_resources import BACKUP_DIR
+            import shutil
+            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+            backup_versions_file = BACKUP_DIR / "versions.json"
+            backup_package_file = BACKUP_DIR / "package.json"
+            shutil.copy2(versions_file, backup_versions_file)
+            if local_package_file.exists():
+                shutil.copy2(local_package_file, backup_package_file)
+            logger.info("已同步版本信息到备份目录")
 
             # 同时更新 package.json 的版本号（前端从这里读取整体版本）
             try:

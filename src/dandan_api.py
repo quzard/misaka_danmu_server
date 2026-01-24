@@ -2973,17 +2973,22 @@ async def get_external_comments_from_url(
         # 缓存结果5小时 (18000秒)
         await crud.set_cache(session, cache_key, comments_data, 18000)
 
-    # 处理简繁转换
-    if chConvert in [1, 2]:
-        converter = None
-        if chConvert == 1:
-            converter = OpenCC('t2s')  # 繁转简
-        elif chConvert == 2:
-            converter = OpenCC('s2t')  # 简转繁
-        
-        if converter:
-            for comment in comments_data:
-                comment['m'] = converter.convert(comment['m'])
+    # 处理简繁转换（使用客户端参数）
+    if chConvert in [1, 2] and comments_data:
+        try:
+            converter = None
+            if chConvert == 1:
+                converter = OpenCC('t2s')  # 繁转简
+            elif chConvert == 2:
+                converter = OpenCC('s2t')  # 简转繁
+
+            if converter:
+                for comment in comments_data:
+                    if 'm' in comment and comment['m']:
+                        comment['m'] = converter.convert(comment['m'])
+                logger.debug(f"外部弹幕简繁转换 (url: {url}): 模式={chConvert}, 处理 {len(comments_data)} 条")
+        except Exception as e:
+            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
@@ -3940,6 +3945,23 @@ async def get_comments_for_dandan(
         comments_data = apply_random_color(comments_data, random_color_mode, palette)
     except Exception as e:
         logger.error(f"应用随机颜色失败: {e}", exc_info=True)
+
+    # 处理简繁转换（使用客户端参数）
+    if chConvert in [1, 2] and comments_data:
+        try:
+            converter = None
+            if chConvert == 1:
+                converter = OpenCC('t2s')  # 繁转简
+            elif chConvert == 2:
+                converter = OpenCC('s2t')  # 简转繁
+
+            if converter:
+                for comment in comments_data:
+                    if 'm' in comment and comment['m']:
+                        comment['m'] = converter.convert(comment['m'])
+                logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 模式={chConvert}, 处理 {len(comments_data)} 条")
+        except Exception as e:
+            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")

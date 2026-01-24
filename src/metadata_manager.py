@@ -185,18 +185,21 @@ class MetadataSourceManager:
         """
         从所有启用的辅助源（包括强制启用的）进行搜索。
         返回一个元组：(别名集合, 补充搜索结果列表)
+
+        优化：对于 TMDB/Bangumi 等源，搜索结果不包含完整别名，
+        需要对前几个结果调用 get_details 获取完整别名（包括中文别名）。
         """
         enabled_sources_settings = []
         for provider, settings in self.source_settings.items():
             if not settings.get('isEnabled'):
                 continue
-            
+
             force_enabled_str = await self._config_manager.get(f"{provider}_force_aux_search", "false")
             force_enabled = force_enabled_str.lower() == 'true'
 
             if settings.get('isAuxSearchEnabled') or force_enabled:
                 enabled_sources_settings.append(settings)
-        
+
         if not enabled_sources_settings:
             return set(), []
 
@@ -221,12 +224,25 @@ class MetadataSourceManager:
         all_aliases: Set[str] = set()
         supplemental_results: List[models.ProviderSearchInfo] = []
 
+        # 收集需要获取详情的任务（用于获取完整别名）
+        detail_tasks = []
+        detail_task_info = []  # 记录每个任务对应的 (provider_name, source_instance, item)
+
         for i, res in enumerate(results):
             # 优化：现在每个源只产生一个任务，直接使用索引获取 provider_name
             provider_name = enabled_sources_settings[i]['providerName'] if i < len(enabled_sources_settings) else 'unknown'
+            source_instance = self.sources.get(provider_name)
 
             if isinstance(res, list):
                 self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果。")
+
+                # 对于 TMDB/TVDB/IMDB 等源，搜索结果不包含完整别名
+                # 需要对前几个结果调用 get_details 获取完整别名
+                # 注意：Bangumi 的 search 方法内部已经调用了 get_details，不需要再次获取
+                needs_detail_fetch = provider_name in ['tmdb', 'tvdb', 'imdb']
+                detail_fetch_count = 0
+                max_detail_fetch = 3  # 最多获取前3个结果的详情
+
                 for item in res:
                     all_aliases.add(item.title)
 
@@ -234,7 +250,7 @@ class MetadataSourceManager:
                     if item.aliasesCn:
                         all_aliases.update(item.aliasesCn)
 
-                    # 添加日文别名列表（修复：之前缺失）
+                    # 添加日文别名列表
                     if item.aliasesJp:
                         all_aliases.update(item.aliasesJp)
 
@@ -249,6 +265,17 @@ class MetadataSourceManager:
                     # 添加罗马音别名
                     if item.nameRomaji:
                         all_aliases.add(item.nameRomaji)
+
+                    # 如果搜索结果没有别名，且源支持获取详情，则添加到详情获取队列
+                    if needs_detail_fetch and source_instance and detail_fetch_count < max_detail_fetch:
+                        # 检查是否已经有别名（如果有就不需要再获取详情）
+                        has_aliases = bool(item.aliasesCn or item.aliasesJp or item.nameJp or item.nameEn)
+                        if not has_aliases:
+                            # 确定 mediaType
+                            media_type = item.type if hasattr(item, 'type') and item.type else 'tv'
+                            detail_tasks.append(source_instance.get_details(item.id, user, mediaType=media_type))
+                            detail_task_info.append((provider_name, item))
+                            detail_fetch_count += 1
 
                     # 如果是 'douban' 或 '360'，则将其结果添加到补充列表中
                     if provider_name in ['douban', '360']:
@@ -269,7 +296,32 @@ class MetadataSourceManager:
                     self.logger.warning(f"连接元数据源 '{provider_name}' 超时。")
                 else:
                     self.logger.error(f"元数据源 '{provider_name}' 的辅助搜索子任务失败: {res}", exc_info=False)
-        
+
+        # 并行获取详情以获取完整别名
+        if detail_tasks:
+            self.logger.info(f"正在获取 {len(detail_tasks)} 个搜索结果的详情以获取完整别名...")
+            detail_results = await asyncio.gather(*detail_tasks, return_exceptions=True)
+
+            for j, detail_res in enumerate(detail_results):
+                if isinstance(detail_res, models.MetadataDetailsResponse):
+                    provider_name, original_item = detail_task_info[j]
+
+                    # 添加详情中的别名
+                    if detail_res.aliasesCn:
+                        self.logger.debug(f"从 {provider_name} 详情获取到中文别名: {detail_res.aliasesCn}")
+                        all_aliases.update(detail_res.aliasesCn)
+                    if detail_res.aliasesJp:
+                        all_aliases.update(detail_res.aliasesJp)
+                    if detail_res.nameJp:
+                        all_aliases.add(detail_res.nameJp)
+                    if detail_res.nameEn:
+                        all_aliases.add(detail_res.nameEn)
+                    if detail_res.nameRomaji:
+                        all_aliases.add(detail_res.nameRomaji)
+                elif isinstance(detail_res, Exception):
+                    provider_name, _ = detail_task_info[j]
+                    self.logger.debug(f"获取 {provider_name} 详情失败: {detail_res}")
+
         return {alias for alias in all_aliases if alias}, supplemental_results
 
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:

@@ -34,6 +34,7 @@ from ..season_mapper import title_contains_season_name
 
 from ..timezone import get_now
 from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_SEARCH
+from ..name_converter import convert_to_chinese_title
 logger = logging.getLogger(__name__)
 
 # --- Helper Functions ---
@@ -519,6 +520,7 @@ async def search_media(
         # --- Start of new logic, copied and adapted from ui_api.py ---
         parsed_keyword = utils.parse_search_keyword(keyword)
         search_title = parsed_keyword["title"]
+        original_title = search_title  # 保存原始标题用于日志
         # Prioritize explicit query params over parsed ones
         final_season = season if season is not None else parsed_keyword.get("season")
         final_episode = episode if episode is not None else parsed_keyword.get("episode")
@@ -529,6 +531,22 @@ async def search_media(
         user = models.User(id=0, username="control_api")
 
         logger.info(f"Control API 正在搜索: '{keyword}' (解析为: title='{search_title}', season={final_season}, episode={final_episode})")
+        timer.step_end()
+
+        # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在所有处理之前执行）
+        timer.step_start("名称转换")
+        converted_title, conversion_applied = await convert_to_chinese_title(
+            search_title,
+            config_manager,
+            metadata_manager,
+            ai_matcher_manager,
+            user
+        )
+        if conversion_applied:
+            logger.info(f"✓ Control API 名称转换: '{original_title}' → '{converted_title}'")
+            search_title = converted_title
+        else:
+            logger.info(f"○ Control API 名称转换未生效: '{original_title}'")
         timer.step_end()
 
         if not manager.has_enabled_scrapers:

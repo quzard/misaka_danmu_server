@@ -58,6 +58,7 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 弹幕源
         'danmakuOutputLimitPerSource': ('-1', '弹幕输出上限。-1为无限制。超出限制时按时间段均匀采样。'),
         'danmakuMergeOutputEnabled': ('false', '是否启用合并输出。启用后，将所有源的弹幕合并后再进行均衡采样输出。'),
+        'danmakuChConvert': ('0', '弹幕简繁转换。0-不转换，1-转换为简体，2-转换为繁体。'),
         'danmakuRandomColorMode': ('off', '弹幕颜色转换模式：off(不使用)、white_to_random(白色弹幕随机染色)、all_random(全部随机染色)。'),
         'danmakuRandomColorPalette': (
             '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465',
@@ -140,10 +141,15 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiAliasValidationPrompt': (ai_prompts.get('DEFAULT_AI_ALIAS_VALIDATION_PROMPT', ''), 'AI别名验证提示词'),
             'aiAliasExpansionEnabled': ('false', '是否启用AI别名扩展。启用后，当元数据源返回非中文标题时，使用AI生成可能的别名用于搜索。'),
             'aiAliasExpansionPrompt': (ai_prompts.get('DEFAULT_AI_ALIAS_EXPANSION_PROMPT', ''), 'AI别名扩展提示词'),
+            'aiNameConversionEnabled': ('false', '是否启用AI名称转换（兜底）。启用后，当元数据源查询失败时使用AI进行名称转换。'),
+            'aiNameConversionPrompt': (ai_prompts.get('DEFAULT_AI_NAME_CONVERSION_PROMPT', ''), 'AI名称转换提示词'),
             'aiLogRawResponse': ('false', '是否记录AI原始响应到日志文件'),
             'seasonMappingPrompt': (ai_prompts.get('DEFAULT_AI_SEASON_MAPPING_PROMPT', ''), 'AI季度映射提示词。用于指导AI从元数据源搜索结果中选择最佳匹配。'),
             'aiCacheEnabled': ('true', '是否启用AI响应缓存。启用后，相同查询将直接返回缓存结果，降低API调用成本。'),
             'aiCacheTtl': ('3600', 'AI缓存过期时间(秒)。默认3600秒(1小时)。'),
+            # 名称转换功能配置
+            'nameConversionEnabled': ('false', '是否启用名称转换功能。启用后，搜索时自动将非中文名称转换为中文。'),
+            'nameConversionSourcePriority': ('[{"key":"bangumi","enabled":true},{"key":"tmdb","enabled":true},{"key":"tvdb","enabled":true},{"key":"douban","enabled":true},{"key":"imdb","enabled":true}]', '名称转换元数据源优先级配置（JSON格式）'),
         })
 
     return configs

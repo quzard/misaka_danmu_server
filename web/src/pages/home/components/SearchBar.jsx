@@ -53,7 +53,7 @@ export const SearchBar = () => {
     form.setFieldValue('keyword', `${keyword}${formatted}`)
   }
 
-  const onSearch = async values => {
+  const onSearch = async (values, page = 1, pageSize = 10) => {
     try {
       if (loading) return
       setLoading(true)
@@ -69,6 +69,8 @@ export const SearchBar = () => {
       const res = await getSearchResult(
         {
           keyword: values.keyword,
+          page,
+          pageSize,
         },
         onProgress
       )
