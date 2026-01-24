@@ -1106,7 +1106,7 @@ export const SearchResult = () => {
           <Spin spinning={paginationLoading}>
           <div
             ref={scrollContainerRef}
-            className="overflow-y-auto border border-gray-200 rounded-lg"
+            className="overflow-y-auto overflow-x-hidden border border-gray-200 rounded-lg"
             style={{ maxHeight: '600px', paddingLeft: isMobile ? 1 : 2, paddingRight: isMobile ? 1 : 2 }}
           >
           {!!renderData?.length ? (
@@ -1193,7 +1193,7 @@ export const SearchResult = () => {
                           <div className="mt-3">{supplementDom(item)}</div>
                         )}
                       </Col>
-                      <Col md={4} xs={11}>
+                      <Col md={4} xs={{ span: 11, offset: 1 }}>
                         <Button
                           block
                           type="default"
