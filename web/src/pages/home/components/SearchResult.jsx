@@ -1107,7 +1107,7 @@ export const SearchResult = () => {
           <div
             ref={scrollContainerRef}
             className="overflow-y-auto border border-gray-200 rounded-lg"
-            style={{ maxHeight: '600px' }}
+            style={{ maxHeight: '600px', paddingLeft: isMobile ? 1 : 2, paddingRight: isMobile ? 1 : 2 }}
           >
           {!!renderData?.length ? (
             <List
