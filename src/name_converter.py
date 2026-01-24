@@ -40,7 +40,9 @@ async def convert_to_chinese_title(
     """
     # 检查是否启用名称转换
     name_conversion_enabled_str = await config_manager.get("nameConversionEnabled", "false")
+    logger.info(f"名称转换配置检查: nameConversionEnabled='{name_conversion_enabled_str}'")
     if name_conversion_enabled_str.lower() != "true":
+        logger.info(f"○ 名称转换功能未启用，跳过: '{title}'")
         return title, False
     
     # 如果已经是中文标题，无需转换
