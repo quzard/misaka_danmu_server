@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input, Tooltip, Segmented } from 'antd'
+import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input, Tooltip } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   getDanmuOutputTotal,
@@ -14,8 +14,6 @@ import {
   setDanmakuBlacklistEnabled,
   getDanmakuBlacklistPatterns,
   setDanmakuBlacklistPatterns,
-  getDanmakuChConvert,
-  setDanmakuChConvert,
 } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 
@@ -72,7 +70,6 @@ export const OutputManage = () => {
   const [loading, setLoading] = useState(false)
   const [limit, setLimit] = useState('-1')
   const [mergeEnabled, setMergeEnabled] = useState(false)
-  const [chConvert, setChConvert] = useState('0')  // 简繁转换：0-关闭，1-简体，2-繁体
   const [saveLoading, setSaveLoading] = useState(false)
   const [colorMode, setColorMode] = useState('off')
   const [palette, setPalette] = useState(DEFAULT_COLOR_PALETTE)
@@ -87,14 +84,13 @@ export const OutputManage = () => {
   const getConfig = async () => {
     setLoading(true)
     try {
-      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes, chConvertRes] = await Promise.all([
+      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes] = await Promise.all([
         getDanmuOutputTotal(),
         getDanmakuMergeOutputEnabled(),
         getDanmakuRandomColorMode(),
         getDanmakuRandomColorPalette(),
         getDanmakuBlacklistEnabled(),
         getDanmakuBlacklistPatterns(),
-        getDanmakuChConvert(),
       ])
       setLimit(limitRes.data?.value ?? '-1')
       setMergeEnabled(mergeEnabledRes.data?.value === 'true')
@@ -102,7 +98,6 @@ export const OutputManage = () => {
       setPalette(parsePaletteFromServer(colorPaletteRes.data?.value))
       setBlacklistEnabled(blacklistEnabledRes.data?.value === 'true')
       setBlacklistPatterns(blacklistPatternsRes.data?.value || '')
-      setChConvert(chConvertRes.data?.value || '0')
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -117,7 +112,6 @@ export const OutputManage = () => {
       await Promise.all([
         setDanmuOutputTotal({ value: `${limit}` }),
         setDanmakuMergeOutputEnabled({ value: mergeEnabled ? 'true' : 'false' }),
-        setDanmakuChConvert({ value: chConvert }),
       ])
       messageApi.success('弹幕输出配置已保存')
     } catch (e) {
@@ -200,22 +194,6 @@ export const OutputManage = () => {
                   <QuestionCircleOutlined className="text-gray-400 cursor-help" />
                 </Tooltip>
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span>简繁转换</span>
-              <Segmented
-                value={chConvert}
-                onChange={setChConvert}
-                options={[
-                  { label: '繁', value: '2' },
-                  { label: '关', value: '0' },
-                  { label: '简', value: '1' },
-                ]}
-                size="small"
-              />
-              <Tooltip title="强制将弹幕内容转换为简体或繁体中文。关闭时不转换。">
-                <QuestionCircleOutlined className="text-gray-400 cursor-help" />
-              </Tooltip>
             </div>
           </div>
           <div className="text-sm text-gray-600">

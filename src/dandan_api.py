@@ -2973,17 +2973,22 @@ async def get_external_comments_from_url(
         # 缓存结果5小时 (18000秒)
         await crud.set_cache(session, cache_key, comments_data, 18000)
 
-    # 处理简繁转换
-    if chConvert in [1, 2]:
-        converter = None
-        if chConvert == 1:
-            converter = OpenCC('t2s')  # 繁转简
-        elif chConvert == 2:
-            converter = OpenCC('s2t')  # 简转繁
-        
-        if converter:
-            for comment in comments_data:
-                comment['m'] = converter.convert(comment['m'])
+    # 处理简繁转换（使用客户端参数）
+    if chConvert in [1, 2] and comments_data:
+        try:
+            converter = None
+            if chConvert == 1:
+                converter = OpenCC('t2s')  # 繁转简
+            elif chConvert == 2:
+                converter = OpenCC('s2t')  # 简转繁
+
+            if converter:
+                for comment in comments_data:
+                    if 'm' in comment and comment['m']:
+                        comment['m'] = converter.convert(comment['m'])
+                logger.debug(f"外部弹幕简繁转换 (url: {url}): 模式={chConvert}, 处理 {len(comments_data)} 条")
+        except Exception as e:
+            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = _process_comments_for_dandanplay(comments_data)
@@ -3941,25 +3946,22 @@ async def get_comments_for_dandan(
     except Exception as e:
         logger.error(f"应用随机颜色失败: {e}", exc_info=True)
 
-    # 应用服务端简繁转换配置（优先级高于客户端参数）
-    try:
-        server_ch_convert = await config_manager.get('danmakuChConvert', '0')
-        # 服务端配置优先，如果服务端配置为0（关闭），则使用客户端参数
-        effective_ch_convert = int(server_ch_convert) if server_ch_convert != '0' else chConvert
-        if effective_ch_convert in [1, 2] and comments_data:
+    # 处理简繁转换（使用客户端参数）
+    if chConvert in [1, 2] and comments_data:
+        try:
             converter = None
-            if effective_ch_convert == 1:
+            if chConvert == 1:
                 converter = OpenCC('t2s')  # 繁转简
-            elif effective_ch_convert == 2:
+            elif chConvert == 2:
                 converter = OpenCC('s2t')  # 简转繁
 
             if converter:
                 for comment in comments_data:
                     if 'm' in comment and comment['m']:
                         comment['m'] = converter.convert(comment['m'])
-                logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 模式={effective_ch_convert}, 处理 {len(comments_data)} 条")
-    except Exception as e:
-        logger.error(f"应用简繁转换失败: {e}", exc_info=True)
+                logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 模式={chConvert}, 处理 {len(comments_data)} 条")
+        except Exception as e:
+            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")
