@@ -1085,7 +1085,7 @@ export const SearchResult = () => {
               )}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">显示</span>
+              <span className={`text-gray-500 ${isMobile ? 'text-xs' : 'text-sm'}`}>显示</span>
               <Select
                 value={autoLoadMode ? 'auto' : pageSize}
                 onChange={handleModeChange}
@@ -1097,7 +1097,7 @@ export const SearchResult = () => {
                   { label: '自动加载', value: 'auto' },
                 ]}
                 size="small"
-                style={{ width: 100 }}
+                style={{ width: isMobile ? 85 : 100, fontSize: isMobile ? 12 : 14 }}
               />
             </div>
           </div>
@@ -1192,7 +1192,7 @@ export const SearchResult = () => {
                           <div className="mt-3">{supplementDom(item)}</div>
                         )}
                       </Col>
-                      <Col md={4} xs={12}>
+                      <Col md={4} xs={10}>
                         <Button
                           block
                           type="default"
@@ -1238,7 +1238,7 @@ export const SearchResult = () => {
                           编辑导入
                         </Button>
                       </Col>
-                      <Col md={4} xs={12}>
+                      <Col md={4} xs={10}>
                         <Button
                           block
                           loading={loading}
