@@ -1107,13 +1107,14 @@ export const SearchResult = () => {
           <div
             ref={scrollContainerRef}
             className="overflow-y-auto border border-gray-200 rounded-lg"
-            style={{ maxHeight: '600px', paddingLeft: isMobile ? 1 : 2, paddingRight: isMobile ? 1 : 2 }}
+            style={{ maxHeight: '600px' }}
           >
           {!!renderData?.length ? (
             <List
               itemLayout="vertical"
               size="large"
               dataSource={renderData}
+              style={{ paddingLeft: isMobile ? 1 : 2, paddingRight: isMobile ? 1 : 2 }}
               footer={autoLoadMode && hasMore ? (
                 <div className="text-center py-4 text-gray-500">
                   {paginationLoading ? '加载中...' : '滚动加载更多'}
