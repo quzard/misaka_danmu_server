@@ -1107,7 +1107,7 @@ export const SearchResult = () => {
           <div
             ref={scrollContainerRef}
             className="overflow-y-auto overflow-x-hidden border border-gray-200 rounded-lg"
-            style={{ maxHeight: '600px', paddingLeft: isMobile ? 1 : 2, paddingRight: isMobile ? 1 : 2 }}
+            style={{ maxHeight: '600px' }}
           >
           {!!renderData?.length ? (
             <List
@@ -1122,9 +1122,12 @@ export const SearchResult = () => {
               renderItem={item => {
                 const isActive = selectList.includes(item)
                 return (
-                  <List.Item key={`${item.mediaId}-${item.provider}`}>
-                    <Row gutter={[12, 12]}>
-                      <Col md={16} xs={24}>
+                  <List.Item
+                    key={`${item.mediaId}-${item.provider}`}
+                    style={{ paddingLeft: isMobile ? 8 : 16, paddingRight: isMobile ? 8 : 16 }}
+                  >
+                    <Row gutter={[8, 8]}>
+                      <Col md={15} xs={24}>
                         <div
                           className="flex items-center justify-start relative cursor-pointer"
                           onClick={() =>
@@ -1239,7 +1242,7 @@ export const SearchResult = () => {
                           编辑导入
                         </Button>
                       </Col>
-                      <Col md={4} xs={11}>
+                      <Col md={5} xs={11}>
                         <Button
                           block
                           loading={loading}
