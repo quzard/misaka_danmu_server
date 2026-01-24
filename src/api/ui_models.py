@@ -20,6 +20,10 @@ class UIProviderSearchResponse(BaseModel):
     search_season: Optional[int] = None
     search_episode: Optional[int] = None
     supplemental_results: List[Dict] = Field(default_factory=list, description="来自补充源（如360, Douban）的搜索结果")
+    # 分页相关字段
+    total: int = Field(0, description="总结果数")
+    page: int = Field(1, description="当前页码")
+    pageSize: int = Field(10, description="每页数量")
 
 
 class RefreshPosterRequest(BaseModel):

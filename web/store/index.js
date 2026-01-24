@@ -14,6 +14,9 @@ export const lastSearchResultAtom = atomWithStorage(
     results: [],
     searchSeason: null,
     keyword: '',
+    total: 0,
+    page: 1,
+    pageSize: 10,
   },
   undefined,
   { getOnInit: true }

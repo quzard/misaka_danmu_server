@@ -92,6 +92,12 @@ async def search_anime_local(
 async def search_anime_provider(
     request: Request,
     keyword: str = Query(..., min_length=1, description="搜索关键词"),
+    page: int = Query(1, ge=1, description="页码，从1开始"),
+    pageSize: int = Query(10, ge=10, le=100, description="每页数量，10-100"),
+    typeFilter: Optional[str] = Query(None, description="类型过滤: tv_series, movie"),
+    yearFilter: Optional[int] = Query(None, description="年份过滤"),
+    providerFilter: Optional[str] = Query(None, description="来源过滤: bilibili, tencent等"),
+    titleFilter: Optional[str] = Query(None, description="标题关键词过滤"),
     manager: ScraperManager = Depends(get_scraper_manager),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
@@ -189,12 +195,32 @@ async def search_anime_provider(
             for item in results:
                 item.currentEpisodeIndex = episode_to_filter
 
+            # 过滤处理
+            filtered_results = results
+            if typeFilter:
+                filtered_results = [item for item in filtered_results if item.type == typeFilter]
+            if yearFilter:
+                filtered_results = [item for item in filtered_results if item.year == yearFilter]
+            if providerFilter:
+                filtered_results = [item for item in filtered_results if item.provider == providerFilter]
+            if titleFilter:
+                filtered_results = [item for item in filtered_results if titleFilter.lower() in item.title.lower()]
+
+            # 分页处理
+            total = len(filtered_results)
+            start_idx = (page - 1) * pageSize
+            end_idx = start_idx + pageSize
+            paginated_results = filtered_results[start_idx:end_idx]
+
             timer.finish()  # 打印计时报告
             return UIProviderSearchResponse(
-                results=[item.model_dump() for item in results],
+                results=[item.model_dump() for item in paginated_results],
                 supplemental_results=[models.ProviderSearchInfo.model_validate(item).model_dump() for item in cached_supplemental_results],
                 search_season=season_to_filter,
-                search_episode=episode_to_filter
+                search_episode=episode_to_filter,
+                total=total,
+                page=page,
+                pageSize=pageSize
             )
 
         timer.step_end(details="缓存未命中")
@@ -476,12 +502,32 @@ async def search_anime_provider(
             logger.warning(f"主页搜索 统一AI映射任务执行失败: {e}")
             timer.step_end(details=f"失败: {e}")
 
+    # 过滤处理
+    filtered_results = sorted_results
+    if typeFilter:
+        filtered_results = [item for item in filtered_results if item.type == typeFilter]
+    if yearFilter:
+        filtered_results = [item for item in filtered_results if item.year == yearFilter]
+    if providerFilter:
+        filtered_results = [item for item in filtered_results if item.provider == providerFilter]
+    if titleFilter:
+        filtered_results = [item for item in filtered_results if titleFilter.lower() in item.title.lower()]
+
+    # 分页处理
+    total = len(filtered_results)
+    start_idx = (page - 1) * pageSize
+    end_idx = start_idx + pageSize
+    paginated_results = filtered_results[start_idx:end_idx]
+
     timer.finish()  # 打印搜索计时报告
     return UIProviderSearchResponse(
-        results=[item.model_dump() for item in sorted_results],
+        results=[item.model_dump() for item in paginated_results],
         supplemental_results=[item.model_dump() for item in supplemental_results] if supplemental_results else [],
         search_season=season_to_filter,
-        search_episode=episode_to_filter
+        search_episode=episode_to_filter,
+        total=total,
+        page=page,
+        pageSize=pageSize
     )
 
 

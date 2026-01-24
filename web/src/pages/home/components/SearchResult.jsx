@@ -4,8 +4,9 @@ import {
   getTmdbSearch,
   importDanmu,
   importEdit,
+  getSearchResult,
 } from '../../../apis'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
   Button,
   Card,
@@ -24,6 +25,8 @@ import {
   Checkbox,
   Popover,
   Select,
+  Pagination,
+  Spin,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -141,10 +144,138 @@ export const SearchResult = () => {
 
   const [keyword, setKeyword] = useState('')
 
-  /** 渲染使用的数据 */
-  const [renderData, setRenderData] = useState(
-    lastSearchResultData.results || []
-  )
+  /** 自动加载模式 */
+  const [autoLoadMode, setAutoLoadMode] = useState(false)
+  const [accumulatedResults, setAccumulatedResults] = useState([])
+  const scrollContainerRef = useRef(null)
+
+  /** 渲染使用的数据 - 自动加载模式使用累积数据，否则使用后端返回的数据 */
+  const renderData = autoLoadMode ? accumulatedResults : (lastSearchResultData.results || [])
+
+  /** 分页相关 - 从后端数据获取 */
+  const [pageSize, setPageSize] = useState(lastSearchResultData.pageSize || 10)
+  const [currentPage, setCurrentPage] = useState(lastSearchResultData.page || 1)
+  const [paginationLoading, setPaginationLoading] = useState(false)
+
+  // 总数从后端获取
+  const total = lastSearchResultData.total || 0
+
+  // 是否还有更多数据可加载
+  const hasMore = autoLoadMode && accumulatedResults.length < total
+
+  // 后端过滤请求函数
+  const fetchWithFilters = useCallback(async (page, size, filters = {}, isLoadMore = false) => {
+    if (!lastSearchResultData.keyword) return
+    setPaginationLoading(true)
+    try {
+      const res = await getSearchResult({
+        keyword: lastSearchResultData.keyword,
+        page,
+        pageSize: size,
+        typeFilter: filters.typeFilter || typeFilter,
+        yearFilter: filters.yearFilter || yearFilter,
+        providerFilter: filters.providerFilter || providerFilter,
+        titleFilter: filters.titleFilter !== undefined ? filters.titleFilter : keyword,
+      })
+
+      const newData = res?.data || {}
+
+      // 自动加载模式：累积数据
+      if (isLoadMore && autoLoadMode) {
+        setAccumulatedResults(prev => [...prev, ...(newData.results || [])])
+      } else if (autoLoadMode) {
+        // 自动加载模式首次加载
+        setAccumulatedResults(newData.results || [])
+      }
+
+      setLastSearchResultData({
+        ...newData,
+        keyword: lastSearchResultData.keyword,
+      })
+      setCurrentPage(page)
+      if (!autoLoadMode) {
+        setPageSize(size)
+      }
+    } catch (error) {
+      console.error(`请求失败: ${error.message || error}`)
+    } finally {
+      setPaginationLoading(false)
+    }
+  }, [lastSearchResultData.keyword, setLastSearchResultData, typeFilter, yearFilter, providerFilter, keyword, autoLoadMode])
+
+  // 加载更多（自动加载模式）
+  const loadMore = useCallback(() => {
+    if (paginationLoading || !hasMore) return
+    const nextPage = currentPage + 1
+    fetchWithFilters(nextPage, 20, {}, true)
+  }, [paginationLoading, hasMore, currentPage, fetchWithFilters])
+
+  // 滚动监听（自动加载模式）
+  useEffect(() => {
+    if (!autoLoadMode || !scrollContainerRef.current) return
+
+    const container = scrollContainerRef.current
+    const handleScroll = () => {
+      if (paginationLoading || !hasMore) return
+      const { scrollTop, scrollHeight, clientHeight } = container
+      // 距离底部 100px 时触发加载
+      if (scrollHeight - scrollTop - clientHeight < 100) {
+        loadMore()
+      }
+    }
+
+    container.addEventListener('scroll', handleScroll)
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [autoLoadMode, paginationLoading, hasMore, loadMore])
+
+  // 页码变化
+  const handlePageChange = (page, size) => {
+    if (size !== pageSize) {
+      // pageSize 变化时，重置到第一页
+      fetchWithFilters(1, size)
+    } else {
+      fetchWithFilters(page, size)
+    }
+  }
+
+  // 切换分页模式
+  const handleModeChange = (value) => {
+    if (value === 'auto') {
+      setAutoLoadMode(true)
+      setAccumulatedResults(lastSearchResultData.results || [])
+      // 自动加载模式使用固定的 pageSize
+    } else {
+      setAutoLoadMode(false)
+      setAccumulatedResults([])
+      setPageSize(value)
+      fetchWithFilters(1, value)
+    }
+  }
+
+  // 过滤条件变化时，重新请求后端（重置到第一页）
+  const handleFilterChange = (filterType, value) => {
+    const newFilters = {
+      typeFilter,
+      yearFilter,
+      providerFilter,
+      titleFilter: keyword,
+    }
+    newFilters[filterType] = value
+
+    // 更新本地状态
+    if (filterType === 'typeFilter') setTypeFilter(value)
+    if (filterType === 'yearFilter') setYearFilter(value)
+    if (filterType === 'providerFilter') setProviderFilter(value)
+    if (filterType === 'titleFilter') setKeyword(value)
+
+    // 重置自动加载累积数据
+    if (autoLoadMode) {
+      setAccumulatedResults([])
+    }
+
+    // 请求后端
+    fetchWithFilters(1, autoLoadMode ? 20 : pageSize, newFilters)
+  }
 
   useEffect(() => {
     setSelectList([])
@@ -175,17 +306,7 @@ export const SearchResult = () => {
     })
   }, [selectList])
 
-  useEffect(() => {
-    const list =
-      lastSearchResultData.results
-        ?.filter(it => it.title.includes(keyword))
-        ?.filter(it => typeFilter === 'all' || it.type === typeFilter)
-        ?.filter(it => yearFilter === 'all' || it.year === yearFilter)
-        ?.filter(
-          it => providerFilter === 'all' || it.provider === providerFilter
-        ) || []
-    setRenderData(list)
-  }, [keyword, typeFilter, lastSearchResultData, yearFilter, providerFilter])
+  // 注意：过滤现在由后端处理，不再需要前端过滤 useEffect
 
   const { years, providers } = useMemo(() => {
     if (!lastSearchResultData.results?.length)
@@ -435,7 +556,7 @@ export const SearchResult = () => {
         ),
       },
     ],
-    onClick: ({ key }) => setTypeFilter(key),
+    onClick: ({ key }) => handleFilterChange('typeFilter', key),
   }
 
   // 年份筛选菜单
@@ -444,7 +565,7 @@ export const SearchResult = () => {
       { key: 'all', label: '所有年份' },
       ...years.map(year => ({ key: year, label: `${year}年` })),
     ],
-    onClick: ({ key }) => setYearFilter(key === 'all' ? 'all' : Number(key)),
+    onClick: ({ key }) => handleFilterChange('yearFilter', key === 'all' ? 'all' : Number(key)),
   }
 
   // 来源筛选菜单
@@ -456,7 +577,7 @@ export const SearchResult = () => {
         label: p.charAt(0).toUpperCase() + p.slice(1),
       })),
     ],
-    onClick: ({ key }) => setProviderFilter(key),
+    onClick: ({ key }) => handleFilterChange('providerFilter', key),
   }
 
   // 处理拖拽开始
@@ -791,11 +912,13 @@ export const SearchResult = () => {
                     <Popover
                       content={
                         <div style={{ width: 250 }}>
-                          <Input
+                          <Input.Search
                             placeholder="输入标题关键词过滤"
                             allowClear
                             value={keyword}
                             onChange={e => setKeyword(e.target.value)}
+                            onSearch={value => handleFilterChange('titleFilter', value)}
+                            enterButton="过滤"
                             autoFocus
                           />
                         </div>
@@ -895,11 +1018,13 @@ export const SearchResult = () => {
                   <Popover
                     content={
                       <div style={{ width: 250 }}>
-                        <Input
+                        <Input.Search
                           placeholder="输入标题关键词过滤"
                           allowClear
                           value={keyword}
                           onChange={e => setKeyword(e.target.value)}
+                          onSearch={value => handleFilterChange('titleFilter', value)}
+                          enterButton="过滤"
                           autoFocus
                         />
                       </div>
@@ -947,11 +1072,52 @@ export const SearchResult = () => {
                 </div>
               )}
             </div>
+          {/* 分页信息和控件 */}
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <div className="text-sm text-gray-500">
+              {autoLoadMode ? (
+                <>已加载 {accumulatedResults.length} / {total} 条结果</>
+              ) : (
+                <>
+                  共 {total} 条结果
+                  {total > 0 && ` (第 ${(currentPage - 1) * pageSize + 1}-${Math.min(currentPage * pageSize, total)} 条)`}
+                </>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">显示</span>
+              <Select
+                value={autoLoadMode ? 'auto' : pageSize}
+                onChange={handleModeChange}
+                options={[
+                  { label: '10条/页', value: 10 },
+                  { label: '20条/页', value: 20 },
+                  { label: '50条/页', value: 50 },
+                  { label: '100条/页', value: 100 },
+                  { label: '自动加载', value: 'auto' },
+                ]}
+                size="small"
+                style={{ width: 100 }}
+              />
+            </div>
+          </div>
+          {/* 固定高度滚动区域 */}
+          <Spin spinning={paginationLoading}>
+          <div
+            ref={scrollContainerRef}
+            className="overflow-y-auto border border-gray-200 rounded-lg"
+            style={{ maxHeight: '600px' }}
+          >
           {!!renderData?.length ? (
             <List
               itemLayout="vertical"
               size="large"
               dataSource={renderData}
+              footer={autoLoadMode && hasMore ? (
+                <div className="text-center py-4 text-gray-500">
+                  {paginationLoading ? '加载中...' : '滚动加载更多'}
+                </div>
+              ) : null}
               renderItem={item => {
                 const isActive = selectList.includes(item)
                 return (
@@ -1092,6 +1258,22 @@ export const SearchResult = () => {
             />
           ) : (
             <Empty description="暂无搜索结果" />
+          )}
+          </div>
+          </Spin>
+          {/* 底部分页控件 - 自动加载模式下隐藏 */}
+          {!autoLoadMode && total > pageSize && (
+            <div className="flex justify-center mt-4">
+              <Pagination
+                current={currentPage}
+                pageSize={pageSize}
+                total={total}
+                onChange={(page) => handlePageChange(page, pageSize)}
+                showQuickJumper
+                size={isMobile ? 'small' : 'default'}
+                simple={isMobile}
+              />
+            </div>
           )}
         </div>
         </div>

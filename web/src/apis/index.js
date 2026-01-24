@@ -96,11 +96,27 @@ export const clearSearchCache = () => api.post('/api/ui/cache/clear')
 
 /** 搜索结果 */
 export const getSearchResult = (data, onProgress) => {
+  const params = {
+    keyword: data.keyword,
+    page: data.page || 1,
+    pageSize: data.pageSize || 10,
+  }
+  // 添加可选的过滤参数
+  if (data.typeFilter && data.typeFilter !== 'all') {
+    params.typeFilter = data.typeFilter
+  }
+  if (data.yearFilter && data.yearFilter !== 'all') {
+    params.yearFilter = data.yearFilter
+  }
+  if (data.providerFilter && data.providerFilter !== 'all') {
+    params.providerFilter = data.providerFilter
+  }
+  if (data.titleFilter) {
+    params.titleFilter = data.titleFilter
+  }
   return api.get(
     '/api/ui/search/provider',
-    {
-      keyword: data.keyword,
-    },
+    params,
     {
       onDownloadProgress: onProgress,
     }
