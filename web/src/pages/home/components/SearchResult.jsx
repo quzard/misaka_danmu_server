@@ -1127,7 +1127,7 @@ export const SearchResult = () => {
                     style={{ paddingLeft: isMobile ? 8 : 16, paddingRight: isMobile ? 8 : 16 }}
                   >
                     <Row gutter={[8, 8]}>
-                      <Col md={14} xs={24}>
+                      <Col md={15} xs={24}>
                         <div
                           className="flex items-center justify-start relative cursor-pointer"
                           onClick={() =>
