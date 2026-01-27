@@ -144,6 +144,10 @@ export const SearchResult = () => {
 
   const [keyword, setKeyword] = useState('')
 
+  /** 保存原始的年份和来源列表（不随过滤变化） */
+  const [availableYears, setAvailableYears] = useState([])
+  const [availableProviders, setAvailableProviders] = useState([])
+
   /** 自动加载模式 */
   const [autoLoadMode, setAutoLoadMode] = useState(false)
   const [accumulatedResults, setAccumulatedResults] = useState([])
@@ -285,6 +289,9 @@ export const SearchResult = () => {
     if (searchLoading) {
       setYearFilter('all')
       setProviderFilter('all')
+      // 新搜索开始时，清空可用列表（等待新数据）
+      setAvailableYears([])
+      setAvailableProviders([])
     }
   }, [searchLoading])
 
@@ -308,20 +315,26 @@ export const SearchResult = () => {
 
   // 注意：过滤现在由后端处理，不再需要前端过滤 useEffect
 
-  const { years, providers } = useMemo(() => {
-    if (!lastSearchResultData.results?.length)
-      return { years: [], providers: [] }
-    const yearSet = new Set()
-    const providerSet = new Set()
-    lastSearchResultData.results.forEach(item => {
-      if (item.year) yearSet.add(item.year)
-      if (item.provider) providerSet.add(item.provider)
-    })
-    return {
-      years: Array.from(yearSet).sort((a, b) => b - a),
-      providers: Array.from(providerSet).sort(),
+  // 当没有过滤条件且有新数据时，更新可用的年份和来源列表
+  useEffect(() => {
+    // 只有在没有任何过滤条件时，才更新可用列表
+    if (yearFilter === 'all' && providerFilter === 'all' && typeFilter === 'all' && !keyword) {
+      if (lastSearchResultData.results?.length) {
+        const yearSet = new Set()
+        const providerSet = new Set()
+        lastSearchResultData.results.forEach(item => {
+          if (item.year) yearSet.add(item.year)
+          if (item.provider) providerSet.add(item.provider)
+        })
+        setAvailableYears(Array.from(yearSet).sort((a, b) => b - a))
+        setAvailableProviders(Array.from(providerSet).sort())
+      }
     }
-  }, [lastSearchResultData.results])
+  }, [lastSearchResultData.results, yearFilter, providerFilter, typeFilter, keyword])
+
+  // 使用保存的可用列表，而不是从当前过滤后的数据中提取
+  const years = availableYears
+  const providers = availableProviders
 
   const handleImportDanmu = async item => {
     try {
