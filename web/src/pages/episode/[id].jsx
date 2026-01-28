@@ -384,16 +384,16 @@ export const EpisodeDetail = () => {
     const hasPreviewChange = isPreviewMode && previewTitle && previewTitle !== data.title
     return (
       <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
-        <td className="p-2 border cursor-move" {...attributes} {...listeners}>
+        <td className="p-2 border border-gray-200 dark:border-gray-600 cursor-move" {...attributes} {...listeners}>
           <HolderOutlined />
         </td>
-        <td className="p-2 border text-xs">{data.episodeId}</td>
-        <td className="p-2 border">
+        <td className="p-2 border border-gray-200 dark:border-gray-600 text-xs">{data.episodeId}</td>
+        <td className="p-2 border border-gray-200 dark:border-gray-600">
           {hasPreviewChange ? (
             <div className="text-sm">
               <span className="text-gray-400 line-through">{data.title}</span>
               <span className="mx-1 text-blue-500">→</span>
-              <span className="text-green-600 font-medium">{previewTitle}</span>
+              <span className="text-green-600 dark:text-green-400 font-medium">{previewTitle}</span>
             </div>
           ) : (
             <Input
@@ -405,7 +405,7 @@ export const EpisodeDetail = () => {
             />
           )}
         </td>
-        <td className="p-2 border">
+        <td className="p-2 border border-gray-200 dark:border-gray-600">
           <InputNumber
             size="small"
             min={1}
@@ -1549,19 +1549,19 @@ export const EpisodeDetail = () => {
                   placeholder="偏移量"
                   className="w-28"
                 />
-                <span className="text-gray-500 text-sm">正数增加，负数减少</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">正数增加，负数减少</span>
               </>
             )}
             {batchIndexMode === 'reorder' && (
               <>
-                <span className="text-gray-500 text-sm">从第</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">从第</span>
                 <InputNumber
                   value={batchReorderStart}
                   onChange={setBatchReorderStart}
                   min={1}
                   className="w-20"
                 />
-                <span className="text-gray-500 text-sm">集开始</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">集开始</span>
               </>
             )}
             <Button
@@ -1578,7 +1578,7 @@ export const EpisodeDetail = () => {
           <div className="font-medium mb-2">📝 批量命名规则</div>
           {/* 添加规则区域 */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-gray-500 text-sm">添加规则:</span>
+            <span className="text-gray-500 dark:text-gray-400 text-sm">添加规则:</span>
             <Select
               value={selectedRuleType}
               onChange={(v) => { setSelectedRuleType(v); setRuleParams({}) }}
@@ -1808,7 +1808,7 @@ export const EpisodeDetail = () => {
                 </div>
                 {/* 第三行：效果预览 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">效果预览:</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">效果预览:</span>
                   <span className="text-sm font-mono text-blue-600 dark:text-blue-400 font-semibold">
                     {
                       ruleParams.position === 'start'
@@ -1837,11 +1837,11 @@ export const EpisodeDetail = () => {
           </div>
           {/* 已添加的规则列表 */}
           {renameRules.length > 0 && (
-            <div className="border rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
+            <div className="border border-gray-200 dark:border-gray-600 rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
               {renameRules.map((rule, idx) => (
-                <div key={rule.id} className="flex items-center gap-2 py-1 border-b last:border-b-0">
+                <div key={rule.id} className="flex items-center gap-2 py-1 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
                   <input type="checkbox" checked={rule.enabled} onChange={() => handleToggleRule(rule.id)} />
-                  <span className="text-gray-500 text-xs">{idx + 1}.</span>
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">{idx + 1}.</span>
                   <Tag color={rule.enabled ? 'blue' : 'default'}>{ruleTypeOptions.find(r => r.value === rule.type)?.label}</Tag>
                   <span className="text-sm flex-1 truncate">
                     {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
@@ -1893,19 +1893,19 @@ export const EpisodeDetail = () => {
         </div>
 
         {/* 可拖拽编辑表格 */}
-        <div className="border rounded overflow-auto" style={{ maxHeight: 400 }}>
+        <div className="border border-gray-200 dark:border-gray-600 rounded overflow-auto" style={{ maxHeight: 400 }}>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={batchEditData.map(item => item.episodeId)} strategy={verticalListSortingStrategy}>
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                   <tr>
-                    <th className="p-2 border w-10">拖拽</th>
-                    <th className="p-2 border w-32">ID</th>
-                    <th className="p-2 border">剧集名</th>
-                    <th className="p-2 border w-24">集数</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-10">拖拽</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-32">ID</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600">剧集名</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-24">集数</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-white dark:bg-gray-800">
                   {batchEditData.map((item, index) => (
                     <SortableRow key={item.episodeId} id={item.episodeId} data={item} index={index} />
                   ))}
@@ -1914,7 +1914,7 @@ export const EpisodeDetail = () => {
             </SortableContext>
           </DndContext>
         </div>
-        <div className="mt-2 text-gray-500 text-sm">
+        <div className="mt-2 text-gray-500 dark:text-gray-400 text-sm">
           💡 拖拽行可调整顺序，点击"确认提交"后才会保存更改
         </div>
       </Modal>
