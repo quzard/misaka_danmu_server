@@ -88,6 +88,7 @@ def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
                 pass
 
     client_ip_str = request.client.host if request.client else "127.0.0.1"
+    original_client_ip = client_ip_str  # 保存原始 IP 用于调试
 
     if trusted_networks:
         try:
@@ -95,12 +96,19 @@ def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
             is_trusted = any(client_addr in network for network in trusted_networks)
             if is_trusted:
                 x_forwarded_for = request.headers.get("x-forwarded-for")
+                x_real_ip = request.headers.get("x-real-ip")
                 if x_forwarded_for:
                     client_ip_str = x_forwarded_for.split(',')[0].strip()
+                    logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, X-Forwarded-For={x_forwarded_for}, 解析后IP={client_ip_str}")
+                elif x_real_ip:
+                    client_ip_str = x_real_ip
+                    logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, X-Real-IP={x_real_ip}, 解析后IP={client_ip_str}")
                 else:
-                    client_ip_str = request.headers.get("x-real-ip", client_ip_str)
-        except ValueError:
-            pass
+                    logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, 但无X-Forwarded-For或X-Real-IP头")
+            else:
+                logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=False, 配置的受信任网段={[str(n) for n in trusted_networks]}")
+        except ValueError as e:
+            logger.warning(f"[IP解析] 无法解析IP地址: {client_ip_str}, 错误: {e}")
 
     return client_ip_str
 
@@ -139,6 +147,8 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
     trusted_proxies_str = await crud.get_config_value(session, "trustedProxies", "")
     client_ip_str = _get_real_client_ip_sync(request, trusted_proxies_str)
 
+    logger.debug(f"[IP白名单检查] 客户端IP={client_ip_str}, 白名单配置={ip_whitelist_str}, 受信任代理={trusted_proxies_str}")
+
     # 解析白名单网段（每次都解析，以便检测配置变更）
     whitelist_networks = []
     for entry in ip_whitelist_str.split(','):
@@ -163,7 +173,10 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
             logger.warning(f"无效的 IP 白名单条目: '{entry}'，已忽略。")
 
     if not whitelist_networks:
+        logger.debug(f"[IP白名单检查] 解析后白名单网段为空")
         return None
+
+    logger.debug(f"[IP白名单检查] 解析后白名单网段={[str(n) for n in whitelist_networks]}")
 
     # 获取 User-Agent 并生成哈希（用于区分同 IP 不同浏览器）
     user_agent = request.headers.get("user-agent", "")

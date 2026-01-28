@@ -111,9 +111,11 @@ async def get_user_sessions(
 
     sessions = await session_crud.get_user_sessions(session, user_in_db["id"])
 
-    # 标记当前会话
+    # 标记当前会话和白名单会话
     for s in sessions:
         s["isCurrent"] = (s["jti"] == current_jti)
+        # 白名单会话的 jti 以 "whitelist_" 开头
+        s["isWhitelist"] = s["jti"].startswith("whitelist_") if s["jti"] else False
 
     return {"sessions": sessions, "currentJti": current_jti}
 

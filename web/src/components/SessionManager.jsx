@@ -7,6 +7,7 @@ import {
   GlobalOutlined,
   DeleteOutlined,
   ExclamationCircleOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { getUserSessions, revokeSession, revokeOtherSessions } from '../apis/index.js'
 import { useMessage } from '../MessageContext'
@@ -18,23 +19,27 @@ import dayjs from 'dayjs'
 const parseUserAgent = (ua) => {
   if (!ua) return { browser: '未知浏览器', os: '未知系统', isMobile: false }
 
-  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua)
+  // 检查是否是白名单会话（UA 以 [白名单] 开头）
+  const isWhitelistUA = ua.startsWith('[白名单]')
+  const cleanUA = isWhitelistUA ? ua.replace('[白名单] ', '') : ua
+
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(cleanUA)
 
   // 解析浏览器
   let browser = '未知浏览器'
-  if (ua.includes('Edg/')) browser = 'Edge'
-  else if (ua.includes('Chrome/')) browser = 'Chrome'
-  else if (ua.includes('Firefox/')) browser = 'Firefox'
-  else if (ua.includes('Safari/') && !ua.includes('Chrome')) browser = 'Safari'
-  else if (ua.includes('Opera') || ua.includes('OPR/')) browser = 'Opera'
+  if (cleanUA.includes('Edg/')) browser = 'Edge'
+  else if (cleanUA.includes('Chrome/')) browser = 'Chrome'
+  else if (cleanUA.includes('Firefox/')) browser = 'Firefox'
+  else if (cleanUA.includes('Safari/') && !cleanUA.includes('Chrome')) browser = 'Safari'
+  else if (cleanUA.includes('Opera') || cleanUA.includes('OPR/')) browser = 'Opera'
 
   // 解析操作系统
   let os = '未知系统'
-  if (ua.includes('Windows')) os = 'Windows'
-  else if (ua.includes('Mac OS')) os = 'macOS'
-  else if (ua.includes('Linux')) os = 'Linux'
-  else if (ua.includes('Android')) os = 'Android'
-  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS'
+  if (cleanUA.includes('Windows')) os = 'Windows'
+  else if (cleanUA.includes('Mac OS')) os = 'macOS'
+  else if (cleanUA.includes('Linux')) os = 'Linux'
+  else if (cleanUA.includes('Android')) os = 'Android'
+  else if (cleanUA.includes('iPhone') || cleanUA.includes('iPad')) os = 'iOS'
 
   return { browser, os, isMobile }
 }
@@ -164,22 +169,30 @@ const SessionManager = ({ open, onClose }) => {
             const { browser, os, isMobile } = parseUserAgent(session.userAgent)
             const expireStatus = getExpireStatus(session.expiresAt, session.isRevoked)
             const isCurrent = session.jti === currentJti
+            const isWhitelist = session.isWhitelist
 
             return (
               <Card
                 key={session.id}
                 size="small"
-                className={isCurrent ? 'border-blue-400 border-2' : ''}
+                className={`${isCurrent ? 'border-blue-400 border-2' : ''} ${isWhitelist ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
               >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      {isMobile ? <MobileOutlined /> : <DesktopOutlined />}
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {isWhitelist ? (
+                        <Tooltip title="IP白名单免登录会话">
+                          <SafetyCertificateOutlined className="text-green-500" />
+                        </Tooltip>
+                      ) : (
+                        isMobile ? <MobileOutlined /> : <DesktopOutlined />
+                      )}
                       <span className="font-medium">{browser} / {os}</span>
+                      {isWhitelist && <Tag color="green" icon={<SafetyCertificateOutlined />}>白名单</Tag>}
                       {isCurrent && <Tag color="blue">当前会话</Tag>}
                       <Tag color={expireStatus.color}>{expireStatus.text}</Tag>
                     </div>
-                    <div className="text-xs text-gray-500 space-y-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
                       <div className="flex items-center gap-1">
                         <GlobalOutlined />
                         <span>IP: {session.ipAddress || '未知'}</span>
@@ -193,7 +206,7 @@ const SessionManager = ({ open, onClose }) => {
                   {!isCurrent && (
                     <Popconfirm
                       title="确定踢出此设备？"
-                      description="该设备将需要重新登录"
+                      description={isWhitelist ? "白名单会话踢出后，同IP同浏览器访问会自动重建" : "该设备将需要重新登录"}
                       onConfirm={() => handleRevokeSession(session.id)}
                       okText="确定"
                       cancelText="取消"
