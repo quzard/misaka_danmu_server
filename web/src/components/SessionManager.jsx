@@ -8,6 +8,7 @@ import {
   DeleteOutlined,
   ExclamationCircleOutlined,
   SafetyCertificateOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons'
 import { getUserSessions, revokeSession, revokeOtherSessions } from '../apis/index.js'
 import { useMessage } from '../MessageContext'
@@ -19,27 +20,23 @@ import dayjs from 'dayjs'
 const parseUserAgent = (ua) => {
   if (!ua) return { browser: '未知浏览器', os: '未知系统', isMobile: false }
 
-  // 检查是否是白名单会话（UA 以 [白名单] 开头）
-  const isWhitelistUA = ua.startsWith('[白名单]')
-  const cleanUA = isWhitelistUA ? ua.replace('[白名单] ', '') : ua
-
-  const isMobile = /Mobile|Android|iPhone|iPad/i.test(cleanUA)
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua)
 
   // 解析浏览器
   let browser = '未知浏览器'
-  if (cleanUA.includes('Edg/')) browser = 'Edge'
-  else if (cleanUA.includes('Chrome/')) browser = 'Chrome'
-  else if (cleanUA.includes('Firefox/')) browser = 'Firefox'
-  else if (cleanUA.includes('Safari/') && !cleanUA.includes('Chrome')) browser = 'Safari'
-  else if (cleanUA.includes('Opera') || cleanUA.includes('OPR/')) browser = 'Opera'
+  if (ua.includes('Edg/')) browser = 'Edge'
+  else if (ua.includes('Chrome/')) browser = 'Chrome'
+  else if (ua.includes('Firefox/')) browser = 'Firefox'
+  else if (ua.includes('Safari/') && !ua.includes('Chrome')) browser = 'Safari'
+  else if (ua.includes('Opera') || ua.includes('OPR/')) browser = 'Opera'
 
   // 解析操作系统
   let os = '未知系统'
-  if (cleanUA.includes('Windows')) os = 'Windows'
-  else if (cleanUA.includes('Mac OS')) os = 'macOS'
-  else if (cleanUA.includes('Linux')) os = 'Linux'
-  else if (cleanUA.includes('Android')) os = 'Android'
-  else if (cleanUA.includes('iPhone') || cleanUA.includes('iPad')) os = 'iOS'
+  if (ua.includes('Windows')) os = 'Windows'
+  else if (ua.includes('Mac OS')) os = 'macOS'
+  else if (ua.includes('Linux')) os = 'Linux'
+  else if (ua.includes('Android')) os = 'Android'
+  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS'
 
   return { browser, os, isMobile }
 }
@@ -196,6 +193,9 @@ const SessionManager = ({ open, onClose }) => {
                       <div className="flex items-center gap-1">
                         <GlobalOutlined />
                         <span>IP: {session.ipAddress || '未知'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="ml-3.5">UA: {session.userAgent || '未知'}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <ClockCircleOutlined />

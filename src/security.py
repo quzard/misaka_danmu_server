@@ -268,7 +268,7 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                     user_id=user_id,
                     jti=jti,
                     ip_address=client_ip_str,
-                    user_agent=f"[白名单] {user_agent[:450]}" if user_agent else "[白名单] 未知",
+                    user_agent=user_agent[:500] if user_agent else None,
                     expires_minutes=db_expire_minutes
                 )
             except Exception as e:
