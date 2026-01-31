@@ -5,12 +5,11 @@ from typing import Callable, Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud, orm_models, models
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..task_manager import TaskSuccess, TaskPauseForRateLimit, TaskStatus
-from ..rate_limiter import RateLimiter, RateLimitExceededError
-from ..utils import clean_xml_string
+from src.db import crud, orm_models, models
+from src.core import ConfigManager
+from src.services import ScraperManager, TaskSuccess, TaskPauseForRateLimit, TaskStatus
+from src.rate_limiter import RateLimiter, RateLimitExceededError
+from src.utils import clean_xml_string
 
 logger = logging.getLogger(__name__)
 

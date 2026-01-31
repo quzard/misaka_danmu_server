@@ -6,18 +6,15 @@ from typing import Callable, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
-from .. import crud, models
-from ..config_manager import ConfigManager
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..task_manager import TaskManager, TaskSuccess
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
-from ..search_utils import unified_search
-from ..season_mapper import ai_type_and_season_mapping_and_correction
-from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT
-from ..name_converter import convert_to_chinese_title
+from src.db import crud, models
+from src.core import ConfigManager
+from src.ai import AIMatcherManager
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.rate_limiter import RateLimiter
+from src.utils import (
+    unified_search, ai_type_and_season_mapping_and_correction,
+    SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT, convert_to_chinese_title
+)
 
 logger = logging.getLogger(__name__)
 

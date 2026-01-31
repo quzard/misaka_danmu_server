@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .base import CommandHandler, parse_command
 
 if TYPE_CHECKING:
-    from ..dandan_api import DandanSearchAnimeResponse
+    from src.api.dandan import DandanSearchAnimeResponse
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ async def handle_command(search_term: str, token: str, session: AsyncSession,
     Returns:
         指令响应 或 None（不是指令）
     """
-    from ..dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+    from src.api.dandan import DandanSearchAnimeResponse, DandanSearchAnimeItem
     
     # 解析指令
     parsed = parse_command(search_term)

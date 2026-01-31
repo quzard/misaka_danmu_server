@@ -5,9 +5,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from .. import crud, orm_models
-from ..task_manager import TaskSuccess
-from ..crud import _get_fs_path_from_web_path
+from src.db import crud, orm_models
+from src.services import TaskSuccess
+
+# 从 crud 导入需要的函数
+_get_fs_path_from_web_path = crud._get_fs_path_from_web_path
 
 logger = logging.getLogger(__name__)
 

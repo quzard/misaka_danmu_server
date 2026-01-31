@@ -7,10 +7,10 @@ import logging
 from typing import Optional, Tuple, List, Any, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud
+from src.db import crud
 
 if TYPE_CHECKING:
-    from ..dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+    from src.api.dandan import DandanSearchAnimeResponse, DandanSearchAnimeItem
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class CommandHandler:
         Returns:
             DandanSearchAnimeItem
         """
-        from ..dandan_api import DandanSearchAnimeItem
+        from src.api.dandan import DandanSearchAnimeItem
 
         return DandanSearchAnimeItem(
             animeId=anime_id,
@@ -210,7 +210,7 @@ class CommandHandler:
         Returns:
             DandanSearchAnimeResponse
         """
-        from ..dandan_api import DandanSearchAnimeResponse
+        from src.api.dandan import DandanSearchAnimeResponse
 
         return DandanSearchAnimeResponse(animes=items)
 

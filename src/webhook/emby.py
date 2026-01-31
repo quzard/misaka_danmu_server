@@ -3,7 +3,7 @@ from typing import Any, Dict
 from fastapi import Request, HTTPException, status
 
 from .base import BaseWebhook
-from ..scraper_manager import ScraperManager
+from src.services import ScraperManager
 
 logger = logging.getLogger(__name__)
 

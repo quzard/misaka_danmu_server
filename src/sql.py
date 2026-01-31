@@ -10,7 +10,7 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from src.database import _get_db_url
+from src.db import _get_db_url
 
 
 async def execute_sql(sql_statement: str, skip_confirm: bool = False):

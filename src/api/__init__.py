@@ -1,9 +1,8 @@
 from fastapi import APIRouter
 
-from .ui_api import router as ui_router, auth_router
-from .webhook_api import router as webhook_router
-from .control_api import router as control_router
-from .endpoints import (
+from src.api.webhook_api import router as webhook_router
+from src.api.control import control_router
+from src.api.ui import (
     auth, scraper, metadata_source, media_server,
     anime, source, episode, search, import_api, task,
     token, config_extra, settings, scheduled_task, webhook, system, auth_extra,
@@ -12,10 +11,6 @@ from .endpoints import (
 
 # This router aggregates all non-dandanplay API endpoints.
 api_router = APIRouter()
-
-# The ui_router contains core UI functionalities.
-api_router.include_router(ui_router, prefix="/ui", tags=["Web UI API"], include_in_schema=False)
-api_router.include_router(auth_router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 
 # 基础端点: Auth, Scraper, Metadata Source, Media Server, Local Danmaku
 api_router.include_router(auth.router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)

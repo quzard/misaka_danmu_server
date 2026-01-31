@@ -2,8 +2,8 @@ import logging
 from typing import Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..jobs.base import BaseJob
-from .. import crud
+from .base import BaseJob
+from src.db import crud
 
 logger = logging.getLogger(__name__)
 

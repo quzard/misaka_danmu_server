@@ -9,13 +9,13 @@ from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..transport_manager import TransportManager
+from src.services import TransportManager
 
-from .. import crud
-from .. import models
+from src.db import crud
+from src.db import models
 
 if TYPE_CHECKING:
-    from ..config_manager import ConfigManager
+    from src.core import ConfigManager
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""

@@ -7,13 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import Request
 from pydantic import BaseModel
 
-from .. import crud
-from ..config_manager import ConfigManager
-from ..task_manager import TaskManager
-from ..rate_limiter import RateLimiter
-from ..tasks import webhook_search_and_dispatch_task
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
+from src.db import crud
+from src.core import ConfigManager
+from src.services import TaskManager, ScraperManager, MetadataSourceManager
+from src.rate_limiter import RateLimiter
+from src.tasks import webhook_search_and_dispatch_task
 
 class WebhookPayload(BaseModel):
     """定义 Webhook 负载的通用结构。"""

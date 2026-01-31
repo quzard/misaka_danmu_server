@@ -8,21 +8,17 @@ from sqlalchemy import select
 from thefuzz import fuzz
 from fastapi import HTTPException
 
-from .. import crud, models, orm_models
-from ..orm_models import AnimeSource as AS
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..task_manager import TaskManager, TaskSuccess
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
-from ..search_utils import unified_search
-from ..timezone import get_now
-from ..utils import parse_search_keyword
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..season_mapper import ai_type_and_season_mapping_and_correction
-from ..search_timer import SearchTimer, SEARCH_TYPE_WEBHOOK
-from ..name_converter import convert_to_chinese_title
+from src.db import crud, models, orm_models
+from src.core import ConfigManager, get_now
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.rate_limiter import RateLimiter
+from src.utils import (
+    unified_search, parse_search_keyword, ai_type_and_season_mapping_and_correction,
+    SearchTimer, SEARCH_TYPE_WEBHOOK, convert_to_chinese_title
+)
+
+# ORM 模型别名
+AnimeSource = orm_models.AnimeSource
 
 logger = logging.getLogger(__name__)
 
@@ -464,10 +460,10 @@ async def webhook_search_and_dispatch_task(
                 for result in all_search_results:
                     # 查找是否有相同provider和mediaId的源被标记
                     stmt = (
-                        select(AS.isFavorited)
+                        select(AnimeSource.isFavorited)
                         .where(
-                            AS.providerName == result.provider,
-                            AS.mediaId == result.mediaId
+                            AnimeSource.providerName == result.provider,
+                            AnimeSource.mediaId == result.mediaId
                         )
                         .limit(1)
                     )
@@ -560,10 +556,10 @@ async def webhook_search_and_dispatch_task(
         for result in all_search_results:
             # 查找是否有相同provider和mediaId的源被标记
             stmt = (
-                select(AS.isFavorited)
+                select(AnimeSource.isFavorited)
                 .where(
-                    AS.providerName == result.provider,
-                    AS.mediaId == result.mediaId
+                    AnimeSource.providerName == result.provider,
+                    AnimeSource.mediaId == result.mediaId
                 )
                 .limit(1)
             )

@@ -6,10 +6,9 @@ import json
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from .. import crud
-from ..config_manager import ConfigManager
-from ..database import get_db_session
-from ..webhook_manager import WebhookManager
+from src.db import crud, get_db_session
+from src.core import ConfigManager
+from src.services import WebhookManager
 
 # 新增：获取专用的 webhook_raw 日志记录器
 webhook_raw_logger = logging.getLogger("webhook_raw")

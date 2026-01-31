@@ -5,9 +5,9 @@ from typing import Callable, List, Optional, Tuple, Dict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud, orm_models
-from ..rate_limiter import RateLimiter, RateLimitExceededError
-from ..task_manager import TaskStatus, TaskPauseForRateLimit
+from src.db import crud, orm_models
+from src.rate_limiter import RateLimiter, RateLimitExceededError
+from src.services import TaskStatus, TaskPauseForRateLimit
 from .utils import extract_short_error_message
 
 logger = logging.getLogger(__name__)

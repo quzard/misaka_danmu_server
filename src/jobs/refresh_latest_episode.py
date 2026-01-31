@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, update
 from datetime import datetime, timedelta
 
-from .. import crud, orm_models
+from src.db import crud, orm_models
 from .base import BaseJob
-from ..task_manager import TaskSuccess
-from ..tasks import refresh_episode_task
-from ..timezone import get_now
+from src.services import TaskSuccess
+from src.tasks import refresh_episode_task
+from src.core import get_now
 
 
 class RefreshLatestEpisodeJob(BaseJob):

@@ -13,11 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, inspect
 from sqlalchemy.orm import selectinload
 
-from .. import crud, orm_models
-from ..config import settings
-from ..timezone import get_now
+from src.db import crud, orm_models
+from src.core import settings, get_now
 from .base import BaseJob
-from ..task_manager import TaskSuccess
+from src.services import TaskSuccess
 
 logger = logging.getLogger(__name__)
 

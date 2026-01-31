@@ -13,14 +13,10 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .. import crud, models, orm_models, security
-from ..config import settings
-from ..config_manager import ConfigManager
-from ..cache_manager import CacheManager
-from ..database import get_db_session
-from ..utils import parse_search_keyword
-from ..timezone import get_app_timezone, get_now
-from ..scraper_manager import ScraperManager
+from src.db import crud, models, orm_models, get_db_session
+from src.core import get_current_user, settings, ConfigManager, CacheManager, get_app_timezone, get_now
+from src.utils import parse_search_keyword
+from src.services import ScraperManager
 from .base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)

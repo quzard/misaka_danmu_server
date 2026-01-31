@@ -4,8 +4,8 @@ import json
 from typing import Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud, models
-from ..metadata_manager import MetadataSourceManager
+from src.db import crud, models
+from src.services import MetadataSourceManager
 from .utils import is_chinese_title
 
 logger = logging.getLogger(__name__)

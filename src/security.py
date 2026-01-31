@@ -12,11 +12,9 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from . import crud, models
-from .config import settings
-from .database import get_db_session
-from .timezone import get_now
-from .crud import session as session_crud
+from src.db import crud, models, get_db_session
+from src.core import settings, get_now
+from src.db.crud import session as session_crud
 
 logger = logging.getLogger(__name__)
 

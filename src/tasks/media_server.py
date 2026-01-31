@@ -5,13 +5,10 @@ from typing import Callable, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from .. import crud
-from ..task_manager import TaskManager, TaskSuccess
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
+from src.db import crud
+from src.services import TaskManager, TaskSuccess, ScraperManager, MetadataSourceManager, TitleRecognitionManager, get_media_server_manager
+from src.core import ConfigManager
+from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +26,6 @@ async def scan_media_server_library(
     progress_callback: Callable
 ):
     """扫描媒体服务器的媒体库"""
-    from ..media_server_manager import get_media_server_manager
 
     await progress_callback(0, "开始扫描媒体库...")
 

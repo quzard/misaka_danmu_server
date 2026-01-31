@@ -3,8 +3,8 @@ import json
 from typing import Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud
-from ..tasks import webhook_search_and_dispatch_task
+from src.db import crud
+from src.tasks import webhook_search_and_dispatch_task
 from .base import BaseJob
 
 logger = logging.getLogger(__name__)

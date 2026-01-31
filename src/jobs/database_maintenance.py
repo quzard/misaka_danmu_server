@@ -7,12 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import text, select
 
-from .. import crud, orm_models
-from ..config import settings
-from ..timezone import get_now
+from src.db import crud, orm_models, _get_db_url
+from src.core import settings, get_now
 from .base import BaseJob
-from ..task_manager import TaskSuccess
-from ..database import _get_db_url
+from src.services import TaskSuccess
 
 logger = logging.getLogger(__name__)
 

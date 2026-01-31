@@ -8,9 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import OperationalError
 
-from .. import orm_models
-from ..crud import DANMAKU_BASE_DIR, _get_fs_path_from_web_path
-from ..task_manager import TaskSuccess
+from src.db import orm_models, crud
+from src.services import TaskSuccess
+
+# 从 crud 导入需要的常量和函数
+DANMAKU_BASE_DIR = crud.DANMAKU_BASE_DIR
+_get_fs_path_from_web_path = crud._get_fs_path_from_web_path
 
 logger = logging.getLogger(__name__)
 
