@@ -30,7 +30,7 @@ from .orm_models import Base
 from .migrations import run_migrations
 
 # 数据库维护
-from .db_maintainer import DatabaseMaintainer
+from .db_maintainer import sync_database_schema
 
 # CRUD 操作
 from . import crud
@@ -52,7 +52,7 @@ __all__ = [
     # 迁移
     'run_migrations',
     # 维护
-    'DatabaseMaintainer',
+    'sync_database_schema',
     # CRUD
     'crud',
 ]
