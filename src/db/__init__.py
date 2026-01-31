@@ -12,7 +12,7 @@ from .database import (
     get_db_session,
     sync_postgres_sequence,
     get_db_type,
-    get_db_session_factory,
+    get_session_factory as get_db_session_factory,
     _get_db_url,
     init_db_tables,
     close_db_engine,
