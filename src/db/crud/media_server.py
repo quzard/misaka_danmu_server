@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, or_, and_, literal, union_all, case
 
-from src.core import get_now
+from src.core.timezone import get_now
 from .. import orm_models
 
 logger = logging.getLogger(__name__)

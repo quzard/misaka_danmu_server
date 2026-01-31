@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode, Scraper, AnimeMetadata
 from .. import models
-from src.core import get_now
+from src.core.timezone import get_now
 
 logger = logging.getLogger(__name__)
 

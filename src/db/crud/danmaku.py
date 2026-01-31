@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, Episode, AnimeMetadata, AnimeSource
 from .. import models
-from src.core import get_now
+from src.core.timezone import get_now
 from ..path_template import generate_danmaku_path
 
 logger = logging.getLogger(__name__)

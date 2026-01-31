@@ -16,7 +16,7 @@ from ..orm_models import (
     WebhookTask, TaskHistory, ScheduledTask, MetadataSource
 )
 from .. import models
-from src.core import get_now
+from src.core.timezone import get_now
 from .source import link_source_to_anime
 from ..database import sync_postgres_sequence
 

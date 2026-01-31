@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, Episode, TitleRecognition, OauthState, TaskHistory, TaskStateCache, WebhookTask, ScheduledTask
 from .. import models, orm_models
-from src.core import get_now
+from src.core.timezone import get_now
 from .task import clear_task_state_cache
 
 logger = logging.getLogger(__name__)

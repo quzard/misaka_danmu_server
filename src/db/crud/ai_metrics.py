@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, and_, Integer
 
 from ..orm_models import AIMetricsLog
-from src.core import get_now
+from src.core.timezone import get_now
 
 logger = logging.getLogger(__name__)
 

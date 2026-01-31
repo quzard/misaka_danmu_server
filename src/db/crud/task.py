@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, or_, String
 
 from ..orm_models import ScheduledTask, TaskHistory, WebhookTask, TaskStateCache
-from src.core import get_now
+from src.core.timezone import get_now
 from .. import orm_models
 
 logger = logging.getLogger(__name__)
