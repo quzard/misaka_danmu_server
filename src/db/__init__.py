@@ -2,14 +2,13 @@
 数据库层 - 连接、模型、CRUD
 
 使用方式:
-    from src.db import get_db_session, engine, get_db_type
+    from src.db import get_db_session, get_db_type
     from src.db import crud, models, orm_models
     from src.db import init_db_tables, close_db_engine, create_initial_admin_user
 """
 
 # 数据库连接
 from .database import (
-    engine,
     get_db_session,
     sync_postgres_sequence,
     get_db_type,
@@ -38,7 +37,6 @@ from . import crud
 
 __all__ = [
     # 数据库连接
-    'engine',
     'get_db_session',
     'sync_postgres_sequence',
     'get_db_type',
