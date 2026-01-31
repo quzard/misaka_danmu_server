@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import Anime, AnimeSource, Episode
 from .. import models
-from ..timezone import get_now
+from src.core import get_now
 from .danmaku import _get_fs_path_from_web_path
 
 logger = logging.getLogger(__name__)

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 
 from ..orm_models import UserSession
-from ..timezone import get_now
+from src.core import get_now
 
 logger = logging.getLogger(__name__)
 

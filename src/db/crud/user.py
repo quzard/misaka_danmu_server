@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 
 from ..orm_models import User, BangumiAuth, OauthState
-from ..timezone import get_now
+from src.core import get_now
 from .. import models
 
 logger = logging.getLogger(__name__)

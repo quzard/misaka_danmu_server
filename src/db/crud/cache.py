@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 
 from ..orm_models import CacheData
 from .. import models, orm_models
-from ..timezone import get_now
+from src.core import get_now
 
 logger = logging.getLogger(__name__)
 
