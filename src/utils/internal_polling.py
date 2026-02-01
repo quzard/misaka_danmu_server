@@ -79,7 +79,7 @@ class InternalPollingManager:
     def _register_builtin_tasks(self):
         """注册所有内置轮询任务"""
         # 延迟导入避免循环依赖
-        from .internal_tasks import scraper_auto_update_handler
+        from src.internal_tasks.scraper_update import scraper_auto_update_handler
 
         # 资源仓库自动更新
         self.register(
