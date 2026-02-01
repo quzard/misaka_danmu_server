@@ -5,9 +5,8 @@ from typing import Callable, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from src.db import crud
+from src.db import crud, ConfigManager
 from src.services import TaskManager, TaskSuccess, ScraperManager, MetadataSourceManager, TitleRecognitionManager, get_media_server_manager
-from src.core import ConfigManager
 from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)

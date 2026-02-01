@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.services import TaskManager, ScraperManager, MetadataSourceManager
 from src.rate_limiter import RateLimiter
-from src.core import ConfigManager
+from src.db import ConfigManager
 
 class BaseJob(ABC):
     """

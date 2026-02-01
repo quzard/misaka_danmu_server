@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import Request
 from pydantic import BaseModel
 
-from src.db import crud
-from src.core import ConfigManager
+from src.db import crud, ConfigManager
 from src.services import TaskManager, ScraperManager, MetadataSourceManager
 from src.rate_limiter import RateLimiter
 from src.tasks import webhook_search_and_dispatch_task

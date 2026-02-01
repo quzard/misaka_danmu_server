@@ -5,10 +5,9 @@ from typing import Callable, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, orm_models, models
+from src.db import crud, orm_models, models, ConfigManager
 from src.rate_limiter import RateLimiter, RateLimitExceededError
 from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TaskPauseForRateLimit, TitleRecognitionManager
-from src.core import ConfigManager
 from .delete import delete_danmaku_file
 from .utils import generate_episode_range_string
 

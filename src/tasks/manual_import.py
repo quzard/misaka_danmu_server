@@ -5,8 +5,7 @@ from typing import Callable, Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, orm_models, models
-from src.core import ConfigManager
+from src.db import crud, orm_models, models, ConfigManager
 from src.services import ScraperManager, TaskSuccess, TaskPauseForRateLimit, TaskStatus
 from src.rate_limiter import RateLimiter, RateLimitExceededError
 from src.utils import clean_xml_string

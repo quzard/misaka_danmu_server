@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 from ..orm_models import Anime, Episode, AnimeMetadata, AnimeSource
 from .. import models
 from src.core.timezone import get_now
-from src.utils.path_template import generate_danmaku_path
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +126,8 @@ async def _generate_danmaku_path(session: AsyncSession, episode, config_manager=
     Returns:
         tuple: (web_path, absolute_path)
     """
+    # 延迟导入避免循环依赖
+    from src.utils.path_template import generate_danmaku_path
     return await generate_danmaku_path(episode, config_manager)
 # --- Anime & Library ---
 

@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker # type: igno
 from fastapi import Request
 from httpx import HTTPStatusError
 
-from src.db import models
-from src.core import ConfigManager, CacheManager
+from src.db import models, ConfigManager, CacheManager
 from src.services import ScraperManager
 
 class BaseMetadataSource(ABC):

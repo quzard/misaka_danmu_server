@@ -7,9 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
-from src.db import crud, models
+from src.db import crud, models, ConfigManager
 from src.utils import parse_search_keyword as utils_parse_search_keyword
-from src.core import ConfigManager
 from .base import BaseMetadataSource
 
 from fastapi import HTTPException, status

@@ -13,8 +13,7 @@ from typing import Dict, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from src.db import crud
-from src.core import ConfigManager
+from src.db import crud, ConfigManager
 from src.services import ScraperManager, TaskManager, MetadataSourceManager
 from src.utils import (
     parse_search_keyword, unified_search,

@@ -8,8 +8,7 @@ import httpx
 from bs4 import BeautifulSoup # type: ignore
 from pydantic import BaseModel, Field
 
-from src.db import models
-from src.core import ConfigManager, CacheManager
+from src.db import models, ConfigManager, CacheManager
 from .base import BaseMetadataSource
 from src.scrapers.base import get_season_from_title
 

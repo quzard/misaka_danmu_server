@@ -10,7 +10,7 @@ import logging
 from typing import Optional, Tuple, List
 
 from src.tasks import is_chinese_title
-from src.core import ConfigManager
+from src.db import models, ConfigManager
 from src.services import MetadataSourceManager
 from src.ai import AIMatcherManager
 from src.db import models

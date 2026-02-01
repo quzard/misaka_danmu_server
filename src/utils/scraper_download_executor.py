@@ -111,7 +111,7 @@ class ScraperDownloadExecutor:
             need_restart: 是否需要重启容器
             extra_info: 额外信息
         """
-        from src.core import CacheManager
+        from src.db import CacheManager
         from src.db import get_db_session_factory
 
         try:
@@ -148,7 +148,7 @@ class ScraperDownloadExecutor:
             临时目录路径，失败返回 None
         """
         import shutil
-        from src.core import CacheManager
+        from src.db import CacheManager
         from src.db import get_db_session_factory
 
         if not downloaded_files:
@@ -207,7 +207,7 @@ class ScraperDownloadExecutor:
             过滤后仍需下载的文件列表
         """
         import shutil
-        from src.core import CacheManager
+        from src.db import CacheManager
         from src.db import get_db_session_factory
 
         try:
@@ -289,7 +289,7 @@ class ScraperDownloadExecutor:
     async def _cleanup_temp_dir(self, task_id: str):
         """清理指定任务的临时目录"""
         import shutil
-        from src.core import CacheManager
+        from src.db import CacheManager
         from src.db import get_db_session_factory
 
         try:

@@ -6,8 +6,7 @@ from typing import Callable, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
-from src.db import crud, models
-from src.core import ConfigManager
+from src.db import crud, models, ConfigManager
 from src.ai import AIMatcherManager
 from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
 from src.rate_limiter import RateLimiter

@@ -11,8 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status, Request, APIRouter
 import httpx
 
-from src.db import crud, models, orm_models
-from src.core import ConfigManager, CacheManager
+from src.db import crud, models, orm_models, ConfigManager, CacheManager
 from .scraper_manager import ScraperManager
 from src.metadata_sources.base import BaseMetadataSource
 

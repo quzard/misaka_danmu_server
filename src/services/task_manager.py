@@ -10,8 +10,7 @@ from uuid import uuid4, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status
 
-from src.core import ConfigManager
-from src.db import models, crud
+from src.db import models, crud, ConfigManager
 
 logger = logging.getLogger(__name__)
 

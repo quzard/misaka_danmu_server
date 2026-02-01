@@ -10,7 +10,7 @@ from src.db import crud, get_db_session
 
 # 使用 TYPE_CHECKING 避免运行时循环导入，仅用于类型提示
 if TYPE_CHECKING:
-    from src.core import ConfigManager
+    from src.db import ConfigManager
     from src.services import WebhookManager
 
 # 新增：获取专用的 webhook_raw 日志记录器

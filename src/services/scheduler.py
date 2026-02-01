@@ -13,10 +13,10 @@ from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR, JobExecution
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from src.db import crud
+from src.db import crud, ConfigManager
+from src.core import get_app_timezone
 from src.rate_limiter import RateLimiter
 from src.jobs import BaseJob, WebhookProcessorJob
-from src.core import ConfigManager, get_app_timezone
 from src.ai import AIMatcherManager
 from .task_manager import TaskManager
 from .scraper_manager import ScraperManager

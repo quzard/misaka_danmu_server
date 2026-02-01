@@ -8,7 +8,7 @@ from src.services import (
     ScraperManager, TaskManager, SchedulerManager,
     WebhookManager, MetadataSourceManager
 )
-from src.core import ConfigManager, CacheManager
+from src.db import ConfigManager, CacheManager
 from src.ai import AIMatcherManager
 from src.rate_limiter import RateLimiter
 

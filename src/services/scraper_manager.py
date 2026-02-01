@@ -12,8 +12,7 @@ from urllib.parse import urlparse
 
 from src.scrapers.base import BaseScraper
 from .transport_manager import TransportManager
-from src.core import ConfigManager
-from src.db import models, crud
+from src.db import models, crud, ConfigManager
 
 # 从 models 导入需要的类
 ProviderSearchInfo = models.ProviderSearchInfo

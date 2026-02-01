@@ -15,7 +15,7 @@ from src.db import crud
 from src.db import models
 
 if TYPE_CHECKING:
-    from src.core import ConfigManager
+    from src.db import ConfigManager
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""

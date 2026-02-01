@@ -7,7 +7,7 @@ from typing import Dict, Type, List
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.core import ConfigManager
+from src.db import ConfigManager
 from src.rate_limiter import RateLimiter
 from src.webhook.base import BaseWebhook
 from .task_manager import TaskManager

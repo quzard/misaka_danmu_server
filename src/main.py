@@ -15,9 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 # 内部模块导入 - 使用聚合式导入
-from src.core import ConfigManager, CacheManager, settings
+from src.core import settings
 from src.core.default_configs import get_default_configs
 from src.db import crud, orm_models, init_db_tables, close_db_engine, create_initial_admin_user, get_db_type
+from src.db import ConfigManager, CacheManager  # 管理器从 db 层导入
 from src.services import (
     TaskManager, MetadataSourceManager, ScraperManager, WebhookManager,
     SchedulerManager, TitleRecognitionManager, MediaServerManager,

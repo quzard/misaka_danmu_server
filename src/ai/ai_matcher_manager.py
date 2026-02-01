@@ -8,7 +8,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from .ai_matcher import AIMatcher
 from .ai_prompts import DEFAULT_AI_MATCH_PROMPT
-from src.core import ConfigManager
+from src.db import ConfigManager
 
 
 class AIMatcherManager:

@@ -8,8 +8,8 @@ from sqlalchemy import select
 from thefuzz import fuzz
 from fastapi import HTTPException
 
-from src.db import crud, models, orm_models
-from src.core import ConfigManager, get_now
+from src.db import crud, models, orm_models, ConfigManager
+from src.core import get_now
 from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
 from src.rate_limiter import RateLimiter
 from src.utils import (
