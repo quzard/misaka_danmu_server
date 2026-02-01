@@ -11,8 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src import security, tasks
-from src.db import crud, models, orm_models, get_db_session
-from src.core import ConfigManager
+from src.db import crud, models, orm_models, get_db_session, ConfigManager
 from src.services import TaskManager, ScraperManager
 from src.rate_limiter import RateLimiter
 

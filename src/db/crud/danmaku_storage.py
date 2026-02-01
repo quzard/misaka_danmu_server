@@ -14,7 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from ..orm_models import Anime, AnimeSource, Episode
-from ..path_template import normalize_title
+from src.utils.path_template import normalize_title
 
 logger = logging.getLogger(__name__)
 

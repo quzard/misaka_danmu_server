@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 
 from src.scrapers.base import BaseScraper
-from .transport_manager import TransportManager
+from src.utils import TransportManager
 from src.db import models, crud, ConfigManager
 
 # 从 models 导入需要的类

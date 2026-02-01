@@ -13,9 +13,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 import httpx
 
-from src.db import models
+from src.db import models, ConfigManager
 from src.security import get_current_user
-from src.core.config_manager import ConfigManager
 from src.api.dependencies import get_config_manager, get_scraper_manager
 
 logger = logging.getLogger(__name__)

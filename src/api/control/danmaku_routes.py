@@ -9,8 +9,7 @@ from typing import Callable
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, models, get_db_session
-from src.core import ConfigManager
+from src.db import crud, models, get_db_session, ConfigManager
 from src.services import TaskManager, TaskSuccess
 
 from .models import ControlTaskResponse

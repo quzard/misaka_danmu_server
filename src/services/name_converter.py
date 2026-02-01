@@ -7,13 +7,14 @@
 import asyncio
 import json
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, TYPE_CHECKING
 
 from src.tasks import is_chinese_title
 from src.db import models, ConfigManager
-from src.services import MetadataSourceManager
-from src.ai import AIMatcherManager
-from src.db import models
+
+if TYPE_CHECKING:
+    from .metadata_manager import MetadataSourceManager
+    from src.ai import AIMatcherManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 async def convert_to_chinese_title(
     title: str,
     config_manager: ConfigManager,
-    metadata_manager: MetadataSourceManager,
-    ai_matcher_manager: Optional[AIMatcherManager],
+    metadata_manager: "MetadataSourceManager",
+    ai_matcher_manager: Optional["AIMatcherManager"],
     user: models.User
 ) -> Tuple[str, bool]:
     """
@@ -79,7 +80,7 @@ async def convert_to_chinese_title(
 async def _convert_via_metadata_sources(
     title: str,
     config_manager: ConfigManager,
-    metadata_manager: MetadataSourceManager,
+    metadata_manager: "MetadataSourceManager",
     user: models.User
 ) -> Optional[Tuple[str, str]]:
     """
@@ -165,7 +166,7 @@ async def _convert_via_metadata_sources(
 async def _convert_via_ai(
     title: str,
     config_manager: ConfigManager,
-    ai_matcher_manager: Optional[AIMatcherManager]
+    ai_matcher_manager: Optional["AIMatcherManager"]
 ) -> Optional[str]:
     """
     通过AI转换标题（兜底方案）

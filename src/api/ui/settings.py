@@ -9,8 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import security
-from src.db import models, orm_models, get_db_session
-from src.core import ConfigManager
+from src.db import models, orm_models, get_db_session, ConfigManager
 
 from src.api.dependencies import get_config_manager, get_title_recognition_manager
 from .models import (

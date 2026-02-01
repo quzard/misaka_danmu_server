@@ -10,17 +10,28 @@ from fastapi import HTTPException
 
 from src.db import crud, models, orm_models, ConfigManager
 from src.core import get_now
-from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager, unified_search
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.ai import AIMatcherManager
 from src.rate_limiter import RateLimiter
 from src.utils import (
     parse_search_keyword, ai_type_and_season_mapping_and_correction,
-    SearchTimer, SEARCH_TYPE_WEBHOOK, convert_to_chinese_title
+    SearchTimer, SEARCH_TYPE_WEBHOOK
 )
 
 # ORM 模型别名
 AnimeSource = orm_models.AnimeSource
 
 logger = logging.getLogger(__name__)
+
+
+# 延迟导入辅助函数
+def _get_unified_search():
+    from src.services.search import unified_search
+    return unified_search
+
+def _get_convert_to_chinese_title():
+    from src.services.name_converter import convert_to_chinese_title
+    return convert_to_chinese_title
 
 
 # 延迟导入辅助函数
@@ -210,6 +221,7 @@ async def webhook_search_and_dispatch_task(
         # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在预处理规则之前执行）
         # 创建一个虚拟用户用于元数据调用
         webhook_user = models.User(id=0, username="webhook")
+        convert_to_chinese_title = _get_convert_to_chinese_title()
         converted_title, conversion_applied = await convert_to_chinese_title(
             original_title,
             config_manager,
@@ -270,6 +282,7 @@ async def webhook_search_and_dispatch_task(
 
         timer.step_start("统一搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
+        unified_search = _get_unified_search()
         all_search_results = await unified_search(
             search_term=search_title,
             session=session,

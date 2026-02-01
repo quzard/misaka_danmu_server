@@ -35,8 +35,8 @@ async def handle_webhook(
     request: Request,
     api_key: str = Query(..., description="Webhook安全密钥"),
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager),
-    webhook_manager: WebhookManager = Depends(get_webhook_manager),
+    config_manager: "ConfigManager" = Depends(get_config_manager),
+    webhook_manager: "WebhookManager" = Depends(get_webhook_manager),
 ):
     """统一的Webhook入口，用于接收来自Sonarr, Radarr等服务的通知。"""
     # 修正：数据库中存储的键名是驼峰命名法的 "webhookApiKey"

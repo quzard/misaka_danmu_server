@@ -9,7 +9,7 @@
 
 from fastapi import Request
 
-from src.core import ConfigManager
+from src.db import ConfigManager
 from src.services import TaskManager, MetadataSourceManager, ScraperManager
 from src.rate_limiter import RateLimiter
 

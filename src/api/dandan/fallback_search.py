@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from src.db import crud, ConfigManager
-from src.services import ScraperManager, TaskManager, MetadataSourceManager
+from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search
 from src.utils import (
-    parse_search_keyword, unified_search,
+    parse_search_keyword,
     ai_type_and_season_mapping_and_correction,
     SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH
 )

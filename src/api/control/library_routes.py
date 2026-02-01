@@ -10,9 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import exc
 
-from src.db import crud, models, get_db_session
+from src.db import crud, models, get_db_session, ConfigManager
 from src import tasks
-from src.core import ConfigManager
 from src.services import ScraperManager, TaskManager, TaskSuccess, MetadataSourceManager
 from src.rate_limiter import RateLimiter
 

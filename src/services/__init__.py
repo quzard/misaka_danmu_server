@@ -16,14 +16,14 @@ from .scraper_manager import ScraperManager
 # 元数据源管理
 from .metadata_manager import MetadataSourceManager
 
+# 标题识别（需要在 WebhookManager 之前导入，因为 webhook 依赖 tasks，tasks 依赖 TitleRecognitionManager）
+from .title_recognition import TitleRecognitionManager
+
 # Webhook管理
 from .webhook_manager import WebhookManager
 
 # 媒体服务器管理
 from .media_server_manager import MediaServerManager, get_media_server_manager
-
-# 标题识别
-from .title_recognition import TitleRecognitionManager
 
 # 下载任务管理
 from .download_task_manager import DownloadTaskManager, DownloadTask, get_download_task_manager
@@ -35,10 +35,13 @@ from src.utils import TransportManager
 from .scheduler import SchedulerManager
 
 # 日志管理
-from .log_manager import LogManager, setup_logging, get_logs, subscribe_to_logs, unsubscribe_from_logs
+from .log_manager import setup_logging, get_logs, subscribe_to_logs, unsubscribe_from_logs
 
 # 搜索服务
 from .search import unified_search
+
+# 名称转换
+from .name_converter import convert_to_chinese_title
 
 __all__ = [
     # 任务管理
@@ -66,12 +69,13 @@ __all__ = [
     # 调度器
     'SchedulerManager',
     # 日志管理
-    'LogManager',
     'setup_logging',
     'get_logs',
     'subscribe_to_logs',
     'unsubscribe_from_logs',
     # 搜索服务
     'unified_search',
+    # 名称转换
+    'convert_to_chinese_title',
 ]
 

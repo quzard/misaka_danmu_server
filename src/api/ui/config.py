@@ -11,9 +11,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import models, crud, get_db_session
+from src.db import models, crud, get_db_session, ConfigManager
 from src import security
-from src.core import ConfigManager, get_config_schema
+from src.core import get_config_schema
 from src.api.dependencies import get_config_manager
 
 # 从 crud 导入需要的子模块

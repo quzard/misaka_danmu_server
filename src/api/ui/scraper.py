@@ -8,9 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from src.db import crud, models, get_db_session
+from src.db import crud, models, get_db_session, ConfigManager
 from src import security
-from src.core import ConfigManager
 from src.services import ScraperManager
 from src.api.dependencies import get_scraper_manager, get_config_manager
 

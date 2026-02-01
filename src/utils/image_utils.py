@@ -1,13 +1,15 @@
 import logging
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 from src.db import crud
-from src.services import ScraperManager
+
+if TYPE_CHECKING:
+    from src.services import ScraperManager
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def _ensure_image_dir():
 
 # 延迟创建目录，避免在模块加载时就尝试创建
 
-async def download_image(image_url: Optional[str], session: AsyncSession, scraper_manager: ScraperManager, provider_name: Optional[str] = None) -> Optional[str]:
+async def download_image(image_url: Optional[str], session: AsyncSession, scraper_manager: "ScraperManager", provider_name: Optional[str] = None) -> Optional[str]:
     """
     从给定的URL下载图片，保存到本地，并返回其相对Web路径。
     支持代理。

@@ -12,9 +12,8 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
-from src.db import models, get_db_session
+from src.db import models, get_db_session, ConfigManager
 from src import security
-from src.core import ConfigManager
 from src.services import TaskManager, MetadataSourceManager
 from src.db.crud import local_danmaku as crud, anime as anime_crud, episode as episode_crud
 from src.utils import download_image

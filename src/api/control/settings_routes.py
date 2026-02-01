@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, get_db_session
-from src.core import ConfigManager
+from src.db import crud, get_db_session, ConfigManager
 
 from .models import ControlActionResponse, DanmakuOutputSettings
 from .dependencies import get_config_manager, get_title_recognition_manager

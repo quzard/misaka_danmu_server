@@ -11,8 +11,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, get_db_session
-from src.core import ConfigManager
+from src.db import crud, get_db_session, ConfigManager
 from src.services import ScraperManager, TaskManager, SchedulerManager, MetadataSourceManager
 from src.rate_limiter import RateLimiter
 from src.ai import AIMatcherManager

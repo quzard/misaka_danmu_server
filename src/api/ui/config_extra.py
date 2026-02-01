@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import security
-from src.db import crud, models, get_db_session
-from src.core import ConfigManager, get_config_schema
+from src.db import crud, models, get_db_session, ConfigManager
+from src.core import get_config_schema
 from src.services import ScraperManager, MetadataSourceManager
 from src.ai.ai_prompts import (
     DEFAULT_AI_MATCH_PROMPT,

@@ -18,9 +18,9 @@ from thefuzz import fuzz
 
 from src.db import crud, orm_models, get_db_session, sync_postgres_sequence, ConfigManager
 from src.core import get_now
-from src.services import ScraperManager, TaskManager, MetadataSourceManager
+from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search
 from src.utils import (
-    parse_search_keyword, unified_search,
+    parse_search_keyword,
     ai_type_and_season_mapping_and_correction, title_contains_season_name,
     SearchTimer, SEARCH_TYPE_FALLBACK_MATCH, SubStepTiming
 )
@@ -48,8 +48,9 @@ from .constants import (
 from .helpers import (
     get_db_cache, set_db_cache,
     store_episode_mapping, find_existing_anime_by_bangumi_id,
-    get_next_real_anime_id, _get_next_virtual_anime_id, _generate_episode_id
+    get_next_real_anime_id, get_next_virtual_anime_id
 )
+from .bangumi import generate_episode_id
 from .route_handler import get_token_from_path, DandanApiRoute
 from .dependencies import (
     get_config_manager,
@@ -742,7 +743,7 @@ async def get_match_for_item(
                 logger.info(f"步骤5：分配虚拟animeId和真实episodeId")
 
                 # 分配虚拟animeId
-                virtual_anime_id = await _get_next_virtual_anime_id(session_inner)
+                virtual_anime_id = await get_next_virtual_anime_id(session_inner)
                 logger.info(f"  - 分配虚拟animeId: {virtual_anime_id}")
 
                 # 分配真实anime_id（用于生成episodeId）
@@ -785,7 +786,7 @@ async def get_match_for_item(
 
                 # 生成真实episodeId (电影使用1作为episode_number)
                 final_episode_number = 1 if is_movie else episode_number
-                real_episode_id = _generate_episode_id(real_anime_id, source_order, final_episode_number)
+                real_episode_id = generate_episode_id(real_anime_id, source_order, final_episode_number)
                 logger.info(f"  - 生成真实episodeId: {real_episode_id}")
 
                 # 步骤6：存储映射关系到数据库缓存

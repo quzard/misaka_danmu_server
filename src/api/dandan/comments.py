@@ -28,7 +28,7 @@ Episode = orm_models.Episode
 ProviderEpisodeInfo = models.ProviderEpisodeInfo
 
 # 同包内相对导入
-from . import models
+from . import models as dandan_models
 from .constants import (
     FALLBACK_SEARCH_CACHE_PREFIX,
     USER_LAST_BANGUMI_CHOICE_PREFIX,

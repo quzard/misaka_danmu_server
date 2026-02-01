@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import security, tasks
-from src.db import crud, models, get_db_session
-from src.core import ConfigManager
+from src.db import crud, models, get_db_session, ConfigManager
 from src.services import TaskManager, ScraperManager, MetadataSourceManager, SchedulerManager
 from src.rate_limiter import RateLimiter
 

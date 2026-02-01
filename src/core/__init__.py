@@ -14,7 +14,7 @@
 
 # 配置相关（纯静态配置，无数据库依赖）
 from .config import settings, Settings
-from .config_schema import CONFIG_SCHEMA
+from .config_schema import CONFIG_SCHEMA, get_config_schema
 from .default_configs import get_default_configs
 
 # 时区相关（只依赖 config，无数据库依赖）
@@ -25,6 +25,7 @@ __all__ = [
     'settings',
     'Settings',
     'CONFIG_SCHEMA',
+    'get_config_schema',
     'get_default_configs',
     # 时区
     'get_now',

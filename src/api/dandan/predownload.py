@@ -12,8 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
-from src.db import crud, orm_models
-from src.core import ConfigManager
+from src.db import crud, orm_models, ConfigManager
 from src.services import ScraperManager, TaskManager, TaskSuccess
 from src.rate_limiter import RateLimiter
 

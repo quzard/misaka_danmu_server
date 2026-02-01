@@ -12,12 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
 from src import security
-from src.db import crud, models, get_db_session
-from src.core import ConfigManager
-from src.services import ScraperManager, MetadataSourceManager, TitleRecognitionManager
+from src.db import crud, models, get_db_session, ConfigManager
+from src.services import ScraperManager, MetadataSourceManager, TitleRecognitionManager, convert_to_chinese_title
 from src.utils import (
     parse_search_keyword, ai_type_and_season_mapping_and_correction,
-    SearchTimer, SEARCH_TYPE_HOME, convert_to_chinese_title
+    SearchTimer, SEARCH_TYPE_HOME
 )
 from src.ai.ai_matcher_manager import AIMatcherManager
 

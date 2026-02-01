@@ -12,8 +12,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import crud, orm_models
-from src.core import CacheManager
+from src.db import crud, orm_models, CacheManager
 
 # 同包内相对导入
 from .constants import (

@@ -17,9 +17,9 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
-from src.db import models, get_db_session
-from src.core import ConfigManager
+from src.db import models, get_db_session, ConfigManager
 from src import security
+from src.security import get_current_user
 from src.services import get_download_task_manager
 from src.services.download_task_manager import TaskStatus
 from src.api.dependencies import get_scraper_manager, get_config_manager
