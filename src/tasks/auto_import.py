@@ -8,10 +8,10 @@ from thefuzz import fuzz
 
 from src.db import crud, models, ConfigManager
 from src.ai import AIMatcherManager
-from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager, unified_search
 from src.rate_limiter import RateLimiter
 from src.utils import (
-    unified_search, ai_type_and_season_mapping_and_correction,
+    ai_type_and_season_mapping_and_correction,
     SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT, convert_to_chinese_title
 )
 

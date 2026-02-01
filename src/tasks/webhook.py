@@ -10,10 +10,10 @@ from fastapi import HTTPException
 
 from src.db import crud, models, orm_models, ConfigManager
 from src.core import get_now
-from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager, unified_search
 from src.rate_limiter import RateLimiter
 from src.utils import (
-    unified_search, parse_search_keyword, ai_type_and_season_mapping_and_correction,
+    parse_search_keyword, ai_type_and_season_mapping_and_correction,
     SearchTimer, SEARCH_TYPE_WEBHOOK, convert_to_chinese_title
 )
 

@@ -6,11 +6,13 @@
 import asyncio
 import logging
 import time
-from typing import List, Optional, Any, Callable
+from typing import List, Optional, Any, Callable, TYPE_CHECKING
 from thefuzz import fuzz
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services import ScraperManager, MetadataSourceManager
+if TYPE_CHECKING:
+    from .scraper_manager import ScraperManager
+    from .metadata_manager import MetadataSourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +20,8 @@ logger = logging.getLogger(__name__)
 async def unified_search(
     search_term: str,
     session: AsyncSession,
-    scraper_manager: ScraperManager,
-    metadata_manager: Optional[MetadataSourceManager] = None,
+    scraper_manager: "ScraperManager",
+    metadata_manager: Optional["MetadataSourceManager"] = None,
     use_alias_expansion: bool = True,
     use_alias_filtering: bool = True,
     use_title_filtering: bool = True,

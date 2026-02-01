@@ -2,16 +2,16 @@
 工具函数模块
 
 使用方式:
-    from src.utils import parse_search_keyword, unified_search
+    from src.utils import parse_search_keyword
     from src.utils import SearchTimer, SEARCH_TYPE_WEBHOOK
     from src.utils import convert_to_chinese_title, clean_xml_string
+
+注意: unified_search 已移至 src.services 层:
+    from src.services import unified_search
 """
 
 # 通用工具
 from .common import parse_search_keyword, sample_comments_evenly, clean_xml_string
-
-# 搜索工具
-from .search import unified_search
 
 # 搜索计时器
 from .search_timer import (
@@ -64,8 +64,6 @@ __all__ = [
     'parse_search_keyword',
     'sample_comments_evenly',
     'clean_xml_string',
-    # 搜索工具
-    'unified_search',
     # 搜索计时器
     'SearchTimer',
     'SubStepTiming',

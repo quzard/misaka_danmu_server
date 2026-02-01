@@ -37,6 +37,9 @@ from .scheduler import SchedulerManager
 # 日志管理
 from .log_manager import LogManager, setup_logging, get_logs, subscribe_to_logs, unsubscribe_from_logs
 
+# 搜索服务
+from .search import unified_search
+
 __all__ = [
     # 任务管理
     'TaskManager',
@@ -68,5 +71,7 @@ __all__ = [
     'get_logs',
     'subscribe_to_logs',
     'unsubscribe_from_logs',
+    # 搜索服务
+    'unified_search',
 ]
 
