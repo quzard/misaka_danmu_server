@@ -121,16 +121,16 @@ async def import_media_items(
     title_recognition_manager=None
 ):
     """导入媒体项(按季度导入电视剧,电影直接导入)"""
-    from ..orm_models import MediaItem
+    from src.db.orm_models import MediaItem
 
     webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
 
     # 如果没有传入manager,从全局获取
     if scraper_manager is None:
-        from ..main import scraper_manager as global_scraper_manager
+        from src.main import scraper_manager as global_scraper_manager
         scraper_manager = global_scraper_manager
     if metadata_manager is None:
-        from ..main import metadata_manager as global_metadata_manager
+        from src.main import metadata_manager as global_metadata_manager
         metadata_manager = global_metadata_manager
     if config_manager is None:
         raise ValueError("config_manager is required")

@@ -72,8 +72,8 @@ async def unified_search(
         await progress_callback(10, "获取别名...")
 
         # 优化2: 检查别名缓存
-        from . import crud
-        from .utils import parse_search_keyword
+        from src.db import crud
+        from src.utils import parse_search_keyword
 
         # 提取核心标题（去除季度和集数信息）
         parsed = parse_search_keyword(search_term)

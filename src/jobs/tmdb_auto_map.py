@@ -74,7 +74,7 @@ class TmdbAutoMapJob(BaseJob):
             self.logger.warning(f"初始化AI matcher失败: {e}, 将使用传统搜索")
 
         # 获取所有作品(TV系列和电影/剧场版)
-        from ..orm_models import Anime, AnimeMetadata
+        from src.db.orm_models import Anime, AnimeMetadata
         stmt = (
             select(
                 Anime.id.label("animeId"),

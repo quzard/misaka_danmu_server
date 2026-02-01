@@ -281,7 +281,7 @@ async def _perform_update(
                         logger.warning(f"备份资源失败: {backup_error}")
 
                     # 检查是否有 Docker socket
-                    from ..docker_utils import is_docker_socket_available, restart_container
+                    from src.utils.docker_utils import is_docker_socket_available, restart_container
                     import sys
                     docker_available = is_docker_socket_available()
 
@@ -427,7 +427,7 @@ async def _perform_update(
         else:
             # 非首次下载：不保存版本信息到 scrapers 目录，版本信息只在备份中
             # 根据是否有 Docker socket 决定重启方式
-            from ..docker_utils import is_docker_socket_available, restart_container
+            from src.utils.docker_utils import is_docker_socket_available, restart_container
             import sys
             docker_available = is_docker_socket_available()
 

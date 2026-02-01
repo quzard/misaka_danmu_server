@@ -280,8 +280,8 @@ async def generic_import_task(
                 anime_id = preassignedAnimeId
 
                 # 检查数据库中是否已有这个ID的条目
-                from ..orm_models import Anime
-                from ..timezone import get_now
+                from src.db.orm_models import Anime
+                from src.core.timezone import get_now
                 stmt = select(Anime).where(Anime.id == anime_id)
                 result = await session.execute(stmt)
                 existing_anime = result.scalar_one_or_none()

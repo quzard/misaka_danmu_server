@@ -297,7 +297,7 @@ async def webhook_search_and_dispatch_task(
             alias_similarity_threshold=70,
         )
         # 收集单源搜索耗时信息
-        from ..search_timer import SubStepTiming
+        from src.utils.search_timer import SubStepTiming
         source_timing_sub_steps = [
             SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
             for name, dur, cnt in manager.last_search_timing

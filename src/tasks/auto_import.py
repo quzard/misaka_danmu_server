@@ -494,7 +494,7 @@ async def auto_search_and_import_task(
             alias_similarity_threshold=70,  # 使用 70% 别名相似度阈值（与 WebUI 一致）
         )
         # 收集单源搜索耗时信息
-        from ..search_timer import SubStepTiming
+        from src.utils.search_timer import SubStepTiming
         source_timing_sub_steps = [
             SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
             for name, dur, cnt in scraper_manager.last_search_timing
@@ -666,7 +666,7 @@ async def auto_search_and_import_task(
                 # 获取精确标记信息
                 favorited_info = {}
                 async with scraper_manager._session_factory() as ai_session:
-                    from ..orm_models import AnimeSource
+                    from src.db.orm_models import AnimeSource
                     from sqlalchemy import select
 
                     for result in all_results:
