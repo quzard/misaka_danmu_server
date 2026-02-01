@@ -55,7 +55,7 @@ class MetadataSourceManager:
         await self.load_and_sync_sources()
         self._build_source_routers()
         # 初始化季度映射器
-        from .season_mapper import SeasonMapper
+        from src.utils.season_mapper import SeasonMapper
         self._season_mapper = SeasonMapper(self, self._session_factory)
         logger.info("元数据源管理器已初始化。")
 
