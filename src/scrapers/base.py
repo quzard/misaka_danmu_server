@@ -9,10 +9,10 @@ from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.services import TransportManager
-
 from src.db import crud
 from src.db import models
+
+from src.utils import TransportManager
 
 if TYPE_CHECKING:
     from src.db import ConfigManager

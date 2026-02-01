@@ -28,8 +28,8 @@ from .title_recognition import TitleRecognitionManager
 # 下载任务管理
 from .download_task_manager import DownloadTaskManager, DownloadTask, get_download_task_manager
 
-# 传输管理
-from .transport_manager import TransportManager
+# 传输管理（从 utils 层重新导出，保持向后兼容）
+from src.utils import TransportManager
 
 # 调度器
 from .scheduler import SchedulerManager

@@ -56,6 +56,9 @@ from .internal_polling import InternalPollingManager
 # 代理中间件
 from .proxy_middleware import init_proxy_middleware
 
+# HTTP Transport 管理
+from .transport_manager import TransportManager
+
 __all__ = [
     # 通用工具
     'parse_search_keyword',
@@ -92,5 +95,7 @@ __all__ = [
     'InternalPollingManager',
     # 代理中间件
     'init_proxy_middleware',
+    # HTTP Transport 管理
+    'TransportManager',
 ]
 
