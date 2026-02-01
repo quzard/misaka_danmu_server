@@ -12,7 +12,7 @@
 # 配置相关（纯静态配置，无数据库依赖）
 from .config import settings, Settings
 from .config_schema import CONFIG_SCHEMA
-from .default_configs import DEFAULT_CONFIGS
+from .default_configs import get_default_configs
 
 # 安全相关 (从 src.security 导入)
 from src.security import (
@@ -37,7 +37,7 @@ __all__ = [
     'settings',
     'Settings',
     'CONFIG_SCHEMA',
-    'DEFAULT_CONFIGS',
+    'get_default_configs',
     # 安全
     'verify_password',
     'get_password_hash',
