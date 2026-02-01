@@ -105,7 +105,7 @@ async def unified_search(
             # 创建别名获取任务（不等待）
             async def get_aliases():
                 try:
-                    from . import models
+                    from src.db import models
                     user = models.User(id=0, username="system")
                     # 使用核心标题获取别名
                     all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(core_title, user)
@@ -127,7 +127,7 @@ async def unified_search(
 
     # 如果没有指定max_results_per_source，从配置中读取
     if max_results_per_source is None:
-        from . import crud
+        from src.db import crud
         config_value = await crud.get_config_value(session, 'searchMaxResultsPerSource', '30')
         try:
             max_results_per_source = int(config_value)
@@ -278,7 +278,7 @@ async def unified_search(
     
     if use_source_priority_sorting:
         # 按源优先级和相似度排序
-        from . import crud
+        from src.db import crud
         source_settings = await crud.get_all_scraper_settings(session)
         source_order_map = {s['providerName']: s['displayOrder'] for s in source_settings}
         

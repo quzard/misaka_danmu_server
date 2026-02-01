@@ -52,8 +52,8 @@ async def record_play_history(
     anime_id, anime_title, image_url, local_image_path = row
 
     # 在独立的 session 中更新缓存（避免影响主请求的事务）
-    from .database import get_session_factory
-    session_factory = get_session_factory()
+    from src.db import get_db_session_factory
+    session_factory = get_db_session_factory()
 
     async with session_factory() as cache_session:
         # 获取现有播放历史
