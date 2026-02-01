@@ -1469,7 +1469,7 @@ async def start_download(
     manager = Depends(get_scraper_manager)
 ):
     """启动弹幕源下载任务（后台运行，不依赖 SSE 连接）"""
-    from src.scraper_download_executor import start_download_task
+    from src.utils.scraper_download_executor import start_download_task
 
     repo_url = payload.get("repoUrl", "")
     use_full_replace = payload.get("fullReplace", False)
@@ -1634,9 +1634,9 @@ async def get_cached_task_status(
     用于容器重启后前端查询之前任务的完成状态
     缓存有效期为1小时
     """
-    from src.core.cache_manager import CacheManager
+    from src.db import CacheManager
     from src.db.database import get_db_session_factory
-    from src.scraper_download_executor import SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX
+    from src.utils.scraper_download_executor import SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX
 
     cache_manager = CacheManager(get_db_session_factory())
     cached_data = await cache_manager.get(SCRAPER_DOWNLOAD_TASK_CACHE_PREFIX, task_id, session)

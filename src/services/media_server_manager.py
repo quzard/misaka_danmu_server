@@ -137,7 +137,7 @@ def get_media_server_manager() -> MediaServerManager:
 
     # 尝试从FastAPI应用状态获取
     try:
-        from .main import app
+        from src.main import app
         if hasattr(app.state, 'media_server_manager'):
             return app.state.media_server_manager
     except:
