@@ -16,7 +16,6 @@ from ..orm_models import (
 )
 from .. import models, orm_models
 from src.core.timezone import get_now
-from src.api.dandan.danmaku_parser import parse_dandan_xml_to_comments
 from .source import check_source_exists_by_media_id, get_anime_id_by_source_media_id, _assign_source_order_if_missing
 
 logger = logging.getLogger(__name__)
@@ -493,6 +492,8 @@ async def fetch_comments(session: AsyncSession, episode_id: int) -> List[Dict[st
             return []
 
         xml_content = absolute_path.read_text(encoding='utf-8')
+        # 延迟导入避免循环依赖
+        from src.api.dandan.danmaku_parser import parse_dandan_xml_to_comments
         return parse_dandan_xml_to_comments(xml_content)
     except Exception as e:
         logger.error(f"读取或解析弹幕文件失败: {episode.danmakuFilePath}。错误: {e}", exc_info=True)
@@ -546,6 +547,8 @@ async def fetch_merged_comments(session: AsyncSession, episode_id: int) -> List[
                 continue
 
             xml_content = absolute_path.read_text(encoding='utf-8')
+            # 延迟导入避免循环依赖
+            from src.api.dandan.danmaku_parser import parse_dandan_xml_to_comments
             comments = parse_dandan_xml_to_comments(xml_content)
 
             for comment in comments:
@@ -570,6 +573,8 @@ async def add_comments_from_xml(session: AsyncSession, episode_id: int, xml_cont
     Parses XML content and adds the comments to a given episode.
     Returns the number of comments added.
     """
+    # 延迟导入避免循环依赖
+    from src.api.dandan.danmaku_parser import parse_dandan_xml_to_comments
     comments = parse_dandan_xml_to_comments(xml_content)
     if not comments:
         return 0

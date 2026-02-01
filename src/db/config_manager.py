@@ -1,10 +1,16 @@
+"""
+配置管理器模块
+
+提供数据库配置项的集中管理、缓存和初始化功能。
+此模块位于 db 层，因为它直接依赖数据库 CRUD 操作。
+"""
+
 import asyncio
 import logging
 from typing import Any, Dict, Optional, Tuple
-from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.db import crud
+from . import crud
 
 
 class ConfigManager:
@@ -41,7 +47,6 @@ class ConfigManager:
         """
         更新一个配置项的值，并使缓存失效。
         """
-        # 直接在管理器中处理数据库更新和缓存失效
         async with self.session_factory() as session:
             await crud.update_config_value(session, configKey, configValue)
         self.invalidate(configKey)
@@ -58,9 +63,9 @@ class ConfigManager:
         """从缓存中移除一个特定的键，以便下次获取时能从数据库重新加载。"""
         if key in self._cache:
             del self._cache[key]
-            # 不再打印缓存失效日志，避免日志噪音
 
     def clear_cache(self):
         """清空内存中的配置缓存，以便下次获取时能从数据库重新加载。"""
         self._cache.clear()
         self.logger.info("所有配置缓存已清空。")
+

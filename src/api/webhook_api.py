@@ -1,14 +1,17 @@
 import logging
 import secrets
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from src.db import crud, get_db_session
-from src.core import ConfigManager
-from src.services import WebhookManager
+
+# 使用 TYPE_CHECKING 避免运行时循环导入，仅用于类型提示
+if TYPE_CHECKING:
+    from src.core import ConfigManager
+    from src.services import WebhookManager
 
 # 新增：获取专用的 webhook_raw 日志记录器
 webhook_raw_logger = logging.getLogger("webhook_raw")
@@ -17,11 +20,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def get_webhook_manager(request: Request) -> WebhookManager:
+async def get_webhook_manager(request: Request) -> "WebhookManager":
     """依赖项：从应用状态获取 Webhook 管理器"""
     return request.app.state.webhook_manager
 
-async def get_config_manager(request: Request) -> ConfigManager:
+async def get_config_manager(request: Request) -> "ConfigManager":
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
 

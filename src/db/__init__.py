@@ -1,10 +1,11 @@
 """
-数据库层 - 连接、模型、CRUD
+数据库层 - 连接、模型、CRUD、管理器
 
 使用方式:
     from src.db import get_db_session, get_db_type
     from src.db import crud, models, orm_models
     from src.db import init_db_tables, close_db_engine, create_initial_admin_user
+    from src.db import ConfigManager, CacheManager
 """
 
 # 数据库连接
@@ -35,6 +36,10 @@ from .db_maintainer import sync_database_schema
 # CRUD 操作
 from . import crud
 
+# 管理器（依赖 crud，所以放在 crud 之后）
+from .config_manager import ConfigManager
+from .cache_manager import CacheManager
+
 __all__ = [
     # 数据库连接
     'get_db_session',
@@ -55,5 +60,8 @@ __all__ = [
     'sync_database_schema',
     # CRUD
     'crud',
+    # 管理器
+    'ConfigManager',
+    'CacheManager',
 ]
 

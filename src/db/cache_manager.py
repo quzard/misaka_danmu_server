@@ -6,6 +6,8 @@
 - 自动TTL过期
 - 缓存前缀管理
 - 模式匹配查询
+
+此模块位于 db 层，因为它直接依赖数据库 CRUD 操作。
 """
 
 import logging
@@ -13,7 +15,7 @@ import asyncio
 from typing import Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from src.db import crud
+from . import crud
 
 
 class CacheManager:
