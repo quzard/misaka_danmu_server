@@ -77,10 +77,15 @@ RUN chmod +x /exec.sh /run.sh
 
 # 从 GitHub 公共仓库下载限制模块的 .so 文件
 # 根据目标平台架构选择对应的文件夹 (linux-x86 或 linux-arm)
-# 根据 SO_BRANCH 参数选择从 main 或 test 分支下载
+# 根据 SO_TAG 参数选择从 main 或 test 分支下载 (latest -> main, test -> test)
 ARG TARGETARCH
-ARG SO_BRANCH=main
+ARG SO_TAG=latest
 RUN set -ex \
+    && if [ "$SO_TAG" = "latest" ]; then \
+         SO_BRANCH="main"; \
+       else \
+         SO_BRANCH="$SO_TAG"; \
+       fi \
     && GITHUB_RAW_BASE="https://raw.githubusercontent.com/l429609201/Misaka-Scraper-Resources/${SO_BRANCH}/src" \
     && if [ "$TARGETARCH" = "amd64" ]; then \
          PLATFORM_DIR="linux-x86"; \
@@ -90,7 +95,7 @@ RUN set -ex \
          echo "Unsupported architecture: $TARGETARCH"; \
          exit 1; \
        fi \
-    && echo "Downloading .so files from branch: ${SO_BRANCH}, platform: $PLATFORM_DIR (arch: $TARGETARCH)" \
+    && echo "Downloading .so files: SO_TAG=${SO_TAG}, branch=${SO_BRANCH}, platform=$PLATFORM_DIR (arch: $TARGETARCH)" \
     && apt-get update && apt-get install -y --no-install-recommends curl \
     && curl -fsSL "${GITHUB_RAW_BASE}/${PLATFORM_DIR}/rate_limiter.so" -o ./src/rate_limiter.so \
     && curl -fsSL "${GITHUB_RAW_BASE}/${PLATFORM_DIR}/security_core.so" -o ./src/security_core.so \

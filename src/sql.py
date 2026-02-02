@@ -103,7 +103,6 @@ def main():
     
     asyncio.run(execute_sql(args.sql, args.yes))
 
-
 if __name__ == "__main__":
     main()
 
