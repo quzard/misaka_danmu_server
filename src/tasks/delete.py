@@ -2,7 +2,7 @@
 import logging
 import asyncio
 import shutil
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Set
 from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,20 +18,152 @@ _get_fs_path_from_web_path = crud._get_fs_path_from_web_path
 logger = logging.getLogger(__name__)
 
 
-def delete_danmaku_file(danmaku_file_path_str: Optional[str]):
-    """根据数据库中存储的Web路径，安全地删除对应的弹幕文件。"""
-    if not danmaku_file_path_str:
+def _is_safe_to_delete_directory(dir_path: Path) -> bool:
+    """
+    检查目录是否可以安全删除。
+
+    安全条件：
+    1. 目录必须存在且是目录
+    2. 目录必须为空（没有任何文件或子目录）
+    3. 目录必须在 DANMAKU_BASE_DIR 下（防止误删系统目录）
+    4. 目录不能是 DANMAKU_BASE_DIR 本身
+    """
+    if not dir_path or not dir_path.exists() or not dir_path.is_dir():
+        return False
+
+    # 安全检查：确保目录在弹幕基础目录下
+    try:
+        dir_path.resolve().relative_to(DANMAKU_BASE_DIR.resolve())
+    except ValueError:
+        # 目录不在 DANMAKU_BASE_DIR 下，不允许删除
+        logger.warning(f"目录 {dir_path} 不在弹幕基础目录下，跳过删除")
+        return False
+
+    # 不能删除弹幕基础目录本身
+    if dir_path.resolve() == DANMAKU_BASE_DIR.resolve():
+        return False
+
+    # 检查目录是否为空
+    try:
+        return not any(dir_path.iterdir())
+    except PermissionError:
+        logger.warning(f"无权限访问目录 {dir_path}")
+        return False
+
+
+def _cleanup_empty_parent_directories(file_path: Path, stop_at: Path = DANMAKU_BASE_DIR):
+    """
+    递归清理空的父目录，直到遇到非空目录或到达停止点。
+
+    Args:
+        file_path: 被删除文件的路径
+        stop_at: 停止清理的目录（不会删除此目录及其父目录）
+    """
+    if not file_path:
         return
+
+    parent = file_path.parent
+
+    # 向上遍历，清理空目录
+    while parent and parent != stop_at and parent.resolve() != stop_at.resolve():
+        if _is_safe_to_delete_directory(parent):
+            try:
+                parent.rmdir()
+                logger.info(f"已清理空目录: {parent}")
+                parent = parent.parent
+            except OSError as e:
+                # 目录可能不为空或无权限，停止清理
+                logger.debug(f"无法删除目录 {parent}: {e}")
+                break
+        else:
+            # 目录不为空或不安全，停止清理
+            break
+
+
+def delete_danmaku_file(danmaku_file_path_str: Optional[str], cleanup_empty_dirs: bool = True) -> Optional[Path]:
+    """
+    根据数据库中存储的Web路径，安全地删除对应的弹幕文件。
+
+    Args:
+        danmaku_file_path_str: 数据库中存储的Web路径
+        cleanup_empty_dirs: 是否清理空的父目录，默认为True
+
+    Returns:
+        被删除文件的路径（用于批量操作后统一清理目录），如果未删除则返回None
+    """
+    if not danmaku_file_path_str:
+        return None
     try:
         # 修正：使用 crud 中的辅助函数来获取正确的文件系统路径
         fs_path = _get_fs_path_from_web_path(danmaku_file_path_str)
         if fs_path and fs_path.is_file():
             fs_path.unlink(missing_ok=True)
+            logger.debug(f"已删除弹幕文件: {fs_path}")
+
+            # 清理空的父目录
+            if cleanup_empty_dirs:
+                _cleanup_empty_parent_directories(fs_path)
+
+            return fs_path
     except (ValueError, FileNotFoundError):
         # 如果路径无效或文件不存在，则忽略
         pass
     except Exception as e:
         logger.error(f"删除弹幕文件 '{danmaku_file_path_str}' 时出错: {e}", exc_info=True)
+    return None
+
+
+def delete_danmaku_files_batch(file_paths: List[Optional[str]]):
+    """
+    批量删除弹幕文件，并在最后统一清理空目录。
+
+    这比逐个删除更高效，因为可以避免重复检查同一个目录。
+
+    Args:
+        file_paths: 数据库中存储的Web路径列表
+    """
+    if not file_paths:
+        return
+
+    # 收集所有被删除文件的父目录
+    affected_dirs: Set[Path] = set()
+
+    for file_path_str in file_paths:
+        if not file_path_str:
+            continue
+        try:
+            fs_path = _get_fs_path_from_web_path(file_path_str)
+            if fs_path and fs_path.is_file():
+                affected_dirs.add(fs_path.parent)
+                fs_path.unlink(missing_ok=True)
+                logger.debug(f"已删除弹幕文件: {fs_path}")
+        except (ValueError, FileNotFoundError):
+            pass
+        except Exception as e:
+            logger.error(f"删除弹幕文件 '{file_path_str}' 时出错: {e}", exc_info=True)
+
+    # 统一清理空目录（从最深的目录开始）
+    # 按路径深度排序，先处理深层目录
+    sorted_dirs = sorted(affected_dirs, key=lambda p: len(p.parts), reverse=True)
+    cleaned_dirs: Set[Path] = set()
+
+    for dir_path in sorted_dirs:
+        # 向上遍历清理空目录
+        current = dir_path
+        while current and current.resolve() != DANMAKU_BASE_DIR.resolve():
+            if current in cleaned_dirs:
+                # 已经处理过这个目录，跳过
+                break
+            if _is_safe_to_delete_directory(current):
+                try:
+                    current.rmdir()
+                    logger.info(f"已清理空目录: {current}")
+                    cleaned_dirs.add(current)
+                    current = current.parent
+                except OSError:
+                    break
+            else:
+                break
 
 
 async def delete_anime_task(animeId: int, session: AsyncSession, progress_callback: Callable, delete_files: bool = True):
@@ -66,20 +198,23 @@ async def delete_anime_task(animeId: int, session: AsyncSession, progress_callba
                 sources_result = await session.execute(sources_stmt)
                 sources = sources_result.scalars().all()
 
-                deleted_files_count = 0
+                # 收集所有文件路径
+                all_file_paths: List[Optional[str]] = []
                 for source in sources:
                     for episode in source.episodes:
                         if episode.danmakuFilePath:
-                            delete_danmaku_file(episode.danmakuFilePath)
-                            deleted_files_count += 1
+                            all_file_paths.append(episode.danmakuFilePath)
 
-                # 同时尝试删除默认目录（兼容旧数据）
+                # 批量删除文件并清理空目录
+                if all_file_paths:
+                    delete_danmaku_files_batch(all_file_paths)
+                    logger.info(f"已删除作品 {animeId} 的 {len(all_file_paths)} 个弹幕文件")
+
+                # 同时尝试删除默认目录（兼容旧数据，确保目录完全清理）
                 anime_danmaku_dir = DANMAKU_BASE_DIR / str(animeId)
                 if anime_danmaku_dir.exists() and anime_danmaku_dir.is_dir():
                     shutil.rmtree(anime_danmaku_dir)
                     logger.info(f"已删除作品的弹幕目录: {anime_danmaku_dir}")
-
-                logger.info(f"已删除作品 {animeId} 的 {deleted_files_count} 个弹幕文件")
 
             # 2. 删除作品本身 (数据库将通过级联删除所有关联记录)
             await progress_callback(90, "正在删除数据库记录...")
@@ -136,8 +271,9 @@ async def delete_source_task(sourceId: int, session: AsyncSession, progress_call
             episodes_to_delete_res = await session.execute(
                 select(orm_models.Episode.danmakuFilePath).where(orm_models.Episode.sourceId == sourceId)
             )
-            for file_path in episodes_to_delete_res.scalars().all():
-                delete_danmaku_file(file_path)
+            file_paths = [fp for fp in episodes_to_delete_res.scalars().all() if fp]
+            # 使用批量删除，统一清理空目录
+            delete_danmaku_files_batch(file_paths)
 
         # 删除源记录，数据库将级联删除其下的所有分集记录
         await progress_callback(70, "正在删除数据库记录...")
@@ -219,6 +355,10 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
     total = len(episodeIds)
     await progress_callback(5, f"准备删除 {total} 个分集...")
     deleted_count = 0
+
+    # 收集所有要删除的文件路径，最后统一清理空目录
+    all_file_paths: List[Optional[str]] = []
+
     try:
         for i, episode_id in enumerate(episodeIds):
             progress = 5 + int(((i + 1) / total) * 90) if total > 0 else 95
@@ -228,16 +368,20 @@ async def delete_bulk_episodes_task(episodeIds: List[int], session: AsyncSession
             episode_result = await session.execute(episode_stmt)
             episode = episode_result.scalar_one_or_none()
             if episode:
-                if delete_files:
-                    delete_danmaku_file(episode.danmakuFilePath)
+                if delete_files and episode.danmakuFilePath:
+                    all_file_paths.append(episode.danmakuFilePath)
                 await session.delete(episode)
                 deleted_count += 1
 
-                # 3. 为每个分集提交一次事务，以尽快释放锁
+                # 为每个分集提交一次事务，以尽快释放锁
                 await session.commit()
 
                 # 短暂休眠，以允许其他数据库操作有机会执行
                 await asyncio.sleep(0.1)
+
+        # 批量删除文件并统一清理空目录
+        if delete_files and all_file_paths:
+            delete_danmaku_files_batch(all_file_paths)
 
         suffix = "" if delete_files else "（保留了弹幕文件）"
         raise TaskSuccess(f"批量删除完成，共处理 {total} 个，成功删除 {deleted_count} 个。{suffix}")
@@ -265,6 +409,9 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
     deleted_count = 0
     affected_anime_ids = set()  # 记录受影响的 anime ID
 
+    # 收集所有要删除的文件路径，最后统一清理空目录
+    all_file_paths: List[Optional[str]] = []
+
     for i, sourceId in enumerate(sourceIds):
         progress = int((i / total) * 90)  # 留10%给清理空anime
         await progress_callback(progress, f"正在删除源 {i+1}/{total} (ID: {sourceId})...")
@@ -276,13 +423,14 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
                 # 记录受影响的 anime ID
                 affected_anime_ids.add(source.animeId)
 
-                # 删除关联的弹幕文件
+                # 收集关联的弹幕文件路径
                 if delete_files:
                     episodes_to_delete_res = await session.execute(
                         select(orm_models.Episode.danmakuFilePath).where(orm_models.Episode.sourceId == sourceId)
                     )
                     for file_path in episodes_to_delete_res.scalars().all():
-                        delete_danmaku_file(file_path)
+                        if file_path:
+                            all_file_paths.append(file_path)
 
                 await session.delete(source)
                 await session.commit()
@@ -290,6 +438,10 @@ async def delete_bulk_sources_task(sourceIds: List[int], session: AsyncSession, 
         except Exception as e:
             logger.error(f"批量删除源任务中，删除源 (ID: {sourceId}) 失败: {e}", exc_info=True)
             # Continue to the next one
+
+    # 批量删除文件并统一清理空目录
+    if delete_files and all_file_paths:
+        delete_danmaku_files_batch(all_file_paths)
 
     # 清理没有源的 anime 条目
     orphan_anime_count = 0

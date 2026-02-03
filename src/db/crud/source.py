@@ -186,16 +186,20 @@ async def clear_source_data(session: AsyncSession, source_id: int):
 
 
 async def delete_anime_source(session: AsyncSession, source_id: int) -> bool:
+    """删除一个数据源及其所有分集的弹幕文件，并清理空目录。"""
+    from src.tasks.delete import delete_danmaku_files_batch
+
     source = await session.get(AnimeSource, source_id)
     if source:
-        # 修正：逐个删除文件，而不是删除整个目录，以提高健壮性并与 tasks.py 保持一致
+        # 收集所有弹幕文件路径
         episodes_to_delete_res = await session.execute(
             select(Episode.danmakuFilePath).where(Episode.sourceId == source_id)
         )
-        for file_path_str in episodes_to_delete_res.scalars().all():
-            if fs_path := _get_fs_path_from_web_path(file_path_str):
-                if fs_path.is_file():
-                    fs_path.unlink(missing_ok=True)
+        file_paths = [fp for fp in episodes_to_delete_res.scalars().all() if fp]
+
+        # 批量删除文件并清理空目录
+        if file_paths:
+            delete_danmaku_files_batch(file_paths)
 
         await session.delete(source)
         await session.commit()

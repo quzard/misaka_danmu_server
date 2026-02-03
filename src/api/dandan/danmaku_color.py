@@ -15,8 +15,9 @@ DEFAULT_RANDOM_COLOR_PALETTE: List[int] = [
 # - off: 不改色
 # - white_to_random: 仅将白色弹幕随机换色
 # - all_random: 所有弹幕随机换色
+# - all_white: 所有弹幕变白色
 DEFAULT_RANDOM_COLOR_MODE = "off"
-VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random"}
+VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random", "all_white"}
 
 
 def _normalize_color_value(value: Any) -> int:
@@ -114,10 +115,32 @@ def apply_random_color(
     - off: 不处理
     - white_to_random: 仅将白色弹幕随机换色
     - all_random: 所有弹幕随机换色
+    - all_white: 所有弹幕变白色
     """
     if mode not in VALID_RANDOM_COLOR_MODES or mode == "off":
         return comments
 
+    # all_white 模式：将所有弹幕颜色设为白色
+    if mode == "all_white":
+        processed = []
+        for item in comments:
+            p_attr = item.get("p", "")
+            if not p_attr:
+                processed.append(item)
+                continue
+
+            parts = p_attr.split(",")
+            current_color = _get_color_from_p(parts)
+
+            if current_color != 16777215:
+                _set_color_in_p(parts, 16777215)
+                new_p = ",".join(parts)
+                processed.append({**item, "p": new_p})
+            else:
+                processed.append(item)
+        return processed
+
+    # 随机颜色模式
     palette_list = list(palette)
     if not palette_list:
         palette_list = DEFAULT_RANDOM_COLOR_PALETTE
