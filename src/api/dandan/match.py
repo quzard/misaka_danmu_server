@@ -674,6 +674,9 @@ async def get_match_for_item(
                             best_match = None
                             logger.warning("  - 传统匹配失败: 没有搜索结果")
 
+                # 用于保存从来源端获取的剧集标题
+                matched_episode_title = None
+
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
                     logger.info(f"  - 顺延机制启用，依次验证候选源")
@@ -709,7 +712,9 @@ async def get_match_for_item(
                                     logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {episode_number} 集，跳过")
                                     continue
 
-                                logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
+                                # 保存来源端的剧集标题
+                                matched_episode_title = target_episode.title
+                                logger.info(f"    {attempt}. {candidate.provider} - 验证通过，剧集标题: '{matched_episode_title}'")
                             else:
                                 logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
                             best_match = candidate
@@ -725,6 +730,21 @@ async def get_match_for_item(
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
+
+                # 如果还没有获取剧集标题（非顺延机制匹配成功的情况），主动获取
+                if matched_episode_title is None and not is_movie and episode_number is not None:
+                    try:
+                        scraper = scraper_manager.get_scraper(best_match.provider)
+                        if scraper:
+                            episodes = await scraper.get_episodes(best_match.mediaId, db_media_type=best_match.type)
+                            if episodes:
+                                for ep in episodes:
+                                    if ep.episodeIndex == episode_number:
+                                        matched_episode_title = ep.title
+                                        logger.info(f"  - 获取到来源端剧集标题: '{matched_episode_title}'")
+                                        break
+                    except Exception as e:
+                        logger.warning(f"  - 获取剧集标题失败: {e}")
 
                 # 步骤4：应用入库后处理规则
                 logger.info(f"步骤4：应用入库后处理规则")
@@ -856,7 +876,15 @@ async def get_match_for_item(
                     logger.info(f"source_id={source_id}, provider={best_match.provider}, mediaId={best_match.mediaId}")
 
                     # 创建episode记录
-                    episode_title = f"第{final_episode_number}集" if not is_movie else final_title
+                    # 优先使用从来源端获取的剧集标题，否则使用通用格式
+                    if is_movie:
+                        episode_title = final_title
+                    elif matched_episode_title:
+                        episode_title = matched_episode_title
+                        logger.info(f"  - 使用来源端剧集标题: '{episode_title}'")
+                    else:
+                        episode_title = f"第{final_episode_number}集"
+                        logger.info(f"  - 使用通用剧集标题: '{episode_title}'")
                     episode_db_id = await crud.create_episode_if_not_exists(
                         session_inner,
                         real_anime_id,
