@@ -1,20 +1,17 @@
 import {
   Button,
+  Checkbox,
   Empty,
-  Form,
   Input,
   InputNumber,
   List,
   Modal,
   Segmented,
-  Spin,
-  Tag,
   Tooltip,
   Upload,
-  message,
 } from 'antd'
 import { useEffect, useRef, useState } from 'react'
-import { batchManualImport, validateImportUrl, importFromUrl } from '../apis'
+import { batchManualImport, validateImportUrl } from '../apis'
 import {
   CloseCircleOutlined,
   CloudUploadOutlined,
@@ -22,6 +19,7 @@ import {
   UploadOutlined,
   CheckCircleOutlined,
   ExclamationCircleOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons'
 import { useMessage } from '../MessageContext'
 
@@ -63,14 +61,11 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const [pageSize, setPageSize] = useState(10)
   const [activeItem, setActiveItem] = useState(null)
 
-  // URL导入相关状态
-  const [urlInput, setUrlInput] = useState('')
+  // 批量URL导入相关状态
+  const [urlListInput, setUrlListInput] = useState('')  // 多行URL输入
   const [urlValidating, setUrlValidating] = useState(false)
-  const [urlValidationResult, setUrlValidationResult] = useState(null)
-  const [urlTitle, setUrlTitle] = useState('')
-  const [urlSeason, setUrlSeason] = useState(1)
-  const [urlMediaType, setUrlMediaType] = useState('tv_series')
-  const [urlEpisodeIndex, setUrlEpisodeIndex] = useState(1)  // 非自定义源URL导入时的集数
+  const [urlParseResults, setUrlParseResults] = useState([])  // 解析结果列表
+  const [startEpisodeIndex, setStartEpisodeIndex] = useState(1)  // 起始集数
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -89,99 +84,117 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   // 判断是否为自定义源
   const isCustomSource = sourceInfo?.providerName === 'custom'
 
-  // URL校验
-  const handleValidateUrl = async () => {
-    if (!urlInput.trim()) {
-      messageApi.warning('请输入URL')
+  // 批量解析URL
+  const handleBatchValidateUrls = async () => {
+    const urls = urlListInput
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+
+    if (urls.length === 0) {
+      messageApi.warning('请输入至少一个URL')
       return
     }
 
     setUrlValidating(true)
-    setUrlValidationResult(null)
+    // 初始化解析结果，全部设为 loading 状态
+    const initialResults = urls.map((url, index) => ({
+      id: `url-${Date.now()}-${index}`,
+      url,
+      status: 'loading',  // loading | success | error
+      selected: true,
+      episodeIndex: startEpisodeIndex + index,
+      title: '',
+      provider: '',
+      mediaId: '',
+      errorMessage: '',
+    }))
+    setUrlParseResults(initialResults)
 
-    try {
-      const res = await validateImportUrl({ url: urlInput.trim() })
-      if (res.data) {
-        // 对于非自定义源，检查 URL 的 provider 是否匹配当前源
-        if (!isCustomSource && res.data.isValid) {
-          const currentProvider = sourceInfo?.providerName?.toLowerCase()
-          const urlProvider = res.data.provider?.toLowerCase()
-          if (currentProvider !== urlProvider) {
-            setUrlValidationResult({
-              isValid: false,
+    // 并行解析所有URL
+    const results = await Promise.all(
+      urls.map(async (url, index) => {
+        try {
+          const res = await validateImportUrl({ url })
+          if (res.data?.isValid) {
+            // 对于非自定义源，检查 provider 是否匹配
+            if (!isCustomSource) {
+              const currentProvider = sourceInfo?.providerName?.toLowerCase()
+              const urlProvider = res.data.provider?.toLowerCase()
+              if (currentProvider !== urlProvider) {
+                return {
+                  ...initialResults[index],
+                  status: 'error',
+                  errorMessage: `来源不匹配 (${res.data.provider})`,
+                  provider: res.data.provider,
+                }
+              }
+            }
+            return {
+              ...initialResults[index],
+              status: 'success',
+              title: res.data.title || '',
               provider: res.data.provider,
-              errorMessage: `URL来源 (${res.data.provider}) 与当前源 (${sourceInfo?.providerName}) 不匹配，请输入 ${sourceInfo?.providerName} 平台的链接`
-            })
-            return
+              mediaId: res.data.mediaId,
+            }
+          } else {
+            return {
+              ...initialResults[index],
+              status: 'error',
+              errorMessage: res.data?.errorMessage || '解析失败',
+            }
+          }
+        } catch (error) {
+          return {
+            ...initialResults[index],
+            status: 'error',
+            errorMessage: error.detail || error.message || '解析失败',
           }
         }
-        setUrlValidationResult(res.data)
-        if (res.data.isValid) {
-          // 自动填充标题
-          if (res.data.title) {
-            setUrlTitle(res.data.title)
-          }
-          // 自动填充媒体类型
-          if (res.data.mediaType) {
-            setUrlMediaType(res.data.mediaType)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('URL校验失败:', error)
-      setUrlValidationResult({
-        isValid: false,
-        errorMessage: error.detail || error.message || 'URL校验失败'
       })
-    } finally {
-      setUrlValidating(false)
+    )
+
+    setUrlParseResults(results)
+    setUrlValidating(false)
+
+    const successCount = results.filter(r => r.status === 'success').length
+    const errorCount = results.filter(r => r.status === 'error').length
+    if (successCount > 0) {
+      messageApi.success(`解析完成：${successCount} 个成功，${errorCount} 个失败`)
+    } else {
+      messageApi.error('所有URL解析失败')
     }
   }
 
-  // URL导入提交
-  const handleUrlImport = async () => {
-    if (!urlValidationResult?.isValid) {
-      messageApi.warning('请先校验URL')
+  // 批量URL导入提交
+  const handleBatchUrlImport = async () => {
+    const selectedItems = urlParseResults.filter(item => item.selected && item.status === 'success')
+    if (selectedItems.length === 0) {
+      messageApi.warning('请选择至少一个有效的URL')
       return
     }
 
     setLoading(true)
     try {
-      let res
-      if (isCustomSource) {
-        // 自定义源：使用 importFromUrl API 创建新的导入任务
-        res = await importFromUrl({
-          url: urlInput.trim(),
-          provider: urlValidationResult.provider,
-          title: urlTitle || urlValidationResult.title,
-          media_type: urlMediaType,
-          season: urlSeason,
-        })
-      } else {
-        // 非自定义源：使用 batchManualImport API 导入到已有源
-        // 需要用户输入集数
-        if (!urlEpisodeIndex || urlEpisodeIndex < 1) {
-          messageApi.warning('请输入有效的集数')
-          setLoading(false)
-          return
-        }
-        res = await batchManualImport({
-          sourceId: sourceInfo.sourceId,
-          items: [{
-            episodeIndex: urlEpisodeIndex,
-            content: urlInput.trim(),
-            title: urlTitle || urlValidationResult.title || undefined,
-          }]
-        })
-      }
+      const items = selectedItems.map(item => ({
+        episodeIndex: item.episodeIndex,
+        content: item.url,
+        title: item.title || undefined,
+      }))
+
+      const res = await batchManualImport({
+        sourceId: sourceInfo.sourceId,
+        items,
+      })
+
       if (res.data) {
-        messageApi.success(res.data.message || 'URL导入任务已提交')
+        messageApi.success(res.data.message || `成功导入 ${selectedItems.length} 个分集`)
         onSuccess(res.data)
         clearUrlState()
       }
     } catch (error) {
-      console.error('URL导入失败:', error)
-      messageApi.error(error.detail || error.message || 'URL导入失败')
+      console.error('批量URL导入失败:', error)
+      messageApi.error(error.detail || error.message || '批量URL导入失败')
     } finally {
       setLoading(false)
     }
@@ -189,18 +202,15 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
 
   // 清空URL相关状态
   const clearUrlState = () => {
-    setUrlInput('')
-    setUrlValidationResult(null)
-    setUrlTitle('')
-    setUrlSeason(1)
-    setUrlMediaType('tv_series')
-    setUrlEpisodeIndex(1)
+    setUrlListInput('')
+    setUrlParseResults([])
+    setStartEpisodeIndex(1)
   }
 
   const handleOk = async () => {
     // URL导入模式
     if (importMode === 'url') {
-      await handleUrlImport()
+      await handleBatchUrlImport()
       return
     }
 
@@ -434,129 +444,165 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     )
   }
 
-  // 渲染URL导入界面
-  const renderUrlImport = () => (
-    <div className="p-4">
-      <div className="mb-4">
-        <div className="text-gray-500 dark:text-gray-400 mb-2">
-          {isCustomSource
-            ? '输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源'
-            : `输入 ${sourceInfo?.providerName} 平台的视频URL，系统将自动获取弹幕`
-          }
-        </div>
-        <Input.Search
-          placeholder={isCustomSource
-            ? '请输入视频URL，如 https://www.XXXXX.com/bangumi/play/ss...'
-            : `请输入 ${sourceInfo?.providerName} 的视频URL`
-          }
-          value={urlInput}
-          onChange={e => {
-            setUrlInput(e.target.value)
-            setUrlValidationResult(null)
-          }}
-          onSearch={handleValidateUrl}
-          enterButton={
-            <Button loading={urlValidating}>
-              校验URL
-            </Button>
-          }
-          size="large"
-        />
-      </div>
+  // 更新解析结果中的某一项
+  const updateParseResult = (id, updates) => {
+    setUrlParseResults(results =>
+      results.map(item =>
+        item.id === id ? { ...item, ...updates } : item
+      )
+    )
+  }
 
-      {/* 校验结果显示 */}
-      {urlValidationResult && (
-        <div className={`p-4 rounded-lg mb-4 ${urlValidationResult.isValid ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700' : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700'}`}>
-          {urlValidationResult.isValid ? (
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircleOutlined className="text-green-500" />
-                <span className="font-medium text-green-700 dark:text-green-400">URL校验通过</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-gray-500 dark:text-gray-400">平台：</span><span className="dark:text-gray-200">{urlValidationResult.provider}</span></div>
-                <div><span className="text-gray-500 dark:text-gray-400">媒体ID：</span><span className="dark:text-gray-200">{urlValidationResult.mediaId}</span></div>
-                {urlValidationResult.title && (
-                  <div className="col-span-2"><span className="text-gray-500 dark:text-gray-400">标题：</span><span className="dark:text-gray-200">{urlValidationResult.title}</span></div>
-                )}
-                {urlValidationResult.mediaType && (
-                  <div><span className="text-gray-500 dark:text-gray-400">类型：</span><span className="dark:text-gray-200">{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</span></div>
-                )}
-                {urlValidationResult.year && (
-                  <div><span className="text-gray-500 dark:text-gray-400">年份：</span><span className="dark:text-gray-200">{urlValidationResult.year}</span></div>
-                )}
-              </div>
-              {urlValidationResult.imageUrl && (
-                <div className="mt-2">
-                  <img src={urlValidationResult.imageUrl} alt="封面" className="h-24 rounded" />
-                </div>
-              )}
-            </div>
-          ) : (
+  // 全选/取消全选
+  const handleSelectAll = (checked) => {
+    setUrlParseResults(results =>
+      results.map(item => ({
+        ...item,
+        selected: item.status === 'success' ? checked : false
+      }))
+    )
+  }
+
+  // 一键应用集数（从起始集数开始递增）
+  const handleApplyEpisodeIndex = () => {
+    setUrlParseResults(results =>
+      results.map((item, index) => ({
+        ...item,
+        episodeIndex: startEpisodeIndex + index
+      }))
+    )
+  }
+
+  // 渲染批量URL导入界面
+  const renderUrlImport = () => {
+    const successCount = urlParseResults.filter(r => r.status === 'success').length
+    const selectedCount = urlParseResults.filter(r => r.selected && r.status === 'success').length
+    const allSuccessSelected = successCount > 0 && selectedCount === successCount
+
+    return (
+      <div className="p-4">
+        <div className="mb-4">
+          <div className="text-gray-500 dark:text-gray-400 mb-2">
+            输入多个视频URL（每行一个），系统将批量解析并导入
+            {!isCustomSource && <span className="text-orange-500 ml-1">（仅支持 {sourceInfo?.providerName} 平台的链接）</span>}
+          </div>
+          <Input.TextArea
+            placeholder={`请输入视频URL，每行一个\n例如：\nhttps://www.bilibili.com/video/BV1xxx\nhttps://www.bilibili.com/video/BV2xxx`}
+            value={urlListInput}
+            onChange={e => {
+              setUrlListInput(e.target.value)
+              setUrlParseResults([])
+            }}
+            rows={5}
+            className="mb-2"
+          />
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <ExclamationCircleOutlined className="text-red-500" />
-              <span className="text-red-700 dark:text-red-400">{urlValidationResult.errorMessage || 'URL校验失败'}</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 导入参数设置 */}
-      {urlValidationResult?.isValid && (
-        <div className="border dark:border-gray-600 rounded-lg p-4">
-          <div className="font-medium mb-3 dark:text-gray-200">导入设置</div>
-          <div className="grid grid-cols-2 gap-4">
-            {/* 非自定义源需要输入集数 */}
-            {!isCustomSource && (
-              <div>
-                <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">集数 <span className="text-red-500">*</span></div>
-                <InputNumber
-                  value={urlEpisodeIndex}
-                  onChange={setUrlEpisodeIndex}
-                  min={1}
-                  style={{ width: '100%' }}
-                  placeholder="请输入集数"
-                />
-              </div>
-            )}
-            <div>
-              <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">标题（可修改）</div>
-              <Input
-                value={urlTitle}
-                onChange={e => setUrlTitle(e.target.value)}
-                placeholder="作品标题"
+              <span className="text-gray-500 dark:text-gray-400 text-sm">起始集数：</span>
+              <InputNumber
+                value={startEpisodeIndex}
+                onChange={setStartEpisodeIndex}
+                min={1}
+                size="small"
+                style={{ width: 80 }}
               />
             </div>
-            {/* 自定义源显示季度和媒体类型 */}
-            {isCustomSource && (
-              <>
-                <div>
-                  <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">季度</div>
-                  <InputNumber
-                    value={urlSeason}
-                    onChange={setUrlSeason}
-                    min={1}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">媒体类型</div>
-                  <Segmented
-                    value={urlMediaType}
-                    onChange={setUrlMediaType}
-                    options={[
-                      { label: '剧集', value: 'tv_series' },
-                      { label: '电影', value: 'movie' },
-                    ]}
-                  />
-                </div>
-              </>
-            )}
+            <Button
+              type="primary"
+              onClick={handleBatchValidateUrls}
+              loading={urlValidating}
+              disabled={!urlListInput.trim()}
+            >
+              批量解析URL
+            </Button>
           </div>
         </div>
-      )}
-    </div>
-  )
+
+        {/* 解析结果列表 */}
+        {urlParseResults.length > 0 && (
+          <div className="border dark:border-gray-600 rounded-lg">
+            <div className="p-3 border-b dark:border-gray-600 flex items-center justify-between bg-gray-50 dark:bg-gray-800">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  checked={allSuccessSelected}
+                  indeterminate={selectedCount > 0 && selectedCount < successCount}
+                  onChange={e => handleSelectAll(e.target.checked)}
+                  disabled={successCount === 0}
+                >
+                  全选
+                </Checkbox>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">
+                  已选择 {selectedCount}/{successCount} 个有效项
+                </span>
+              </div>
+              <Button size="small" onClick={handleApplyEpisodeIndex}>
+                一键应用集数
+              </Button>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {urlParseResults.map((item, index) => (
+                <div
+                  key={item.id}
+                  className={`p-3 border-b dark:border-gray-700 last:border-b-0 flex items-center gap-3 ${
+                    item.status === 'error' ? 'bg-red-50 dark:bg-red-900/20' : ''
+                  }`}
+                >
+                  <Checkbox
+                    checked={item.selected}
+                    onChange={e => updateParseResult(item.id, { selected: e.target.checked })}
+                    disabled={item.status !== 'success'}
+                  />
+                  <InputNumber
+                    value={item.episodeIndex}
+                    onChange={value => updateParseResult(item.id, { episodeIndex: value })}
+                    min={1}
+                    size="small"
+                    style={{ width: 60 }}
+                    disabled={item.status !== 'success'}
+                  />
+                  <div className="flex-1 min-w-0">
+                    {item.status === 'loading' ? (
+                      <div className="flex items-center gap-2 text-gray-500">
+                        <LoadingOutlined />
+                        <span className="truncate">{item.url}</span>
+                      </div>
+                    ) : item.status === 'success' ? (
+                      <div>
+                        <Input
+                          value={item.title}
+                          onChange={e => updateParseResult(item.id, { title: e.target.value })}
+                          placeholder="分集标题"
+                          size="small"
+                          className="mb-1"
+                        />
+                        <div className="text-xs text-gray-400 truncate" title={item.url}>
+                          <CheckCircleOutlined className="text-green-500 mr-1" />
+                          {item.provider} | {item.url}
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <div className="text-red-500 dark:text-red-400 text-sm flex items-center gap-1">
+                          <ExclamationCircleOutlined />
+                          {item.errorMessage}
+                        </div>
+                        <div className="text-xs text-gray-400 truncate" title={item.url}>
+                          {item.url}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // 计算选中的有效项数量
+  const selectedValidCount = urlParseResults.filter(r => r.selected && r.status === 'success').length
 
   return (
     <Modal
@@ -566,11 +612,11 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       onCancel={onCancel}
       confirmLoading={loading}
       destroyOnHidden
-      okText={importMode === 'url' ? '开始导入' : '确定'}
+      okText={importMode === 'url' ? `导入选中 (${selectedValidCount})` : '确定'}
       okButtonProps={{
-        disabled: importMode === 'url' && !urlValidationResult?.isValid
+        disabled: importMode === 'url' && selectedValidCount === 0
       }}
-      width={importMode === 'url' ? 600 : 520}
+      width={importMode === 'url' ? 700 : 520}
     >
       {/* 导入模式切换 - 所有源都显示 */}
       <div className="mb-4">
@@ -586,8 +632,8 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
             }
           }}
           options={[
-            { label: <span><UploadOutlined className="mr-1" />{isCustomSource ? 'XML文件导入' : 'XML/URL导入'}</span>, value: 'xml' },
-            { label: <span><LinkOutlined className="mr-1" />URL导入</span>, value: 'url' },
+            { label: <span><UploadOutlined className="mr-1" />XML文件导入</span>, value: 'xml' },
+            { label: <span><LinkOutlined className="mr-1" />URL批量导入</span>, value: 'url' },
           ]}
           block
         />
@@ -602,7 +648,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
           <div className="p-4 text-center">
             <Upload {...uploadProps} ref={uploadRef}>
               <div>
-                <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+                <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} className="dark:text-gray-400" />
                 <div className="flex items-center justify-center">
                   <Button
                     type="primary"
@@ -612,9 +658,9 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
                   >
                     选择文件
                   </Button>
-                  <div className="ml-2">或直接拖拽文件到此处</div>
+                  <div className="ml-2 dark:text-gray-300">或直接拖拽文件到此处</div>
                 </div>
-                <div className="mt-2">
+                <div className="mt-2 text-gray-500 dark:text-gray-400">
                   {isCustomSource
                     ? '支持批量上传，仅接受.xml格式文件'
                     : `支持批量上传，接受.xml格式文件或 ${sourceInfo?.providerName} 的视频URL`
@@ -624,7 +670,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
             </Upload>
           </div>
           {xmlDataList.length === 0 ? (
-            <div className="text-center py-10 text-gray-500">
+            <div className="text-center py-10 text-gray-500 dark:text-gray-400">
               <Empty description="暂无解析数据，请上传XML文件" />
             </div>
           ) : (
