@@ -8,9 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.db import models, get_db_session
+from src.db import models, get_db_session, ConfigManager
 from src import security
-from src.core import ConfigManager
 from src.db.crud import danmaku_edit as crud
 from src.api.dependencies import get_config_manager
 
