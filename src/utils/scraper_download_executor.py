@@ -706,6 +706,9 @@ class ScraperDownloadExecutor:
                 await self.scraper_manager.load_and_sync_scrapers()
                 self._log(f"✓ 成功加载了 {deploy_count} 个弹幕源")
 
+                # 首次下载完成，设置任务状态为完成
+                self.task.status = TaskStatus.COMPLETED
+
             else:
                 # 非首次下载（已有弹幕源）：只部署到 backup 目录，然后重启容器
                 # 这样可以避免在运行时替换 .so 文件导致的冲突

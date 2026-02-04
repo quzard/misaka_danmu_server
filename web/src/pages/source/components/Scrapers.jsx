@@ -687,6 +687,23 @@ export const Scrapers = () => {
               }
 
               checkServiceReady()
+            } else {
+              // 不需要重启的情况（首次下载热加载完成）
+              // 延迟关闭进度条并刷新数据
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: '',
+                  isRestarting: false
+                })
+                getInfo()
+                loadVersionInfo()
+                setLoadingResources(false)
+              }, 1500)
             }
 
             // SSE 流正常结束
@@ -931,17 +948,148 @@ export const Scrapers = () => {
           'Content-Type': 'multipart/form-data'
         }
       })
-      messageApi.success(res.data?.message || '上传成功')
 
-      // 延迟刷新,等待后台重载完成
-      setTimeout(async () => {
-        try {
-          await getInfo()
-          await loadVersionInfo()
-        } catch (error) {
-          console.error('刷新信息失败:', error)
+      const responseData = res.data || {}
+      const needRestart = responseData.need_restart
+      const autoRestart = responseData.auto_restart
+
+      if (needRestart) {
+        // 需要重启容器
+        if (autoRestart) {
+          // 自动重启：显示等待进度
+          messageApi.info(responseData.message || '上传成功，容器正在重启...')
+          setDownloadProgress({
+            visible: true,
+            current: 0,
+            total: 0,
+            progress: 0,
+            message: '容器正在重启中...',
+            scraper: '',
+            isRestarting: true
+          })
+
+          // 轮询检测服务是否恢复
+          const checkServiceReady = async () => {
+            const maxWaitSeconds = 120
+            let waitSeconds = 0
+            let serviceWentDown = false
+
+            // 第一阶段：等待服务停止
+            setDownloadProgress(prev => ({
+              ...prev,
+              progress: 0,
+              message: '等待容器停止...'
+            }))
+
+            for (let i = 0; i < 30; i++) {
+              waitSeconds++
+              const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: Math.min(restartProgress, 25),
+                message: `等待容器停止... (${waitSeconds}秒)`
+              }))
+
+              try {
+                const response = await fetch('/api/ui/version', {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(2000)
+                })
+                if (!response.ok) {
+                  serviceWentDown = true
+                  break
+                }
+              } catch (e) {
+                serviceWentDown = true
+                break
+              }
+
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+
+            // 第二阶段：等待服务恢复
+            for (let i = 0; i < 60; i++) {
+              const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: Math.min(restartProgress, 95),
+                message: `正在等待服务恢复... (${waitSeconds}秒)`
+              }))
+
+              try {
+                const response = await fetch('/api/ui/version', {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(3000)
+                })
+                if (response.ok) {
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    progress: 100,
+                    message: '服务已恢复，正在刷新...'
+                  }))
+                  await new Promise(resolve => setTimeout(resolve, 500))
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  messageApi.success('容器重启完成')
+                  await getInfo()
+                  await loadVersionInfo()
+                  return
+                }
+              } catch (e) {
+                // 继续等待
+              }
+
+              for (let j = 0; j < 2; j++) {
+                await new Promise(resolve => setTimeout(resolve, 1000))
+                waitSeconds++
+                const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: Math.min(restartProgress, 95),
+                  message: `正在等待服务恢复... (${waitSeconds}秒)`
+                }))
+              }
+            }
+
+            // 超时
+            setDownloadProgress({
+              visible: false,
+              current: 0,
+              total: 0,
+              progress: 0,
+              message: '',
+              scraper: '',
+              isRestarting: false
+            })
+            messageApi.warning('容器重启超时，请手动刷新页面')
+          }
+
+          checkServiceReady()
+        } else {
+          // 手动重启：显示提示信息
+          messageApi.warning(responseData.message || '上传成功，请手动重启容器以加载新的弹幕源')
         }
-      }, 2500) // 延迟2.5秒
+      } else {
+        // 不需要重启（首次上传热加载）
+        messageApi.success(responseData.message || '上传成功')
+
+        // 延迟刷新,等待后台热加载完成
+        setTimeout(async () => {
+          try {
+            await getInfo()
+            await loadVersionInfo()
+          } catch (error) {
+            console.error('刷新信息失败:', error)
+          }
+        }, 2500)
+      }
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
     } finally {

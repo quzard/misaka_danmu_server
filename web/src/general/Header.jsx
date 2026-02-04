@@ -6,8 +6,8 @@ import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
-import { Tag, Dropdown, Modal, Form, Input, Button, Space, Badge } from 'antd';
-import { logout, changePassword, checkAppUpdate } from '../apis/index.js'
+import { Tag, Dropdown, Modal, Form, Input, Button, Space, Badge, Popconfirm } from 'antd';
+import { logout, changePassword, checkAppUpdate, getDockerStatus, restartService } from '../apis/index.js'
 import Cookies from 'js-cookie'
 import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
 import { Tooltip } from 'antd'
@@ -265,12 +265,39 @@ const MobileHeader = ({ activeKey }) => {
   const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
   const [newPasswordVisible, setNewPasswordVisible] = useState(false)
   const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false)
+  const [dockerAvailable, setDockerAvailable] = useState(false)
+  const [restartLoading, setRestartLoading] = useState(false)
   const messageApi = useMessage()
+
+  // 检查 Docker 套接字是否可用
+  useEffect(() => {
+    const checkDocker = async () => {
+      try {
+        const res = await getDockerStatus()
+        setDockerAvailable(res.data?.docker_available || false)
+      } catch (error) {
+        setDockerAvailable(false)
+      }
+    }
+    checkDocker()
+  }, [])
 
   const onLogout = async () => {
     await logout()
     Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
+  }
+
+  const handleRestart = async () => {
+    try {
+      setRestartLoading(true)
+      await restartService()
+      messageApi.success('重启指令已发送，请稍候...')
+    } catch (error) {
+      messageApi.error(error.response?.data?.detail || '重启失败')
+    } finally {
+      setRestartLoading(false)
+    }
   }
 
   const handleChangePassword = async (values) => {
@@ -310,6 +337,8 @@ const MobileHeader = ({ activeKey }) => {
       setIsPasswordModalOpen(true)
     } else if (item.key === 'session-manager') {
       setIsSessionModalOpen(true)
+    } else if (item.key === 'restart-service') {
+      // 重启由 Popconfirm 处理，这里不做任何事
     } else {
       navigate(item.key)
     }
@@ -375,6 +404,21 @@ const MobileHeader = ({ activeKey }) => {
                       label: '修改密码',
                       icon: 'key',
                     },
+                    ...(dockerAvailable ? [{
+                      key: 'restart-service',
+                      label: (
+                        <Popconfirm
+                          title="确认重启"
+                          description="确定要重启服务吗？"
+                          onConfirm={handleRestart}
+                          okText="确定"
+                          cancelText="取消"
+                        >
+                          <span>重启服务</span>
+                        </Popconfirm>
+                      ),
+                      icon: 'refresh',
+                    }] : []),
                     {
                       key: 'logout',
                       label: '退出登录',
@@ -509,11 +553,38 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick 
   const [showPassword2, setShowPassword2] = useState(false)
   const [showPassword3, setShowPassword3] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [dockerAvailable, setDockerAvailable] = useState(false)
+  const [restartLoading, setRestartLoading] = useState(false)
+
+  // 检查 Docker 套接字是否可用
+  useEffect(() => {
+    const checkDocker = async () => {
+      try {
+        const res = await getDockerStatus()
+        setDockerAvailable(res.data?.docker_available || false)
+      } catch (error) {
+        setDockerAvailable(false)
+      }
+    }
+    checkDocker()
+  }, [])
 
   const onLogout = async () => {
     await logout()
     Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
+  }
+
+  const handleRestart = async () => {
+    try {
+      setRestartLoading(true)
+      await restartService()
+      messageApi.success('重启指令已发送，请稍候...')
+    } catch (error) {
+      messageApi.error(error.response?.data?.detail || '重启失败')
+    } finally {
+      setRestartLoading(false)
+    }
   }
 
   const handleChangePassword = async (values) => {
@@ -629,6 +700,20 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick 
                       </div>
                     ),
                   },
+                  ...(dockerAvailable ? [{
+                    key: 'restart',
+                    label: (
+                      <Popconfirm
+                        title="确认重启"
+                        description="确定要重启服务吗？"
+                        onConfirm={handleRestart}
+                        okText="确定"
+                        cancelText="取消"
+                      >
+                        <div className="text-base">重启服务</div>
+                      </Popconfirm>
+                    ),
+                  }] : []),
                   {
                     key: 'logout',
                     label: (
