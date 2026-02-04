@@ -494,9 +494,8 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
               setUrlParseResults([])
             }}
             rows={5}
-            className="mb-2"
           />
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mt-4">
             <div className="flex items-center gap-2">
               <span className="text-gray-500 dark:text-gray-400 text-sm">起始集数：</span>
               <InputNumber
