@@ -3,9 +3,7 @@ Import相关的API端点 - 弹幕导入功能
 """
 import hashlib
 import logging
-import re
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +16,7 @@ from src.api.dependencies import (
     get_scraper_manager, get_task_manager, get_metadata_manager,
     get_config_manager, get_rate_limiter, get_title_recognition_manager
 )
-from .models import UITaskResponse, ImportFromUrlRequest
+from .models import UITaskResponse, ImportFromUrlRequest, ValidateUrlRequest, ValidateUrlResponse
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +185,64 @@ async def import_edited_episodes(
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
 
 
+@router.post("/validate-url", summary="校验并解析导入URL", response_model=ValidateUrlResponse)
+async def validate_import_url(
+    request_data: ValidateUrlRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager)
+):
+    """
+    动态校验 URL 并返回解析结果。
+
+    - 自动检测 URL 属于哪个平台（基于各 scraper 的 handled_domains）
+    - 调用对应 scraper 的 get_info_from_url() 获取详细信息
+    - 返回解析出的平台、媒体ID、标题、封面等信息
+
+    用途：
+    1. 前端在用户输入URL后调用此接口进行校验
+    2. 返回识别出的平台、媒体ID等信息
+    3. 前端可据此自动填充表单字段
+    """
+    url = request_data.url.strip()
+
+    if not url:
+        return ValidateUrlResponse(isValid=False, errorMessage="URL不能为空")
+
+    # 1. 动态查找 scraper（基于 _domain_map，由各 scraper 的 handled_domains 构建）
+    scraper = scraper_manager.get_scraper_by_domain(url)
+    if not scraper:
+        return ValidateUrlResponse(isValid=False, errorMessage="不支持的URL或平台，请检查URL是否正确")
+
+    provider = scraper.provider_name
+
+    try:
+        # 2. 调用 scraper 的解析方法
+        info = await scraper.get_info_from_url(url)
+        if not info:
+            return ValidateUrlResponse(
+                isValid=False,
+                provider=provider,
+                errorMessage=f"无法从URL解析出有效信息，请检查URL格式是否正确"
+            )
+
+        # 3. 返回解析结果
+        return ValidateUrlResponse(
+            isValid=True,
+            provider=provider,
+            mediaId=info.mediaId,
+            title=info.title,
+            imageUrl=info.imageUrl,
+            mediaType=info.type,
+            year=info.year
+        )
+    except Exception as e:
+        logger.error(f"解析URL时发生错误: {e}", exc_info=True)
+        return ValidateUrlResponse(
+            isValid=False,
+            provider=provider,
+            errorMessage=f"解析URL时发生错误: {str(e)}"
+        )
+
 
 @router.post("/import-from-url", status_code=status.HTTP_202_ACCEPTED, summary="从URL导入弹幕", response_model=UITaskResponse)
 async def import_from_url(
@@ -200,82 +256,100 @@ async def import_from_url(
     config_manager: ConfigManager = Depends(get_config_manager),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
+    """
+    从URL导入弹幕（重构版 - 动态解析）。
+
+    - 如果不指定 provider，会自动从URL检测平台
+    - 如果不指定 title，会自动从源获取标题
+    - 调用各 scraper 的 get_info_from_url() 方法进行解析，无需硬编码
+    """
+    url = request_data.url.strip()
+
+    if not url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL不能为空")
+
+    # 1. 确定 scraper：优先使用指定的 provider，否则自动检测
+    scraper = None
     provider = request_data.provider
-    url = request_data.url
-    title = request_data.title
-    
-    try:
-        scraper = scraper_manager.get_scraper(provider)
-    except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
-    media_id_for_scraper = None
+    if provider:
+        # 用户指定了 provider
+        try:
+            scraper = scraper_manager.get_scraper(provider)
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    else:
+        # 自动检测 provider
+        scraper = scraper_manager.get_scraper_by_domain(url)
+        if not scraper:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无法识别URL所属平台，请检查URL是否正确或手动指定平台"
+            )
+        provider = scraper.provider_name
 
+    # 2. 调用 scraper 的 get_info_from_url() 获取作品信息
     try:
-        if provider == 'bilibili':
-            bvid_match = re.search(r'video/(BV[a-zA-Z0-9]+)', url)
-            ssid_match = re.search(r'bangumi/play/ss(\d+)', url)
-            epid_match = re.search(r'bangumi/play/ep(\d+)', url)
-            if ssid_match:
-                media_id_for_scraper = f"ss{ssid_match.group(1)}"
-            elif bvid_match:
-                media_id_for_scraper = f"bv{bvid_match.group(1)}"
-            elif epid_match:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True)
-                    resp.raise_for_status()
-                    html_text = resp.text
-                    ssid_match_from_page = re.search(r'"season_id":(\d+)', html_text)
-                    if ssid_match_from_page:
-                        media_id_for_scraper = f"ss{ssid_match_from_page.group(1)}"
-        elif provider == 'tencent':
-            cid_match = re.search(r'/cover/([^/]+)', url)
-            if cid_match:
-                media_id_for_scraper = cid_match.group(1)
-        elif provider == 'iqiyi':
-            linkid_match = re.search(r'v_(\w+)\.html', url)
-            if linkid_match:
-                media_id_for_scraper = linkid_match.group(1)
-        elif provider == 'youku':
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"}, follow_redirects=True)
-                resp.raise_for_status()
-                html_text = resp.text
-                showid_match = re.search(r'showid:"(\d+)"', html_text)
-                if showid_match:
-                    media_id_for_scraper = showid_match.group(1)
-        elif provider == 'mgtv':
-            cid_match = re.search(r'/b/(\d+)/', url)
-            if cid_match:
-                media_id_for_scraper = cid_match.group(1)
+        info = await scraper.get_info_from_url(url)
+        if not info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法从URL '{url}' 解析出有效的作品信息"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"从URL解析媒体ID时出错: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="从URL解析媒体ID时出错")
+        logger.error(f"从URL解析作品信息时出错: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"从URL解析作品信息时出错: {str(e)}"
+        )
 
-    if not media_id_for_scraper:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"无法从URL '{url}' 中为提供商 '{provider}' 解析出媒体ID。")
+    # 3. 确定最终使用的参数（用户指定的优先，否则使用从源获取的）
+    final_title = request_data.title if request_data.title else info.title
+    final_media_type = request_data.media_type if request_data.media_type else (info.type or "tv_series")
+    final_season = request_data.season if request_data.season is not None else (info.season or 1)
+    media_id = info.mediaId
+    image_url = info.imageUrl
+    year = info.year
 
+    logger.info(f"URL导入: provider={provider}, mediaId={media_id}, title={final_title}, type={final_media_type}, season={final_season}")
+
+    # 4. 创建导入任务
     task_coro = lambda session, callback: tasks.generic_import_task(
-        provider=provider, mediaId=media_id_for_scraper, animeTitle=title, # type: ignore
-        mediaType=request_data.media_type, season=request_data.season, year=None,
-        currentEpisodeIndex=None, imageUrl=None, doubanId=None, tmdbId=None, imdbId=None, tvdbId=None, bangumiId=None,
+        provider=provider,
+        mediaId=media_id,
+        animeTitle=final_title,
+        mediaType=final_media_type,
+        season=final_season,
+        year=year,
+        currentEpisodeIndex=None,
+        imageUrl=image_url,
+        doubanId=None,
+        tmdbId=None,
+        imdbId=None,
+        tvdbId=None,
+        bangumiId=None,
         metadata_manager=metadata_manager,
-        progress_callback=callback, session=session, manager=scraper_manager, task_manager=task_manager,
+        progress_callback=callback,
+        session=session,
+        manager=scraper_manager,
+        task_manager=task_manager,
         config_manager=config_manager,
         rate_limiter=rate_limiter,
         title_recognition_manager=title_recognition_manager
     )
-    
-    # 生成unique_key以避免重复任务
-    unique_key_parts = ["url-import", provider, media_id_for_scraper, request_data.media_type]
-    if request_data.season:
-        unique_key_parts.append(f"season-{request_data.season}")
-    unique_key = "-".join(unique_key_parts)
-    
-    task_title = f"URL导入: {title} ({provider})"
+
+    # 5. 生成 unique_key 以避免重复任务
+    unique_key_parts = ["url-import", provider, media_id, final_media_type]
+    if final_season:
+        unique_key_parts.append(f"season-{final_season}")
+    unique_key = "-".join(filter(None, unique_key_parts))
+
+    task_title = f"URL导入: {final_title} ({provider})"
     task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
 
-    return {"message": f"'{title}' 的URL导入任务已提交。", "taskId": task_id}
+    return {"message": f"'{final_title}' 的URL导入任务已提交。", "taskId": task_id}
 
 
 

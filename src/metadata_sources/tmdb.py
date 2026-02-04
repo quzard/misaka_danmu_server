@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from src.db import crud, models, ConfigManager
 from src.utils import parse_search_keyword as utils_parse_search_keyword
+from src.utils.common import convert_keys_to_camel
 from .base import BaseMetadataSource
 
 from fastapi import HTTPException, status
@@ -412,7 +413,7 @@ class TmdbMetadataSource(BaseMetadataSource):
             response = await client.get(f"/tv/episode_group/{group_id}", params={"language": "zh-CN"})
             response.raise_for_status()
             api_data = response.json()
-            camel_case_data = utils.convert_keys_to_camel(api_data)
+            camel_case_data = convert_keys_to_camel(api_data)
             group_details = models.TMDBEpisodeGroupDetails.model_validate(camel_case_data)
 
             # 2. (可选) 丰富分集信息，例如获取日文标题和图片

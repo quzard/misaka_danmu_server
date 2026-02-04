@@ -132,12 +132,30 @@ class TmdbReverseLookupConfigRequest(BaseModel):
 
 
 class ImportFromUrlRequest(BaseModel):
-    """从URL导入请求"""
-    provider: str
-    url: str
-    title: str
-    media_type: str
-    season: int
+    """从URL导入请求 - 重构后支持动态解析"""
+    url: str  # 必填：要导入的URL
+    # 以下字段可选，如果不提供则从URL自动解析
+    provider: Optional[str] = None  # 可选：指定平台，不指定则自动检测
+    title: Optional[str] = None  # 可选：指定标题，不指定则从源获取
+    media_type: Optional[str] = None  # 可选：媒体类型
+    season: Optional[int] = None  # 可选：季度
+
+
+class ValidateUrlRequest(BaseModel):
+    """URL校验请求"""
+    url: str  # 要校验的URL
+
+
+class ValidateUrlResponse(BaseModel):
+    """URL校验响应"""
+    isValid: bool  # URL是否有效
+    provider: Optional[str] = None  # 识别出的平台
+    mediaId: Optional[str] = None  # 媒体ID
+    title: Optional[str] = None  # 作品标题
+    imageUrl: Optional[str] = None  # 封面图URL
+    mediaType: Optional[str] = None  # 媒体类型 (movie/tv_series)
+    year: Optional[int] = None  # 年份
+    errorMessage: Optional[str] = None  # 错误信息
 
 
 class GlobalFilterSettings(BaseModel):

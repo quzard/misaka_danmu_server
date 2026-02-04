@@ -6,17 +6,22 @@ import {
   InputNumber,
   List,
   Modal,
+  Segmented,
+  Spin,
   Tag,
   Tooltip,
   Upload,
   message,
 } from 'antd'
 import { useEffect, useRef, useState } from 'react'
-import { batchManualImport } from '../apis'
+import { batchManualImport, validateImportUrl, importFromUrl } from '../apis'
 import {
   CloseCircleOutlined,
   CloudUploadOutlined,
+  LinkOutlined,
   UploadOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useMessage } from '../MessageContext'
 
@@ -41,6 +46,8 @@ import { CSS } from '@dnd-kit/utilities'
 export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const messageApi = useMessage()
   const [loading, setLoading] = useState(false)
+  // 导入模式: 'xml' | 'url'
+  const [importMode, setImportMode] = useState('xml')
   // 存储解析后的XML数据列表
   const [xmlDataList, setXmlDataList] = useState([])
   const [fileList, setFileList] = useState([])
@@ -56,6 +63,14 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const [pageSize, setPageSize] = useState(10)
   const [activeItem, setActiveItem] = useState(null)
 
+  // URL导入相关状态
+  const [urlInput, setUrlInput] = useState('')
+  const [urlValidating, setUrlValidating] = useState(false)
+  const [urlValidationResult, setUrlValidationResult] = useState(null)
+  const [urlTitle, setUrlTitle] = useState('')
+  const [urlSeason, setUrlSeason] = useState(1)
+  const [urlMediaType, setUrlMediaType] = useState('tv_series')
+
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: {
@@ -70,7 +85,91 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     })
   )
 
+  // 判断是否为自定义源
+  const isCustomSource = sourceInfo?.providerName === 'custom'
+
+  // URL校验
+  const handleValidateUrl = async () => {
+    if (!urlInput.trim()) {
+      messageApi.warning('请输入URL')
+      return
+    }
+
+    setUrlValidating(true)
+    setUrlValidationResult(null)
+
+    try {
+      const res = await validateImportUrl({ url: urlInput.trim() })
+      if (res.data) {
+        setUrlValidationResult(res.data)
+        if (res.data.isValid) {
+          // 自动填充标题
+          if (res.data.title) {
+            setUrlTitle(res.data.title)
+          }
+          // 自动填充媒体类型
+          if (res.data.mediaType) {
+            setUrlMediaType(res.data.mediaType)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('URL校验失败:', error)
+      setUrlValidationResult({
+        isValid: false,
+        errorMessage: error.detail || error.message || 'URL校验失败'
+      })
+    } finally {
+      setUrlValidating(false)
+    }
+  }
+
+  // URL导入提交
+  const handleUrlImport = async () => {
+    if (!urlValidationResult?.isValid) {
+      messageApi.warning('请先校验URL')
+      return
+    }
+
+    setLoading(true)
+    try {
+      const res = await importFromUrl({
+        url: urlInput.trim(),
+        provider: urlValidationResult.provider,
+        title: urlTitle || urlValidationResult.title,
+        media_type: urlMediaType,
+        season: urlSeason,
+      })
+      if (res.data) {
+        messageApi.success(res.data.message || 'URL导入任务已提交')
+        onSuccess(res.data)
+        clearUrlState()
+      }
+    } catch (error) {
+      console.error('URL导入失败:', error)
+      messageApi.error(error.detail || error.message || 'URL导入失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 清空URL相关状态
+  const clearUrlState = () => {
+    setUrlInput('')
+    setUrlValidationResult(null)
+    setUrlTitle('')
+    setUrlSeason(1)
+    setUrlMediaType('tv_series')
+  }
+
   const handleOk = async () => {
+    // URL导入模式
+    if (importMode === 'url') {
+      await handleUrlImport()
+      return
+    }
+
+    // XML导入模式
     if (!sourceInfo?.sourceId) return
     try {
       if (xmlDataList.length === 0) {
@@ -89,7 +188,6 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
         }),
       })
       if (res.data) {
-        // messageApi.success('批量导入任务已提交！')
         onSuccess(res.data)
         clearAll()
       }
@@ -112,6 +210,8 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     setUploading(false)
     // 清空上传组件的内部文件列表
     setFileList([])
+    // 清空URL状态
+    clearUrlState()
   }
 
   const handleDelete = item => {
@@ -299,6 +399,106 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     )
   }
 
+  // 渲染URL导入界面
+  const renderUrlImport = () => (
+    <div className="p-4">
+      <div className="mb-4">
+        <div className="text-gray-500 mb-2">
+          输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源
+        </div>
+        <Input.Search
+          placeholder="请输入视频URL，如 https://www.XXXXX.com/bangumi/play/ss..."
+          value={urlInput}
+          onChange={e => {
+            setUrlInput(e.target.value)
+            setUrlValidationResult(null)
+          }}
+          onSearch={handleValidateUrl}
+          enterButton={
+            <Button loading={urlValidating}>
+              校验URL
+            </Button>
+          }
+          size="large"
+        />
+      </div>
+
+      {/* 校验结果显示 */}
+      {urlValidationResult && (
+        <div className={`p-4 rounded-lg mb-4 ${urlValidationResult.isValid ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+          {urlValidationResult.isValid ? (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircleOutlined className="text-green-500" />
+                <span className="font-medium text-green-700">URL校验通过</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div><span className="text-gray-500">平台：</span>{urlValidationResult.provider}</div>
+                <div><span className="text-gray-500">媒体ID：</span>{urlValidationResult.mediaId}</div>
+                {urlValidationResult.title && (
+                  <div className="col-span-2"><span className="text-gray-500">标题：</span>{urlValidationResult.title}</div>
+                )}
+                {urlValidationResult.mediaType && (
+                  <div><span className="text-gray-500">类型：</span>{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</div>
+                )}
+                {urlValidationResult.year && (
+                  <div><span className="text-gray-500">年份：</span>{urlValidationResult.year}</div>
+                )}
+              </div>
+              {urlValidationResult.imageUrl && (
+                <div className="mt-2">
+                  <img src={urlValidationResult.imageUrl} alt="封面" className="h-24 rounded" />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <ExclamationCircleOutlined className="text-red-500" />
+              <span className="text-red-700">{urlValidationResult.errorMessage || 'URL校验失败'}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 导入参数设置 */}
+      {urlValidationResult?.isValid && (
+        <div className="border rounded-lg p-4">
+          <div className="font-medium mb-3">导入设置</div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-gray-500 text-sm mb-1">标题（可修改）</div>
+              <Input
+                value={urlTitle}
+                onChange={e => setUrlTitle(e.target.value)}
+                placeholder="作品标题"
+              />
+            </div>
+            <div>
+              <div className="text-gray-500 text-sm mb-1">季度</div>
+              <InputNumber
+                value={urlSeason}
+                onChange={setUrlSeason}
+                min={1}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div className="col-span-2">
+              <div className="text-gray-500 text-sm mb-1">媒体类型</div>
+              <Segmented
+                value={urlMediaType}
+                onChange={setUrlMediaType}
+                options={[
+                  { label: '剧集', value: 'tv_series' },
+                  { label: '电影', value: 'movie' },
+                ]}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <Modal
       title={`批量导入 - ${sourceInfo?.animeName} (${sourceInfo?.providerName})`}
@@ -307,88 +507,124 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       onCancel={onCancel}
       confirmLoading={loading}
       destroyOnHidden
+      okText={importMode === 'url' ? '开始导入' : '确定'}
+      okButtonProps={{
+        disabled: importMode === 'url' && !urlValidationResult?.isValid
+      }}
+      width={importMode === 'url' ? 600 : 520}
     >
-      <div className="p-4 text-center">
-        <Upload {...uploadProps} ref={uploadRef}>
-          <div>
-            <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
-            <div className="flex items-center justify-center">
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                loading={uploading}
-                disabled={uploading}
-              >
-                选择文件
-              </Button>
-              <div className="ml-2">或直接拖拽文件到此处</div>
-            </div>
-            <div className="mt-2">
-              支持批量上传，仅接受.xml格式文件
-            </div>
-          </div>
-        </Upload>
-      </div>
-      {xmlDataList.length === 0 ? (
-        <div className="text-center py-10 text-gray-500">
-          <Empty description="暂无解析数据，请上传XML文件" />
+      {/* 自定义源显示导入模式切换 */}
+      {isCustomSource && (
+        <div className="mb-4">
+          <Segmented
+            value={importMode}
+            onChange={value => {
+              setImportMode(value)
+              // 切换模式时清空状态
+              if (value === 'xml') {
+                clearUrlState()
+              } else {
+                clearAll()
+              }
+            }}
+            options={[
+              { label: <span><UploadOutlined className="mr-1" />XML文件导入</span>, value: 'xml' },
+              { label: <span><LinkOutlined className="mr-1" />URL导入</span>, value: 'url' },
+            ]}
+            block
+          />
         </div>
+      )}
+
+      {/* URL导入模式 */}
+      {importMode === 'url' ? (
+        renderUrlImport()
       ) : (
         <>
-          <Tooltip title="以第一个文件集为准依次自增1">
-            <Button
-              onClick={() => {
-                setXmlDataList(list => {
-                  const index = list[0]?.episodeIndex
-                  return list.map((it, i) => {
-                    return {
-                      ...it,
-                      episodeIndex: index + i,
-                    }
-                  })
-                })
-              }}
-            >
-              一键应用集数
-            </Button>
-          </Tooltip>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={xmlDataList.map(item => item.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <List
-                itemLayout="vertical"
-                size="large"
-                pagination={{
-                  pageSize: pageSize,
-                  onShowSizeChange: (_, size) => {
-                    setPageSize(size)
-                  },
-                  hideOnSinglePage: true,
-                }}
-                dataSource={xmlDataList}
-                renderItem={(item, index) => (
-                  <SortableItem
-                    key={item.id}
-                    item={item}
-                    index={index}
-                    handleDelete={() => handleDelete(item)}
-                    handleEditTitle={value => handleEditTitle(item, value)}
-                    handleEditIndex={value => handleEditIndex(item, value)}
+          {/* XML文件导入模式 */}
+          <div className="p-4 text-center">
+            <Upload {...uploadProps} ref={uploadRef}>
+              <div>
+                <CloudUploadOutlined style={{ fontSize: 48, marginBottom: 16 }} />
+                <div className="flex items-center justify-center">
+                  <Button
+                    type="primary"
+                    icon={<UploadOutlined />}
+                    loading={uploading}
+                    disabled={uploading}
+                  >
+                    选择文件
+                  </Button>
+                  <div className="ml-2">或直接拖拽文件到此处</div>
+                </div>
+                <div className="mt-2">
+                  支持批量上传，仅接受.xml格式文件
+                </div>
+              </div>
+            </Upload>
+          </div>
+          {xmlDataList.length === 0 ? (
+            <div className="text-center py-10 text-gray-500">
+              <Empty description="暂无解析数据，请上传XML文件" />
+            </div>
+          ) : (
+            <>
+              <Tooltip title="以第一个文件集为准依次自增1">
+                <Button
+                  onClick={() => {
+                    setXmlDataList(list => {
+                      const index = list[0]?.episodeIndex
+                      return list.map((it, i) => {
+                        return {
+                          ...it,
+                          episodeIndex: index + i,
+                        }
+                      })
+                    })
+                  }}
+                >
+                  一键应用集数
+                </Button>
+              </Tooltip>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCorners}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={xmlDataList.map(item => item.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <List
+                    itemLayout="vertical"
+                    size="large"
+                    pagination={{
+                      pageSize: pageSize,
+                      onShowSizeChange: (_, size) => {
+                        setPageSize(size)
+                      },
+                      hideOnSinglePage: true,
+                    }}
+                    dataSource={xmlDataList}
+                    renderItem={(item, index) => (
+                      <SortableItem
+                        key={item.id}
+                        item={item}
+                        index={index}
+                        handleDelete={() => handleDelete(item)}
+                        handleEditTitle={value => handleEditTitle(item, value)}
+                        handleEditIndex={value => handleEditIndex(item, value)}
+                      />
+                    )}
                   />
-                )}
-              />
-            </SortableContext>
+                </SortableContext>
 
-            {/* 拖拽覆盖层 */}
-            <DragOverlay>{renderDragOverlay()}</DragOverlay>
-          </DndContext>
+                {/* 拖拽覆盖层 */}
+                <DragOverlay>{renderDragOverlay()}</DragOverlay>
+              </DndContext>
+            </>
+          )}
         </>
       )}
     </Modal>

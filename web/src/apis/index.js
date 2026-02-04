@@ -525,6 +525,14 @@ export const addSourceToAnime = data =>
 export const batchManualImport = data =>
   api.post(`/api/ui/library/source/${data.sourceId}/batch-import`, data)
 
+/** 校验并解析导入URL */
+export const validateImportUrl = data =>
+  api.post('/api/ui/validate-url', data)
+
+/** 从URL导入弹幕 */
+export const importFromUrl = data =>
+  api.post('/api/ui/import-from-url', data)
+
 /** 获取影视的资源 */
 export const getAnimeSource = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/sources`)
