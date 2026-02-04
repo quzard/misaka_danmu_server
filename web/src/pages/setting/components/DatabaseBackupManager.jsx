@@ -276,7 +276,7 @@ export const DatabaseBackupManager = () => {
       </div>
 
       {/* 定时任务状态 */}
-      <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+      <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
         {jobStatus?.exists ? (
           <div className="flex items-center gap-2">
             <ClockCircleOutlined className="text-blue-500" />

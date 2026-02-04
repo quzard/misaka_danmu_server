@@ -396,7 +396,7 @@ export const EpisodeDetail = () => {
     const previewTitle = previewData[data.episodeId]
     const hasPreviewChange = isPreviewMode && previewTitle && previewTitle !== data.title
     return (
-      <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
+      <tr ref={setNodeRef} style={{ ...style, backgroundColor: 'var(--color-card)' }}>
         <td className="p-2 border border-gray-200 dark:border-gray-600 cursor-move" {...attributes} {...listeners}>
           <HolderOutlined />
         </td>
@@ -1540,7 +1540,7 @@ export const EpisodeDetail = () => {
         <Form form={form} layout="horizontal">
           {/* 自定义源 URL 导入模式 */}
           {isXmlImport && !isEditing && manualImportMode === 'url' && (
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
               <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
                 <LinkOutlined className="mr-1" />
                 输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源
@@ -1609,7 +1609,7 @@ export const EpisodeDetail = () => {
 
           {/* 非自定义源且非编辑模式时，显示URL解析功能 */}
           {!isXmlImport && !isEditing && (
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
               <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
                 <LinkOutlined className="mr-1" />
                 输入 {sourceInfo?.providerName} 平台的视频URL，可自动解析标题
@@ -1815,7 +1815,7 @@ export const EpisodeDetail = () => {
         cancelText="取消"
       >
         {/* 批量调整集数 */}
-        <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
+        <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
           <div className="font-medium mb-2">🔢 批量调整集数</div>
           <div className="flex flex-wrap items-center gap-2">
             <Select
@@ -1861,7 +1861,7 @@ export const EpisodeDetail = () => {
         </div>
 
         {/* 批量命名规则 - ReNamer风格 */}
-        <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded">
+        <div className="mb-4 p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
           <div className="font-medium mb-2">📝 批量命名规则</div>
           {/* 添加规则区域 */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -2124,7 +2124,7 @@ export const EpisodeDetail = () => {
           </div>
           {/* 已添加的规则列表 */}
           {renameRules.length > 0 && (
-            <div className="border border-gray-200 dark:border-gray-600 rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
+            <div className="border border-gray-200 dark:border-gray-600 rounded p-2 mb-3 max-h-32 overflow-auto" style={{ backgroundColor: 'var(--color-card)' }}>
               {renameRules.map((rule, idx) => (
                 <div key={rule.id} className="flex items-center gap-2 py-1 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
                   <input type="checkbox" checked={rule.enabled} onChange={() => handleToggleRule(rule.id)} />
@@ -2192,7 +2192,7 @@ export const EpisodeDetail = () => {
                     <th className="p-2 border border-gray-200 dark:border-gray-600 w-24">集数</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white dark:bg-gray-800">
+                <tbody style={{ backgroundColor: 'var(--color-card)' }}>
                   {batchEditData.map((item, index) => (
                     <SortableRow key={item.episodeId} id={item.episodeId} data={item} index={index} />
                   ))}

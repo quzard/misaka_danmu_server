@@ -122,11 +122,6 @@ export function ThemeProvider({ children }) {
         borderColor: '#FFD9E5',
         hoverBorderColor: '#FF6B9B',
       },
-      Modal: {
-        contentBg: '#FFFFFF',
-        headerBg: '#FFFFFF',
-        footerBg: '#FFFFFF',
-      },
     },
   }
 
@@ -199,16 +194,14 @@ export function ThemeProvider({ children }) {
         borderRadius: 8,
         borderColor: '#334155',
         hoverBorderColor: '#FF6B9B',
-        colorBgContainer: '#1E293B',
-        activeBg: '#1E293B',
+        colorBgContainer: '#273449',
       },
       InputNumber: {
-        colorBgContainer: '#1E293B',
-        activeBg: '#1E293B',
+        colorBgContainer: '#273449',
       },
       Select: {
-        colorBgContainer: '#1E293B',
-        colorBgElevated: '#273449',
+        colorBgContainer: '#273449',
+        colorBgElevated: '#334155',
       },
       Modal: {
         contentBg: '#1E293B',
