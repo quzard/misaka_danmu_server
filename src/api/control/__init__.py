@@ -21,7 +21,7 @@ from .rate_limit_routes import router as rate_limit_router
 
 # 创建主路由
 control_router = APIRouter(
-    tags=["外部控制API"],
+    tags=["External Control API"],
     dependencies=[Depends(verify_api_key)]
 )
 
