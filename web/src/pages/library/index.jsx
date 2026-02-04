@@ -293,6 +293,7 @@ export const Library = () => {
                   const res = await getAnimeDetail({
                     animeId: record.animeId,
                   })
+                  form.resetFields()
                   form.setFieldsValue({
                     ...(res.data || {}),
                     animeId: record.animeId,
@@ -933,6 +934,7 @@ export const Library = () => {
                   icon={<MyIcon icon="edit" size={16} />}
                   onClick={async () => {
                     const res = await getAnimeDetail({ animeId: record.animeId })
+                    form.resetFields()
                     form.setFieldsValue({
                       ...(res.data || {}),
                       animeId: record.animeId,

@@ -882,3 +882,27 @@ export const uploadBackup = (file) => {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
+
+/** ---------------------------------------------------弹幕编辑相关------------------------------------------------ */
+/** 获取弹幕编辑详情（统计、分布、预览） */
+export const getDanmakuEditDetail = (episodeId) => api.get(`/api/ui/danmaku/detail/${episodeId}`)
+
+/** 分页获取弹幕列表（用于编辑预览） */
+export const getDanmakuEditComments = (episodeId, params = {}) => {
+  const queryParams = new URLSearchParams()
+  if (params.page) queryParams.append('page', params.page)
+  if (params.pageSize) queryParams.append('pageSize', params.pageSize)
+  if (params.startTime !== undefined) queryParams.append('startTime', params.startTime)
+  if (params.endTime !== undefined) queryParams.append('endTime', params.endTime)
+  const queryString = queryParams.toString()
+  return api.get(`/api/ui/danmaku/comments/${episodeId}${queryString ? `?${queryString}` : ''}`)
+}
+
+/** 应用时间偏移 */
+export const applyDanmakuOffset = (data) => api.post('/api/ui/danmaku/offset', JSON.stringify(data))
+
+/** 分集拆分 */
+export const splitEpisodeDanmaku = (data) => api.post('/api/ui/danmaku/split', JSON.stringify(data))
+
+/** 分集合并 */
+export const mergeEpisodesDanmaku = (data) => api.post('/api/ui/danmaku/merge', JSON.stringify(data))

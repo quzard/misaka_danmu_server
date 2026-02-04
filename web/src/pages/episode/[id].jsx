@@ -52,6 +52,7 @@ import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { BatchImportModal } from '../../components/BatchImportModal'
+import { DanmakuEditModal } from '../../components/DanmakuEditModal'
 import { isUrl } from '../../utils/data'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store'
@@ -114,6 +115,9 @@ export const EpisodeDetail = () => {
   const [ruleParams, setRuleParams] = useState({})
   const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [previewData, setPreviewData] = useState({})
+
+  // 弹幕编辑弹窗状态
+  const [isDanmakuEditModalOpen, setIsDanmakuEditModalOpen] = useState(false)
 
   // 当默认分页大小加载完成后，更新 pagination
   useEffect(() => {
@@ -1266,6 +1270,15 @@ export const EpisodeDetail = () => {
                 <span className="ml-1">批量刷新</span>
               </Tooltip>
             </Button>
+            <Button
+              onClick={() => setIsDanmakuEditModalOpen(true)}
+              disabled={!episodeList.length}
+            >
+              <Tooltip title="弹幕时间偏移、分集拆分、合并等操作">
+                <EditOutlined />
+                <span className="ml-1">弹幕编辑</span>
+              </Tooltip>
+            </Button>
             {isXmlImport && (
               <Button
                 onClick={() => {
@@ -2197,6 +2210,16 @@ export const EpisodeDetail = () => {
         sourceInfo={sourceInfo}
         onCancel={() => setIsBatchModalOpen(false)}
         onSuccess={handleBatchImportSuccess}
+      />
+      <DanmakuEditModal
+        open={isDanmakuEditModalOpen}
+        onCancel={() => setIsDanmakuEditModalOpen(false)}
+        onSuccess={() => {
+          setIsDanmakuEditModalOpen(false)
+          getDetail()
+        }}
+        episodes={episodeList}
+        sourceInfo={sourceInfo}
       />
     </div>
   )
