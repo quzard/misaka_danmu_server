@@ -189,6 +189,7 @@ export function ThemeProvider({ children }) {
         colorBorder: '#334155',
         itemHoverBg: '#273449',
         colorSplit: '#334155',
+        colorBgContainer: '#1E293B',
       },
       Form: {
         colorBorder: '#334155',
@@ -198,6 +199,16 @@ export function ThemeProvider({ children }) {
         borderRadius: 8,
         borderColor: '#334155',
         hoverBorderColor: '#FF6B9B',
+        colorBgContainer: '#1E293B',
+        activeBg: '#1E293B',
+      },
+      InputNumber: {
+        colorBgContainer: '#1E293B',
+        activeBg: '#1E293B',
+      },
+      Select: {
+        colorBgContainer: '#1E293B',
+        colorBgElevated: '#273449',
       },
       Modal: {
         contentBg: '#1E293B',

@@ -473,7 +473,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
 
       <div>
         <div className="text-sm font-medium mb-2">选择分集</div>
-        <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
+        <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
           <Checkbox
             checked={offsetEpisodes.length === episodes?.length}
             indeterminate={offsetEpisodes.length > 0 && offsetEpisodes.length < episodes?.length}
@@ -661,7 +661,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 左侧：可选分集 */}
         <div>
           <div className="text-sm font-medium mb-2">可选分集</div>
-          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
             {availableMergeEpisodes.length > 0 ? (
               availableMergeEpisodes.map((ep) => (
                 <div
@@ -685,7 +685,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 右侧：已选分集（可拖拽排序） */}
         <div>
           <div className="text-sm font-medium mb-2">合并顺序（可拖拽调整）</div>
-          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
             {mergeEpisodes.length > 0 ? (
               <DndContext
                 sensors={sensors}
