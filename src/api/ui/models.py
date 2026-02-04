@@ -155,6 +155,7 @@ class ValidateUrlResponse(BaseModel):
     imageUrl: Optional[str] = None  # 封面图URL
     mediaType: Optional[str] = None  # 媒体类型 (movie/tv_series)
     year: Optional[int] = None  # 年份
+    episodeIndex: Optional[int] = None  # 集数（如果能从URL解析出来）
     errorMessage: Optional[str] = None  # 错误信息
 
 

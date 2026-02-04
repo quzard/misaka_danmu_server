@@ -916,9 +916,11 @@ export const EpisodeDetail = () => {
           if (!currentValues.title && res.data.title) {
             updates.title = res.data.title
           }
-          // 如果集数为空或为1，尝试从URL解析的信息中获取（如果有的话）
-          // 否则默认填充下一集
-          if (!currentValues.episodeIndex) {
+          // 如果URL解析出了集数，优先使用解析出的集数
+          if (res.data.episodeIndex) {
+            updates.episodeIndex = res.data.episodeIndex
+          } else if (!currentValues.episodeIndex) {
+            // 否则如果集数为空，填充下一集
             const nextEpisode = episodeList.length > 0
               ? Math.max(...episodeList.map(e => e.episodeIndex)) + 1
               : 1
@@ -1571,6 +1573,9 @@ export const EpisodeDetail = () => {
                         {urlValidationResult.mediaType && (
                           <div><span className="text-gray-500 dark:text-gray-400">类型：</span><span className="dark:text-gray-200">{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</span></div>
                         )}
+                        {urlValidationResult.episodeIndex && (
+                          <div><span className="text-gray-500 dark:text-gray-400">集数：</span><span className="dark:text-gray-200">第 {urlValidationResult.episodeIndex} 集</span></div>
+                        )}
                       </div>
                       {urlValidationResult.imageUrl && (
                         <div className="mt-2">
@@ -1633,6 +1638,9 @@ export const EpisodeDetail = () => {
                         <div><span className="text-gray-500 dark:text-gray-400">媒体ID：</span><span className="dark:text-gray-200">{urlValidationResult.mediaId}</span></div>
                         {urlValidationResult.title && (
                           <div className="col-span-2"><span className="text-gray-500 dark:text-gray-400">标题：</span><span className="dark:text-gray-200">{urlValidationResult.title}</span></div>
+                        )}
+                        {urlValidationResult.episodeIndex && (
+                          <div><span className="text-gray-500 dark:text-gray-400">集数：</span><span className="dark:text-gray-200">第 {urlValidationResult.episodeIndex} 集</span></div>
                         )}
                       </div>
                     </div>

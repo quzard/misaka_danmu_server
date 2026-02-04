@@ -233,7 +233,8 @@ async def validate_import_url(
             title=info.title,
             imageUrl=info.imageUrl,
             mediaType=info.type,
-            year=info.year
+            year=info.year,
+            episodeIndex=info.currentEpisodeIndex  # 如果URL中包含集数信息
         )
     except Exception as e:
         logger.error(f"解析URL时发生错误: {e}", exc_info=True)
