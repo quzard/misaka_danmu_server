@@ -4,15 +4,10 @@ from typing import Callable, Optional, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud, orm_models, models
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..task_manager import TaskManager, TaskSuccess, TaskPauseForRateLimit
-from ..rate_limiter import RateLimiter, RateLimitExceededError
-from ..metadata_manager import MetadataSourceManager
-from ..title_recognition import TitleRecognitionManager
-from ..image_utils import download_image
-from ..database import sync_postgres_sequence
+from src.db import crud, orm_models, models, sync_postgres_sequence, ConfigManager
+from src.services import ScraperManager, TaskManager, TaskSuccess, TaskPauseForRateLimit, MetadataSourceManager, TitleRecognitionManager
+from src.rate_limiter import RateLimiter, RateLimitExceededError
+from src.utils import download_image
 
 logger = logging.getLogger(__name__)
 
@@ -285,8 +280,8 @@ async def generic_import_task(
                 anime_id = preassignedAnimeId
 
                 # 检查数据库中是否已有这个ID的条目
-                from ..orm_models import Anime
-                from ..timezone import get_now
+                from src.db.orm_models import Anime
+                from src.core.timezone import get_now
                 stmt = select(Anime).where(Anime.id == anime_id)
                 result = await session.execute(stmt)
                 existing_anime = result.scalar_one_or_none()

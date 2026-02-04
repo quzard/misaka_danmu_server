@@ -1,21 +1,16 @@
 from fastapi import APIRouter
 
-from .ui_api import router as ui_router, auth_router
-from .webhook_api import router as webhook_router
-from .control_api import router as control_router
-from .endpoints import (
+from src.api.webhook_api import router as webhook_router
+from src.api.control import control_router
+from src.api.ui import (
     auth, scraper, metadata_source, media_server,
     anime, source, episode, search, import_api, task,
     token, config_extra, settings, scheduled_task, webhook, system, auth_extra,
-    local_danmaku, scraper_resources, parameters, danmaku_storage, backup
+    local_danmaku, scraper_resources, parameters, danmaku_storage, backup, danmaku_edit
 )
 
 # This router aggregates all non-dandanplay API endpoints.
 api_router = APIRouter()
-
-# The ui_router contains core UI functionalities.
-api_router.include_router(ui_router, prefix="/ui", tags=["Web UI API"], include_in_schema=False)
-api_router.include_router(auth_router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
 
 # 基础端点: Auth, Scraper, Metadata Source, Media Server, Local Danmaku
 api_router.include_router(auth.router, prefix="/ui/auth", tags=["Auth"], include_in_schema=False)
@@ -51,6 +46,9 @@ api_router.include_router(config_extra.router, prefix="/ui", tags=["Config"], in
 
 # 备份管理端点
 api_router.include_router(backup.router, prefix="/ui", tags=["Backup"], include_in_schema=False)
+
+# 弹幕编辑端点
+api_router.include_router(danmaku_edit.router, prefix="/ui", tags=["Danmaku Edit"], include_in_schema=False)
 
 api_router.include_router(webhook_router, prefix="/webhook", tags=["Webhook"], include_in_schema=False)
 

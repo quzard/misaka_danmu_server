@@ -284,7 +284,7 @@ export const DatabaseBackupManager = () => {
             {jobStatus.enabled ? (
               <>
                 <Tag icon={<CheckCircleOutlined />} color="success">已启用</Tag>
-                <span className="text-gray-500">
+                <span className="text-gray-500 dark:text-gray-400">
                   执行周期: {jobStatus.cron_expression}
                   {jobStatus.next_run_time && ` | 下次执行: ${formatDate(jobStatus.next_run_time)}`}
                 </span>
@@ -297,7 +297,7 @@ export const DatabaseBackupManager = () => {
             </Button>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-gray-500">
+          <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
             <ClockCircleOutlined />
             <span>定时备份: 未配置</span>
             <Button type="link" size="small" onClick={goToScheduledTasks}>
@@ -323,7 +323,7 @@ export const DatabaseBackupManager = () => {
       {/* 批量操作 */}
       {selectedRowKeys.length > 0 && (
         <div className="mt-3 flex items-center gap-4">
-          <span className="text-gray-500">已选中 {selectedRowKeys.length} 项</span>
+          <span className="text-gray-500 dark:text-gray-400">已选中 {selectedRowKeys.length} 项</span>
           <Popconfirm
             title={`确定删除选中的 ${selectedRowKeys.length} 个备份？`}
             onConfirm={handleBatchDelete}

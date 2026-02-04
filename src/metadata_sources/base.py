@@ -6,10 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker # type: igno
 from fastapi import Request
 from httpx import HTTPStatusError
 
-from .. import models
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..cache_manager import CacheManager
+from src.db import models, ConfigManager, CacheManager
+from src.services import ScraperManager
 
 class BaseMetadataSource(ABC):
     """所有元数据源插件的抽象基类。"""

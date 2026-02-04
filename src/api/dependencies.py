@@ -4,15 +4,13 @@ API依赖注入函数
 """
 
 from fastapi import Request
-from ..scraper_manager import ScraperManager
-from ..task_manager import TaskManager
-from ..scheduler import SchedulerManager
-from ..webhook_manager import WebhookManager
-from ..metadata_manager import MetadataSourceManager
-from ..config_manager import ConfigManager
-from ..cache_manager import CacheManager
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..rate_limiter import RateLimiter
+from src.services import (
+    ScraperManager, TaskManager, SchedulerManager,
+    WebhookManager, MetadataSourceManager
+)
+from src.db import ConfigManager, CacheManager
+from src.ai import AIMatcherManager
+from src.rate_limiter import RateLimiter
 
 
 async def get_scraper_manager(request: Request) -> ScraperManager:
@@ -63,8 +61,3 @@ async def get_title_recognition_manager(request: Request):
 async def get_cache_manager(request: Request) -> CacheManager:
     """依赖项：从应用状态获取缓存管理器"""
     return request.app.state.cache_manager
-
-
-async def get_ai_matcher_manager(request: Request) -> AIMatcherManager:
-    """依赖项：从应用状态获取AI匹配管理器"""
-    return request.app.state.ai_matcher_manager

@@ -9,8 +9,8 @@ import httpx
 from pydantic import BaseModel, Field
 from fastapi import HTTPException, Request
 
-from .. import models
-from .. import crud
+from src.db import models
+from src.db import crud
 from .base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)

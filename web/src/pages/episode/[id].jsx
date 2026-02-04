@@ -1,6 +1,5 @@
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  batchManualImport,
   deleteAnimeEpisode,
   deleteAnimeEpisodeSingle,
   editEpisode,
@@ -12,6 +11,8 @@ import {
   refreshEpisodeDanmaku,
   refreshEpisodesBulk,
   resetEpisode,
+  validateImportUrl,
+  importFromUrl,
 } from '../../apis'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -22,7 +23,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Modal,
   Space,
   Switch,
@@ -40,15 +40,19 @@ import {
   HolderOutlined,
   UploadOutlined,
   VerticalAlignMiddleOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+  LinkOutlined,
 } from '@ant-design/icons'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Select } from 'antd'
+import { Select, Segmented } from 'antd'
 import { RoutePaths } from '../../general/RoutePaths'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { BatchImportModal } from '../../components/BatchImportModal'
+import { DanmakuEditModal } from '../../components/DanmakuEditModal'
 import { isUrl } from '../../utils/data'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store'
@@ -92,6 +96,12 @@ export const EpisodeDetail = () => {
   const [fileList, setFileList] = useState([])
   const [lastClickedIndex, setLastClickedIndex] = useState(null)
 
+  // URL解析相关状态（手动导入分集时使用）
+  const [urlValidating, setUrlValidating] = useState(false)
+  const [urlValidationResult, setUrlValidationResult] = useState(null)
+  // 手动导入模式: 'xml' | 'url' (仅自定义源使用)
+  const [manualImportMode, setManualImportMode] = useState('xml')
+
   // 批量编辑相关状态
   const [isBatchEditModalOpen, setIsBatchEditModalOpen] = useState(false)
   const [batchEditData, setBatchEditData] = useState([])
@@ -105,6 +115,9 @@ export const EpisodeDetail = () => {
   const [ruleParams, setRuleParams] = useState({})
   const [isPreviewMode, setIsPreviewMode] = useState(false)
   const [previewData, setPreviewData] = useState({})
+
+  // 弹幕编辑弹窗状态
+  const [isDanmakuEditModalOpen, setIsDanmakuEditModalOpen] = useState(false)
 
   // 当默认分页大小加载完成后，更新 pagination
   useEffect(() => {
@@ -384,16 +397,16 @@ export const EpisodeDetail = () => {
     const hasPreviewChange = isPreviewMode && previewTitle && previewTitle !== data.title
     return (
       <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
-        <td className="p-2 border cursor-move" {...attributes} {...listeners}>
+        <td className="p-2 border border-gray-200 dark:border-gray-600 cursor-move" {...attributes} {...listeners}>
           <HolderOutlined />
         </td>
-        <td className="p-2 border text-xs">{data.episodeId}</td>
-        <td className="p-2 border">
+        <td className="p-2 border border-gray-200 dark:border-gray-600 text-xs">{data.episodeId}</td>
+        <td className="p-2 border border-gray-200 dark:border-gray-600">
           {hasPreviewChange ? (
             <div className="text-sm">
               <span className="text-gray-400 line-through">{data.title}</span>
               <span className="mx-1 text-blue-500">→</span>
-              <span className="text-green-600 font-medium">{previewTitle}</span>
+              <span className="text-green-600 dark:text-green-400 font-medium">{previewTitle}</span>
             </div>
           ) : (
             <Input
@@ -405,7 +418,7 @@ export const EpisodeDetail = () => {
             />
           )}
         </td>
-        <td className="p-2 border">
+        <td className="p-2 border border-gray-200 dark:border-gray-600">
           <InputNumber
             size="small"
             min={1}
@@ -872,18 +885,104 @@ export const EpisodeDetail = () => {
     })
   }
 
+  // URL解析函数（手动导入分集时使用）
+  const handleValidateUrl = async (url) => {
+    if (!url?.trim()) {
+      messageApi.warning('请输入URL')
+      return
+    }
+
+    setUrlValidating(true)
+    setUrlValidationResult(null)
+
+    try {
+      const res = await validateImportUrl({ url: url.trim() })
+      if (res.data) {
+        // 对于非自定义源，检查 URL 的 provider 是否匹配当前源
+        if (!isXmlImport && res.data.isValid) {
+          const currentProvider = sourceInfo?.providerName?.toLowerCase()
+          const urlProvider = res.data.provider?.toLowerCase()
+          if (currentProvider !== urlProvider) {
+            setUrlValidationResult({
+              isValid: false,
+              provider: res.data.provider,
+              errorMessage: `URL来源 (${res.data.provider}) 与当前源 (${sourceInfo?.providerName}) 不匹配`
+            })
+            return
+          }
+        }
+        setUrlValidationResult(res.data)
+        // 自动填充表单字段
+        if (res.data.isValid) {
+          const currentValues = form.getFieldsValue()
+          const updates = {}
+          // 如果标题为空，自动填充
+          if (!currentValues.title && res.data.title) {
+            updates.title = res.data.title
+          }
+          // 如果URL解析出了集数，优先使用解析出的集数
+          if (res.data.episodeIndex) {
+            updates.episodeIndex = res.data.episodeIndex
+          } else if (!currentValues.episodeIndex) {
+            // 否则如果集数为空，填充下一集
+            const nextEpisode = episodeList.length > 0
+              ? Math.max(...episodeList.map(e => e.episodeIndex)) + 1
+              : 1
+            updates.episodeIndex = nextEpisode
+          }
+          if (Object.keys(updates).length > 0) {
+            form.setFieldsValue(updates)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('URL校验失败:', error)
+      setUrlValidationResult({
+        isValid: false,
+        errorMessage: error.detail || error.message || 'URL校验失败'
+      })
+    } finally {
+      setUrlValidating(false)
+    }
+  }
+
+  // 清空URL解析状态
+  const clearUrlValidation = () => {
+    setUrlValidationResult(null)
+    setUrlValidating(false)
+  }
+
   const handleSave = async () => {
     try {
       if (confirmLoading) return
       setConfirmLoading(true)
       const values = await form.validateFields()
       console.log(values, 'values')
+
       if (values.episodeId) {
+        // 编辑模式
         await editEpisode({
           ...values,
           sourceId: Number(id),
         })
+      } else if (isXmlImport && manualImportMode === 'url') {
+        // 自定义源 URL 导入模式
+        if (!urlValidationResult?.isValid) {
+          messageApi.warning('请先解析URL')
+          setConfirmLoading(false)
+          return
+        }
+        await importFromUrl({
+          url: values.sourceUrl,
+          provider: urlValidationResult.provider,
+          title: values.title,
+          media_type: urlValidationResult.mediaType || 'tv_series',
+          season: 1,
+          episode_index: values.episodeIndex,
+          source_id: Number(id),  // 指定导入到当前源
+        })
       } else {
+        // 普通手动导入（XML或非自定义源URL）
         await manualImportEpisode({
           ...values,
           sourceId: Number(id),
@@ -894,10 +993,25 @@ export const EpisodeDetail = () => {
       setUploading(false)
       // 清空上传组件的内部文件列表
       setFileList([])
+      // 清空URL解析状态
+      clearUrlValidation()
+      setManualImportMode('xml')
       messageApi.success('分集信息更新成功！')
     } catch (error) {
       console.log(error)
-      messageApi.error(`更新失败: ${error.message || error?.detail || error}`)
+      // 改进错误提示，处理对象类型的错误
+      let errorMsg = '更新失败'
+      if (error?.errorFields) {
+        // 表单验证错误
+        errorMsg = error.errorFields.map(f => f.errors.join(', ')).join('; ')
+      } else if (error?.detail) {
+        errorMsg = error.detail
+      } else if (error?.message) {
+        errorMsg = error.message
+      } else if (typeof error === 'string') {
+        errorMsg = error
+      }
+      messageApi.error(errorMsg)
     } finally {
       setConfirmLoading(false)
       setEditOpen(false)
@@ -1156,6 +1270,15 @@ export const EpisodeDetail = () => {
                 <span className="ml-1">批量刷新</span>
               </Tooltip>
             </Button>
+            <Button
+              onClick={() => setIsDanmakuEditModalOpen(true)}
+              disabled={!episodeList.length}
+            >
+              <Tooltip title="弹幕时间偏移、分集拆分、合并等操作">
+                <EditOutlined />
+                <span className="ml-1">弹幕编辑</span>
+              </Tooltip>
+            </Button>
             {isXmlImport && (
               <Button
                 onClick={() => {
@@ -1169,6 +1292,12 @@ export const EpisodeDetail = () => {
               onClick={() => {
                 form.resetFields()
                 setIsEditing(false)
+                // 默认填充下一集的集数
+                const nextEpisode = episodeList.length > 0
+                  ? Math.max(...episodeList.map(e => e.episodeIndex)) + 1
+                  : 1
+                form.setFieldsValue({ episodeIndex: nextEpisode })
+                clearUrlValidation()
                 setEditOpen(true)
               }}
               type="primary"
@@ -1245,7 +1374,6 @@ export const EpisodeDetail = () => {
                       } else {
                         setSelectedRows([...selectedRows, record])
                       }
-                      setLastSelectedIndex(currentIndex)
                     }
                     setLastClickedIndex(index)
                   }}
@@ -1379,10 +1507,167 @@ export const EpisodeDetail = () => {
           setEditOpen(false)
           setIsEditing(false)
           form.resetFields()
+          clearUrlValidation()
+          setManualImportMode('xml')
         }}
         zIndex={100}
+        width={600}
       >
+        {/* 自定义源且非编辑模式时，显示导入模式切换 */}
+        {isXmlImport && !isEditing && (
+          <div className="mb-4">
+            <Segmented
+              value={manualImportMode}
+              onChange={value => {
+                setManualImportMode(value)
+                form.resetFields()
+                clearUrlValidation()
+                // 重新设置默认集数
+                const nextEpisode = episodeList.length > 0
+                  ? Math.max(...episodeList.map(e => e.episodeIndex)) + 1
+                  : 1
+                form.setFieldsValue({ episodeIndex: nextEpisode })
+              }}
+              options={[
+                { label: <span><UploadOutlined className="mr-1" />XML导入</span>, value: 'xml' },
+                { label: <span><LinkOutlined className="mr-1" />URL导入</span>, value: 'url' },
+              ]}
+              block
+            />
+          </div>
+        )}
+
         <Form form={form} layout="horizontal">
+          {/* 自定义源 URL 导入模式 */}
+          {isXmlImport && !isEditing && manualImportMode === 'url' && (
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
+                <LinkOutlined className="mr-1" />
+                输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源
+              </div>
+              <Form.Item
+                name="sourceUrl"
+                label="视频URL"
+                rules={[
+                  {
+                    required: true,
+                    message: `请输入视频URL`,
+                  },
+                ]}
+                className="mb-2"
+              >
+                <Input.Search
+                  placeholder="请输入视频URL，如 https://www.bilibili.com/video/BV..."
+                  onSearch={handleValidateUrl}
+                  onChange={() => setUrlValidationResult(null)}
+                  enterButton={
+                    <Button loading={urlValidating}>
+                      解析URL
+                    </Button>
+                  }
+                />
+              </Form.Item>
+
+              {/* URL解析结果显示 */}
+              {urlValidationResult && (
+                <div className={`p-3 rounded-lg ${urlValidationResult.isValid ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700' : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700'}`}>
+                  {urlValidationResult.isValid ? (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircleOutlined className="text-green-500" />
+                        <span className="font-medium text-green-700 dark:text-green-400 text-sm">URL解析成功</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 text-xs">
+                        <div><span className="text-gray-500 dark:text-gray-400">平台：</span><span className="dark:text-gray-200">{urlValidationResult.provider}</span></div>
+                        <div><span className="text-gray-500 dark:text-gray-400">媒体ID：</span><span className="dark:text-gray-200">{urlValidationResult.mediaId}</span></div>
+                        {urlValidationResult.title && (
+                          <div className="col-span-2"><span className="text-gray-500 dark:text-gray-400">标题：</span><span className="dark:text-gray-200">{urlValidationResult.title}</span></div>
+                        )}
+                        {urlValidationResult.mediaType && (
+                          <div><span className="text-gray-500 dark:text-gray-400">类型：</span><span className="dark:text-gray-200">{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</span></div>
+                        )}
+                        {urlValidationResult.episodeIndex && (
+                          <div><span className="text-gray-500 dark:text-gray-400">集数：</span><span className="dark:text-gray-200">第 {urlValidationResult.episodeIndex} 集</span></div>
+                        )}
+                      </div>
+                      {urlValidationResult.imageUrl && (
+                        <div className="mt-2">
+                          <img src={urlValidationResult.imageUrl} alt="封面" className="h-20 rounded" />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <ExclamationCircleOutlined className="text-red-500" />
+                      <span className="text-red-700 dark:text-red-400 text-sm">{urlValidationResult.errorMessage || 'URL解析失败'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 非自定义源且非编辑模式时，显示URL解析功能 */}
+          {!isXmlImport && !isEditing && (
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
+                <LinkOutlined className="mr-1" />
+                输入 {sourceInfo?.providerName} 平台的视频URL，可自动解析标题
+              </div>
+              <Form.Item
+                name="sourceUrl"
+                label="官方链接"
+                rules={[
+                  {
+                    required: true,
+                    message: `请输入官方链接`,
+                  },
+                ]}
+                className="mb-2"
+              >
+                <Input.Search
+                  placeholder={`请输入 ${sourceInfo?.providerName} 的视频URL`}
+                  onSearch={handleValidateUrl}
+                  onChange={() => setUrlValidationResult(null)}
+                  enterButton={
+                    <Button loading={urlValidating}>
+                      解析URL
+                    </Button>
+                  }
+                />
+              </Form.Item>
+
+              {/* URL解析结果显示 */}
+              {urlValidationResult && (
+                <div className={`p-3 rounded-lg ${urlValidationResult.isValid ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700' : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700'}`}>
+                  {urlValidationResult.isValid ? (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircleOutlined className="text-green-500" />
+                        <span className="font-medium text-green-700 dark:text-green-400 text-sm">URL解析成功</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 text-xs">
+                        <div><span className="text-gray-500 dark:text-gray-400">平台：</span><span className="dark:text-gray-200">{urlValidationResult.provider}</span></div>
+                        <div><span className="text-gray-500 dark:text-gray-400">媒体ID：</span><span className="dark:text-gray-200">{urlValidationResult.mediaId}</span></div>
+                        {urlValidationResult.title && (
+                          <div className="col-span-2"><span className="text-gray-500 dark:text-gray-400">标题：</span><span className="dark:text-gray-200">{urlValidationResult.title}</span></div>
+                        )}
+                        {urlValidationResult.episodeIndex && (
+                          <div><span className="text-gray-500 dark:text-gray-400">集数：</span><span className="dark:text-gray-200">第 {urlValidationResult.episodeIndex} 集</span></div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <ExclamationCircleOutlined className="text-red-500" />
+                      <span className="text-red-700 dark:text-red-400 text-sm">{urlValidationResult.errorMessage || 'URL解析失败'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <Form.Item
             name="title"
             label="分集标题"
@@ -1401,41 +1686,42 @@ export const EpisodeDetail = () => {
               min={1}
             />
           </Form.Item>
-          {isXmlImport ? (
+
+          {/* 自定义源 XML 导入模式 */}
+          {isXmlImport && !isEditing && manualImportMode === 'xml' && (
             <>
-              {!isEditing && (
-                <>
-                  <Form.Item
-                    name="content"
-                    label="弹幕XML内容"
-                    rules={[
-                      {
-                        required: true,
-                        message: `请输入弹幕XML内容`,
-                      },
-                    ]}
-                  >
-                    <Input.TextArea
-                      rows={6}
-                      placeholder="请在此处粘贴弹幕XML文件的内容"
-                    />
-                  </Form.Item>
-                  <div className="text-right my-4">
-                    <Upload
-                      {...uploadProps}
-                      ref={uploadRef}
-                      loading={uploading}
-                      disabled={uploading}
-                    >
-                      <Button type="primary" icon={<UploadOutlined />}>
-                        选择文件导入XML
-                      </Button>
-                    </Upload>
-                  </div>
-                </>
-              )}
+              <Form.Item
+                name="content"
+                label="弹幕XML内容"
+                rules={[
+                  {
+                    required: true,
+                    message: `请输入弹幕XML内容`,
+                  },
+                ]}
+              >
+                <Input.TextArea
+                  rows={6}
+                  placeholder="请在此处粘贴弹幕XML文件的内容"
+                />
+              </Form.Item>
+              <div className="text-right my-4">
+                <Upload
+                  {...uploadProps}
+                  ref={uploadRef}
+                  loading={uploading}
+                  disabled={uploading}
+                >
+                  <Button type="primary" icon={<UploadOutlined />}>
+                    选择文件导入XML
+                  </Button>
+                </Upload>
+              </div>
             </>
-          ) : (
+          )}
+
+          {/* 非自定义源编辑模式下显示普通的官方链接输入框 */}
+          {!isXmlImport && isEditing && (
             <Form.Item
               name="sourceUrl"
               label="官方链接"
@@ -1449,6 +1735,7 @@ export const EpisodeDetail = () => {
               <Input placeholder="请输入官方链接" />
             </Form.Item>
           )}
+
           {isEditing && (
             <Form.Item
               name="danmakuFilePath"
@@ -1549,19 +1836,19 @@ export const EpisodeDetail = () => {
                   placeholder="偏移量"
                   className="w-28"
                 />
-                <span className="text-gray-500 text-sm">正数增加，负数减少</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">正数增加，负数减少</span>
               </>
             )}
             {batchIndexMode === 'reorder' && (
               <>
-                <span className="text-gray-500 text-sm">从第</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">从第</span>
                 <InputNumber
                   value={batchReorderStart}
                   onChange={setBatchReorderStart}
                   min={1}
                   className="w-20"
                 />
-                <span className="text-gray-500 text-sm">集开始</span>
+                <span className="text-gray-500 dark:text-gray-400 text-sm">集开始</span>
               </>
             )}
             <Button
@@ -1578,7 +1865,7 @@ export const EpisodeDetail = () => {
           <div className="font-medium mb-2">📝 批量命名规则</div>
           {/* 添加规则区域 */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
-            <span className="text-gray-500 text-sm">添加规则:</span>
+            <span className="text-gray-500 dark:text-gray-400 text-sm">添加规则:</span>
             <Select
               value={selectedRuleType}
               onChange={(v) => { setSelectedRuleType(v); setRuleParams({}) }}
@@ -1808,7 +2095,7 @@ export const EpisodeDetail = () => {
                 </div>
                 {/* 第三行：效果预览 */}
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">效果预览:</span>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">效果预览:</span>
                   <span className="text-sm font-mono text-blue-600 dark:text-blue-400 font-semibold">
                     {
                       ruleParams.position === 'start'
@@ -1837,11 +2124,11 @@ export const EpisodeDetail = () => {
           </div>
           {/* 已添加的规则列表 */}
           {renameRules.length > 0 && (
-            <div className="border rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
+            <div className="border border-gray-200 dark:border-gray-600 rounded p-2 mb-3 bg-white dark:bg-gray-900 max-h-32 overflow-auto">
               {renameRules.map((rule, idx) => (
-                <div key={rule.id} className="flex items-center gap-2 py-1 border-b last:border-b-0">
+                <div key={rule.id} className="flex items-center gap-2 py-1 border-b border-gray-200 dark:border-gray-600 last:border-b-0">
                   <input type="checkbox" checked={rule.enabled} onChange={() => handleToggleRule(rule.id)} />
-                  <span className="text-gray-500 text-xs">{idx + 1}.</span>
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">{idx + 1}.</span>
                   <Tag color={rule.enabled ? 'blue' : 'default'}>{ruleTypeOptions.find(r => r.value === rule.type)?.label}</Tag>
                   <span className="text-sm flex-1 truncate">
                     {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
@@ -1893,19 +2180,19 @@ export const EpisodeDetail = () => {
         </div>
 
         {/* 可拖拽编辑表格 */}
-        <div className="border rounded overflow-auto" style={{ maxHeight: 400 }}>
+        <div className="border border-gray-200 dark:border-gray-600 rounded overflow-auto" style={{ maxHeight: 400 }}>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={batchEditData.map(item => item.episodeId)} strategy={verticalListSortingStrategy}>
               <table className="w-full text-sm">
                 <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                   <tr>
-                    <th className="p-2 border w-10">拖拽</th>
-                    <th className="p-2 border w-32">ID</th>
-                    <th className="p-2 border">剧集名</th>
-                    <th className="p-2 border w-24">集数</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-10">拖拽</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-32">ID</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600">剧集名</th>
+                    <th className="p-2 border border-gray-200 dark:border-gray-600 w-24">集数</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="bg-white dark:bg-gray-800">
                   {batchEditData.map((item, index) => (
                     <SortableRow key={item.episodeId} id={item.episodeId} data={item} index={index} />
                   ))}
@@ -1914,7 +2201,7 @@ export const EpisodeDetail = () => {
             </SortableContext>
           </DndContext>
         </div>
-        <div className="mt-2 text-gray-500 text-sm">
+        <div className="mt-2 text-gray-500 dark:text-gray-400 text-sm">
           💡 拖拽行可调整顺序，点击"确认提交"后才会保存更改
         </div>
       </Modal>
@@ -1923,6 +2210,16 @@ export const EpisodeDetail = () => {
         sourceInfo={sourceInfo}
         onCancel={() => setIsBatchModalOpen(false)}
         onSuccess={handleBatchImportSuccess}
+      />
+      <DanmakuEditModal
+        open={isDanmakuEditModalOpen}
+        onCancel={() => setIsDanmakuEditModalOpen(false)}
+        onSuccess={() => {
+          setIsDanmakuEditModalOpen(false)
+          getDetail()
+        }}
+        episodes={episodeList}
+        sourceInfo={sourceInfo}
       />
     </div>
   )

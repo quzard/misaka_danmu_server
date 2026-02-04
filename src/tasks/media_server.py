@@ -5,13 +5,9 @@ from typing import Callable, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from .. import crud
-from ..task_manager import TaskManager, TaskSuccess
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
+from src.db import crud, ConfigManager
+from src.services import TaskManager, TaskSuccess, ScraperManager, MetadataSourceManager, TitleRecognitionManager, get_media_server_manager
+from src.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +25,6 @@ async def scan_media_server_library(
     progress_callback: Callable
 ):
     """扫描媒体服务器的媒体库"""
-    from ..media_server_manager import get_media_server_manager
 
     await progress_callback(0, "开始扫描媒体库...")
 
@@ -126,16 +121,16 @@ async def import_media_items(
     title_recognition_manager=None
 ):
     """导入媒体项(按季度导入电视剧,电影直接导入)"""
-    from ..orm_models import MediaItem
+    from src.db.orm_models import MediaItem
 
     webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
 
     # 如果没有传入manager,从全局获取
     if scraper_manager is None:
-        from ..main import scraper_manager as global_scraper_manager
+        from src.main import scraper_manager as global_scraper_manager
         scraper_manager = global_scraper_manager
     if metadata_manager is None:
-        from ..main import metadata_manager as global_metadata_manager
+        from src.main import metadata_manager as global_metadata_manager
         metadata_manager = global_metadata_manager
     if config_manager is None:
         raise ValueError("config_manager is required")

@@ -9,11 +9,11 @@ from sqlalchemy import select, func
 from datetime import datetime
 
 from .base import CommandHandler
-from ..orm_models import TaskHistory
-from ..timezone import get_now
+from src.db.orm_models import TaskHistory
+from src.core.timezone import get_now
 
 if TYPE_CHECKING:
-    from ..dandan_api import DandanSearchAnimeResponse
+    from src.api.dandan import DandanSearchAnimeResponse
 
 logger = logging.getLogger(__name__)
 

@@ -12,33 +12,26 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
 from fastapi.middleware.cors import CORSMiddleware
-
-# 内部模块导入
-from .config_manager import ConfigManager
-from .cache_manager import CacheManager
-from .ai.ai_matcher_manager import AIMatcherManager
-from .database import init_db_tables, close_db_engine, create_initial_admin_user
-from .internal_polling import InternalPollingManager
-from .api import api_router, control_router
-from .dandan_api import dandan_router
-from .task_manager import TaskManager
-from .metadata_manager import MetadataSourceManager
-from .scraper_manager import ScraperManager
-from .webhook_manager import WebhookManager
-from .scheduler import SchedulerManager
-from .config import settings
-from . import crud, security, orm_models
-from .log_manager import setup_logging
-from .rate_limiter import RateLimiter
-from ._version import APP_VERSION
-from .ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
-from .title_recognition import TitleRecognitionManager
-from .media_server_manager import MediaServerManager
-from .default_configs import get_default_configs
-from .database import get_db_type
-from .transport_manager import TransportManager
-from .proxy_middleware import init_proxy_middleware
 from sqlalchemy import text
+
+# 内部模块导入 - 使用聚合式导入
+from src.core import settings
+from src.core.default_configs import get_default_configs
+from src.db import crud, orm_models, init_db_tables, close_db_engine, create_initial_admin_user, get_db_type
+from src.db import ConfigManager, CacheManager  # 管理器从 db 层导入
+from src.services import (
+    TaskManager, MetadataSourceManager, ScraperManager, WebhookManager,
+    SchedulerManager, TitleRecognitionManager, MediaServerManager,
+    TransportManager, setup_logging
+)
+from src.utils import InternalPollingManager, init_proxy_middleware
+from src.api import api_router, control_router
+from src.api.dandan import dandan_router
+from src.ai import AIMatcherManager
+from src.ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
+from src.rate_limiter import RateLimiter
+from src._version import APP_VERSION
+from src import security
     
 print(f"当前环境: {settings.environment}")
 

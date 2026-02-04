@@ -225,8 +225,9 @@ export const OutputManage = () => {
               onChange={setColorMode}
               options={[
                 { label: '不使用', value: 'off' },
-                { label: '随机白色弹幕', value: 'white_to_random' },
+                { label: '白色弹幕变随机颜色', value: 'white_to_random' },
                 { label: '全部随机上色', value: 'all_random' },
+                { label: '全部变白色', value: 'all_white' },
               ]}
             />
           </div>

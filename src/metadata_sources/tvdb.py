@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 import httpx
 from fastapi import HTTPException, status
 
-from .. import crud, models
+from src.db import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
 
 logger = logging.getLogger(__name__)

@@ -3,11 +3,9 @@ from typing import Callable
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..task_manager import TaskManager
-from ..scraper_manager import ScraperManager
-from ..rate_limiter import RateLimiter
-from ..config_manager import ConfigManager
-from ..metadata_manager import MetadataSourceManager
+from src.services import TaskManager, ScraperManager, MetadataSourceManager
+from src.rate_limiter import RateLimiter
+from src.db import ConfigManager
 
 class BaseJob(ABC):
     """

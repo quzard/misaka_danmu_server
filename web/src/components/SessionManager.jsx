@@ -7,6 +7,8 @@ import {
   GlobalOutlined,
   DeleteOutlined,
   ExclamationCircleOutlined,
+  SafetyCertificateOutlined,
+  InfoCircleOutlined,
 } from '@ant-design/icons'
 import { getUserSessions, revokeSession, revokeOtherSessions } from '../apis/index.js'
 import { useMessage } from '../MessageContext'
@@ -164,25 +166,36 @@ const SessionManager = ({ open, onClose }) => {
             const { browser, os, isMobile } = parseUserAgent(session.userAgent)
             const expireStatus = getExpireStatus(session.expiresAt, session.isRevoked)
             const isCurrent = session.jti === currentJti
+            const isWhitelist = session.isWhitelist
 
             return (
               <Card
                 key={session.id}
                 size="small"
-                className={isCurrent ? 'border-blue-400 border-2' : ''}
+                className={`${isCurrent ? 'border-blue-400 border-2' : ''} ${isWhitelist ? 'bg-green-50 dark:bg-green-900/20' : ''}`}
               >
                 <div className="flex justify-between items-start">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      {isMobile ? <MobileOutlined /> : <DesktopOutlined />}
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {isWhitelist ? (
+                        <Tooltip title="IP白名单免登录会话">
+                          <SafetyCertificateOutlined className="text-green-500" />
+                        </Tooltip>
+                      ) : (
+                        isMobile ? <MobileOutlined /> : <DesktopOutlined />
+                      )}
                       <span className="font-medium">{browser} / {os}</span>
+                      {isWhitelist && <Tag color="green" icon={<SafetyCertificateOutlined />}>白名单</Tag>}
                       {isCurrent && <Tag color="blue">当前会话</Tag>}
                       <Tag color={expireStatus.color}>{expireStatus.text}</Tag>
                     </div>
-                    <div className="text-xs text-gray-500 space-y-1">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
                       <div className="flex items-center gap-1">
                         <GlobalOutlined />
                         <span>IP: {session.ipAddress || '未知'}</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="ml-3.5">UA: {session.userAgent || '未知'}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <ClockCircleOutlined />
@@ -193,7 +206,7 @@ const SessionManager = ({ open, onClose }) => {
                   {!isCurrent && (
                     <Popconfirm
                       title="确定踢出此设备？"
-                      description="该设备将需要重新登录"
+                      description={isWhitelist ? "白名单会话踢出后，同IP同浏览器访问会自动重建" : "该设备将需要重新登录"}
                       onConfirm={() => handleRevokeSession(session.id)}
                       okText="确定"
                       cancelText="取消"

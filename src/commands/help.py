@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .base import CommandHandler
 
 if TYPE_CHECKING:
-    from ..dandan_api import DandanSearchAnimeResponse, DandanSearchAnimeItem
+    from src.api.dandan import DandanSearchAnimeResponse, DandanSearchAnimeItem
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class HelpCommand(CommandHandler):
     async def execute(self, token: str, args: List[str], session: AsyncSession,
                      config_manager, **kwargs) -> "DandanSearchAnimeResponse":
         """展示所有可用指令"""
-        from ..dandan_api import DandanSearchAnimeItem
+        from src.api.dandan import DandanSearchAnimeItem
         
         # 获取图片URL
         image_url = await self.get_image_url(config_manager)

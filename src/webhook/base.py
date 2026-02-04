@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import Request
 from pydantic import BaseModel
 
-from .. import crud
-from ..config_manager import ConfigManager
-from ..task_manager import TaskManager
-from ..rate_limiter import RateLimiter
-from ..tasks import webhook_search_and_dispatch_task
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
+from src.db import crud, ConfigManager
+from src.services import TaskManager, ScraperManager, MetadataSourceManager
+from src.rate_limiter import RateLimiter
+
+# 延迟导入，避免循环依赖
+def _get_webhook_search_and_dispatch_task():
+    from src.tasks import webhook_search_and_dispatch_task
+    return webhook_search_and_dispatch_task
 
 class WebhookPayload(BaseModel):
     """定义 Webhook 负载的通用结构。"""
@@ -88,6 +89,7 @@ class BaseWebhook(ABC):
             else:
                 # 延时导入关闭：直接提交到 TaskManager
                 self.logger.info(f"Webhook 延时导入已关闭，正在立即执行任务 '{task_title}'...")
+                webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
                 task_coro = lambda s, cb: webhook_search_and_dispatch_task(
                     webhookSource=webhook_source,
                     progress_callback=cb,

@@ -49,14 +49,14 @@ const SortableItem = ({ item, onToggle, showSwitch = true }) => {
         <span
           {...attributes}
           {...listeners}
-          className="cursor-grab text-gray-400 hover:text-gray-600"
+          className="cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
         >
           <HolderOutlined />
         </span>
         <div>
           <div className="font-medium">{item.name}</div>
           {item.description && (
-            <div className="text-xs text-gray-500">{item.description}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400">{item.description}</div>
           )}
         </div>
       </div>
@@ -226,11 +226,11 @@ export const SortablePriorityList = ({
           {activeItem && (
             <div className="flex items-center justify-between p-3 rounded-lg border-2 border-blue-400 bg-white dark:bg-gray-800 shadow-lg">
               <div className="flex items-center gap-3">
-                <HolderOutlined className="text-gray-400" />
+                <HolderOutlined className="text-gray-400 dark:text-gray-500" />
                 <div>
                   <div className="font-medium">{activeItem.name}</div>
                   {activeItem.description && (
-                    <div className="text-xs text-gray-500">{activeItem.description}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{activeItem.description}</div>
                   )}
                 </div>
               </div>
@@ -240,7 +240,7 @@ export const SortablePriorityList = ({
       </DndContext>
 
       {tips.length > 0 && (
-        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-500">
+        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-500 dark:text-gray-400">
           <div className="font-medium mb-1">💡 使用说明</div>
           <ul className="list-disc list-inside space-y-1 m-0">
             {tips.map((tip, index) => (

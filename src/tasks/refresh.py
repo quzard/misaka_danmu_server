@@ -5,15 +5,14 @@ from typing import Callable, List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import crud, orm_models
-from ..rate_limiter import RateLimiter, RateLimitExceededError
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..task_manager import TaskManager, TaskSuccess, TaskPauseForRateLimit
-from ..config_manager import ConfigManager
-from ..title_recognition import TitleRecognitionManager
+from src.db import crud, orm_models, models, ConfigManager
+from src.rate_limiter import RateLimiter, RateLimitExceededError
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TaskPauseForRateLimit, TitleRecognitionManager
 from .delete import delete_danmaku_file
 from .utils import generate_episode_range_string
+
+# 从 models 导入需要的类
+ProviderEpisodeInfo = models.ProviderEpisodeInfo
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,6 @@ async def full_refresh_task(sourceId: int, session: AsyncSession, scraper_manage
 
             try:
                 # 创建虚拟分集对象用于下载
-                from ..models import ProviderEpisodeInfo
                 virtual_episode = ProviderEpisodeInfo(
                     provider=provider_name,
                     episodeIndex=episode_index,
@@ -219,7 +217,6 @@ async def refresh_episode_task(episodeId: int, session: AsyncSession, manager: S
 
         # 使用三线程下载模式获取弹幕
         # 创建一个虚拟的分集对象用于并发下载
-        from ..models import ProviderEpisodeInfo
         virtual_episode = ProviderEpisodeInfo(
             provider=provider_name,
             episodeIndex=1,
@@ -371,7 +368,6 @@ async def refresh_bulk_episodes_task(episodeIds: List[int], session: AsyncSessio
                         continue
 
                 # 3. 下载弹幕
-                from ..models import ProviderEpisodeInfo
                 virtual_episode = ProviderEpisodeInfo(
                     provider=provider_name,
                     episodeIndex=1,

@@ -14,7 +14,7 @@ import httpx
 from fastapi import FastAPI
 
 # 复用 scraper_resources 中的工具函数
-from ..api.endpoints.scraper_resources import (
+from ..api.ui.scraper_resources import (
     parse_github_url,
     parse_gitee_url,
     _build_base_url,
@@ -281,7 +281,7 @@ async def _perform_update(
                         logger.warning(f"备份资源失败: {backup_error}")
 
                     # 检查是否有 Docker socket
-                    from ..docker_utils import is_docker_socket_available, restart_container
+                    from src.utils.docker_utils import is_docker_socket_available, restart_container
                     import sys
                     docker_available = is_docker_socket_available()
 
@@ -322,7 +322,7 @@ async def _perform_update(
                         logger.warning("⚠️ 未检测到 Docker 套接字，请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
 
                     # 清除版本缓存
-                    import src.api.endpoints.scraper_resources as sr
+                    import src.api.ui.scraper_resources as sr
                     sr._version_cache = None
                     sr._version_cache_time = None
                     return
@@ -377,7 +377,7 @@ async def _perform_update(
             logger.warning(f"有 {len(failed_downloads)} 个文件下载失败: {failed_downloads}")
             logger.warning("由于存在下载失败，不更新版本信息，不执行重启")
             # 清除版本缓存
-            import src.api.endpoints.scraper_resources as sr
+            import src.api.ui.scraper_resources as sr
             sr._version_cache = None
             sr._version_cache_time = None
             return  # 有失败则不继续执行
@@ -386,7 +386,7 @@ async def _perform_update(
         if download_count == 0:
             logger.info(f"没有新文件需要下载 (跳过: {skip_count})")
             # 清除版本缓存
-            import src.api.endpoints.scraper_resources as sr
+            import src.api.ui.scraper_resources as sr
             sr._version_cache = None
             sr._version_cache_time = None
             return
@@ -427,7 +427,7 @@ async def _perform_update(
         else:
             # 非首次下载：不保存版本信息到 scrapers 目录，版本信息只在备份中
             # 根据是否有 Docker socket 决定重启方式
-            from ..docker_utils import is_docker_socket_available, restart_container
+            from src.utils.docker_utils import is_docker_socket_available, restart_container
             import sys
             docker_available = is_docker_socket_available()
 
@@ -457,7 +457,7 @@ async def _perform_update(
                 logger.warning("⚠️ 未检测到 Docker 套接字，请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
 
         # 清除版本缓存
-        import src.api.endpoints.scraper_resources as sr
+        import src.api.ui.scraper_resources as sr
         sr._version_cache = None
         sr._version_cache_time = None
 

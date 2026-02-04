@@ -7,14 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy import select
 import httpx
 
-from .. import crud, models
+from src.db import crud, models
 from .base import BaseJob
-from ..rate_limiter import RateLimiter
-from ..task_manager import TaskManager, TaskSuccess
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
+from src.rate_limiter import RateLimiter
+from src.services import TaskManager, TaskSuccess, ScraperManager, MetadataSourceManager
+from src.ai import AIMatcherManager
+from src.ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT
 
 class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoScrape"
@@ -76,7 +74,7 @@ class TmdbAutoMapJob(BaseJob):
             self.logger.warning(f"初始化AI matcher失败: {e}, 将使用传统搜索")
 
         # 获取所有作品(TV系列和电影/剧场版)
-        from ..orm_models import Anime, AnimeMetadata
+        from src.db.orm_models import Anime, AnimeMetadata
         stmt = (
             select(
                 Anime.id.label("animeId"),

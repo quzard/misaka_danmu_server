@@ -5,10 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession # type: ignore
 from sqlalchemy import select, func
 
 from fastapi import HTTPException, status
-from .. import crud, orm_models
+from src.db import crud, orm_models
 from .base import BaseJob
-from ..task_manager import TaskSuccess
-from ..tasks import generic_import_task
+from src.services import TaskSuccess
+from src.tasks import generic_import_task
 
 
 class IncrementalRefreshJob(BaseJob):

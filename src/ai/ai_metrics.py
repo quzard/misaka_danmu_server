@@ -94,7 +94,7 @@ class AIMetricsCollector:
         try:
             async with self._write_lock:
                 async with self._db_session_factory() as session:
-                    from ..crud.ai_metrics import create_ai_metrics_log
+                    from src.db.crud.ai_metrics import create_ai_metrics_log
                     await create_ai_metrics_log(
                         session=session,
                         timestamp=metric.timestamp,

@@ -8,23 +8,30 @@ from sqlalchemy import select
 from thefuzz import fuzz
 from fastapi import HTTPException
 
-from .. import crud, models, orm_models
-from ..orm_models import AnimeSource as AS
-from ..config_manager import ConfigManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..task_manager import TaskManager, TaskSuccess
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
-from ..search_utils import unified_search
-from ..timezone import get_now
-from ..utils import parse_search_keyword
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..season_mapper import ai_type_and_season_mapping_and_correction
-from ..search_timer import SearchTimer, SEARCH_TYPE_WEBHOOK
-from ..name_converter import convert_to_chinese_title
+from src.db import crud, models, orm_models, ConfigManager
+from src.core import get_now
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.ai import AIMatcherManager
+from src.rate_limiter import RateLimiter
+from src.utils import (
+    parse_search_keyword, ai_type_and_season_mapping_and_correction,
+    SearchTimer, SEARCH_TYPE_WEBHOOK
+)
+
+# ORM 模型别名
+AnimeSource = orm_models.AnimeSource
 
 logger = logging.getLogger(__name__)
+
+
+# 延迟导入辅助函数
+def _get_unified_search():
+    from src.services.search import unified_search
+    return unified_search
+
+def _get_convert_to_chinese_title():
+    from src.services.name_converter import convert_to_chinese_title
+    return convert_to_chinese_title
 
 
 # 延迟导入辅助函数
@@ -214,6 +221,7 @@ async def webhook_search_and_dispatch_task(
         # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在预处理规则之前执行）
         # 创建一个虚拟用户用于元数据调用
         webhook_user = models.User(id=0, username="webhook")
+        convert_to_chinese_title = _get_convert_to_chinese_title()
         converted_title, conversion_applied = await convert_to_chinese_title(
             original_title,
             config_manager,
@@ -221,9 +229,15 @@ async def webhook_search_and_dispatch_task(
             ai_matcher_manager,
             webhook_user
         )
+        # 🔧 用于匹配和排序的标题：
+        # - 如果名称转换开关开启且转换成功，使用转换后的标题
+        # - 否则使用原始标题（animeTitle）
         if conversion_applied:
             logger.info(f"✓ Webhook 名称转换: '{original_title}' → '{converted_title}'")
-            original_title = converted_title  # 更新 original_title 用于后续处理
+            original_title = converted_title  # 更新 original_title 用于后续搜索
+            match_title = converted_title     # 使用转换后的标题进行匹配
+        else:
+            match_title = animeTitle          # 使用原始标题进行匹配
 
         # 应用与 WebUI 一致的标题预处理规则
         search_title = original_title
@@ -268,6 +282,7 @@ async def webhook_search_and_dispatch_task(
 
         timer.step_start("统一搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
+        unified_search = _get_unified_search()
         all_search_results = await unified_search(
             search_term=search_title,
             session=session,
@@ -282,7 +297,7 @@ async def webhook_search_and_dispatch_task(
             alias_similarity_threshold=70,
         )
         # 收集单源搜索耗时信息
-        from ..search_timer import SubStepTiming
+        from src.utils.search_timer import SubStepTiming
         source_timing_sub_steps = [
             SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
             for name, dur, cnt in manager.last_search_timing
@@ -291,7 +306,7 @@ async def webhook_search_and_dispatch_task(
 
         if not all_search_results:
             timer.finish()  # 打印计时报告
-            raise ValueError(f"未找到 '{animeTitle}' 的任何可用源。")
+            raise ValueError(f"未找到 '{match_title}' 的任何可用源。")
 
         # 使用统一的AI类型和季度映射修正函数
         if webhook_tmdb_enabled.lower() == "true":
@@ -379,21 +394,22 @@ async def webhook_search_and_dispatch_task(
 
         # 使用与WebUI相同的智能排序逻辑，优化年份权重
         # 🔧 使用 effective_year（数据库年份优先）进行排序，而不是 webhook 传来的 year
+        # 🔧 使用 match_title（名称转换后的标题）进行匹配，而不是原始的 animeTitle
         all_search_results.sort(
             key=lambda item: (
                 # 1. 最高优先级：完全匹配的标题
-                10000 if item.title.strip() == animeTitle.strip() else 0,
+                10000 if item.title.strip() == match_title.strip() else 0,
                 # 2. 次高优先级：去除标点符号后的完全匹配
-                5000 if item.title.replace("：", ":").replace(" ", "").strip() == animeTitle.replace("：", ":").replace(" ", "").strip() else 0,
+                5000 if item.title.replace("：", ":").replace(" ", "").strip() == match_title.replace("：", ":").replace(" ", "").strip() else 0,
                 # 3. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
-                2000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 98 and abs(len(item.title) - len(animeTitle)) <= 10) else 0,
+                2000 if (fuzz.token_sort_ratio(match_title, item.title) > 98 and abs(len(item.title) - len(match_title)) <= 10) else 0,
                 # 4. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
-                1000 if (fuzz.token_sort_ratio(animeTitle, item.title) > 95 and abs(len(item.title) - len(animeTitle)) <= 20) else 0,
+                1000 if (fuzz.token_sort_ratio(match_title, item.title) > 95 and abs(len(item.title) - len(match_title)) <= 20) else 0,
                 # 5. 🔧 长期连载作品优先：标题完全匹配 + 搜索结果年份比 webhook 年份早 3 年以上
                 # 理由：长期连载的作品（如从2020年播到2025年），webhook 传来的是单集年份（2025），
                 # 而搜索结果中年份更早的版本（2020）更可能是用户想要的原版
                 800 if (
-                    item.title.strip() == animeTitle.strip() and
+                    item.title.strip() == match_title.strip() and
                     effective_year is not None and
                     item.year is not None and
                     effective_year - item.year >= 3
@@ -403,9 +419,9 @@ async def webhook_search_and_dispatch_task(
                 # 7. 季度匹配（仅对电视剧）
                 100 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
                 # 8. 一般相似度，但必须达到85%以上才考虑
-                fuzz.token_set_ratio(animeTitle, item.title) if fuzz.token_set_ratio(animeTitle, item.title) >= 85 else 0,
+                fuzz.token_set_ratio(match_title, item.title) if fuzz.token_set_ratio(match_title, item.title) >= 85 else 0,
                 # 9. 惩罚标题长度差异大的结果
-                -abs(len(item.title) - len(animeTitle)),
+                -abs(len(item.title) - len(match_title)),
                 # 10. 惩罚年份不匹配的结果（使用 effective_year）
                 -500 if effective_year is not None and item.year is not None and item.year != effective_year else 0,
                 # 11. 最后考虑源优先级
@@ -415,19 +431,19 @@ async def webhook_search_and_dispatch_task(
         )
 
         # 添加排序后的调试日志
-        logger.info(f"Webhook 任务: 排序后的前5个结果 (effective_year={effective_year}):")
+        logger.info(f"Webhook 任务: 排序后的前5个结果 (effective_year={effective_year}, match_title='{match_title}'):")
         for i, item in enumerate(all_search_results[:5]):
-            title_match = "✓" if item.title.strip() == animeTitle.strip() else "✗"
+            title_match = "✓" if item.title.strip() == match_title.strip() else "✗"
             year_match = "✓" if effective_year is not None and item.year is not None and item.year == effective_year else ("✗" if effective_year is not None and item.year is not None else "-")
             # 检查是否为长期连载作品（年份差>=3年）
             is_long_running = (
-                item.title.strip() == animeTitle.strip() and
+                item.title.strip() == match_title.strip() and
                 effective_year is not None and
                 item.year is not None and
                 effective_year - item.year >= 3
             )
             long_running_mark = "📺" if is_long_running else ""
-            similarity = fuzz.token_set_ratio(animeTitle, item.title)
+            similarity = fuzz.token_set_ratio(match_title, item.title)
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}")
 
@@ -442,8 +458,9 @@ async def webhook_search_and_dispatch_task(
             logger.info("Webhook 任务: AI匹配已启用")
             try:
                 # 构建查询信息（使用 effective_year 而不是 webhook 的 year）
+                # 🔧 使用 match_title（名称转换后的标题）进行 AI 匹配
                 query_info = {
-                    'title': animeTitle,
+                    'title': match_title,
                     'season': season if mediaType == 'tv_series' else None,
                     'episode': currentEpisodeIndex,
                     'year': effective_year,  # 使用数据库年份优先
@@ -456,10 +473,10 @@ async def webhook_search_and_dispatch_task(
                 for result in all_search_results:
                     # 查找是否有相同provider和mediaId的源被标记
                     stmt = (
-                        select(AS.isFavorited)
+                        select(AnimeSource.isFavorited)
                         .where(
-                            AS.providerName == result.provider,
-                            AS.mediaId == result.mediaId
+                            AnimeSource.providerName == result.provider,
+                            AnimeSource.mediaId == result.mediaId
                         )
                         .limit(1)
                     )
@@ -552,10 +569,10 @@ async def webhook_search_and_dispatch_task(
         for result in all_search_results:
             # 查找是否有相同provider和mediaId的源被标记
             stmt = (
-                select(AS.isFavorited)
+                select(AnimeSource.isFavorited)
                 .where(
-                    AS.providerName == result.provider,
-                    AS.mediaId == result.mediaId
+                    AnimeSource.providerName == result.provider,
+                    AnimeSource.mediaId == result.mediaId
                 )
                 .limit(1)
             )
@@ -563,8 +580,9 @@ async def webhook_search_and_dispatch_task(
             is_favorited = result_row.scalar_one_or_none()
             if is_favorited:
                 # 验证类型匹配和标题相似度
+                # 🔧 使用 match_title（名称转换后的标题）进行相似度计算
                 type_matched = result.type == target_type
-                similarity = fuzz.token_set_ratio(animeTitle, result.title)
+                similarity = fuzz.token_set_ratio(match_title, result.title)
                 logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} "
                            f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
@@ -587,8 +605,9 @@ async def webhook_search_and_dispatch_task(
             # 顺延机制关闭，验证第一个结果是否满足条件
             if all_search_results:
                 first_result = all_search_results[0]
+                # 🔧 使用 match_title（名称转换后的标题）进行相似度计算
                 type_matched = first_result.type == target_type
-                similarity = fuzz.token_set_ratio(animeTitle, first_result.title)
+                similarity = fuzz.token_set_ratio(match_title, first_result.title)
 
                 # 必须满足：类型匹配 AND 相似度 >= 70%
                 if type_matched and similarity >= 70:

@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ValidationError, field_validator
 
-from .. import crud, models
+from src.db import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
 
 logger = logging.getLogger(__name__)

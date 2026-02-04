@@ -7,10 +7,13 @@ import logging
 import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-from ..models import ProviderSearchInfo
+from src.db import models
 from .ai_metrics import AIMetricsCollector, AICallMetrics
 from .ai_cache import AIResponseCache
 from .ai_providers import get_provider_config, is_provider_supported
+
+# 从 models 导入需要的类
+ProviderSearchInfo = models.ProviderSearchInfo
 
 logger = logging.getLogger(__name__)
 ai_responses_logger = logging.getLogger("ai_responses")
@@ -1122,7 +1125,7 @@ class AIMatcher:
 
         try:
             # V2.1.6: 先使用算法相似度匹配
-            from ..season_mapper import title_contains_season_name
+            from src.utils.season_mapper import title_contains_season_name
 
             best_confidence = 0.0
             best_season = None

@@ -2,27 +2,31 @@
 import asyncio
 import logging
 import traceback
-from typing import Callable, Optional, Dict, Any
+from typing import Callable, Optional, Dict, Any, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import AsyncSession
 from thefuzz import fuzz
 
-from .. import crud, models
-from ..config_manager import ConfigManager
-from ..ai.ai_matcher_manager import AIMatcherManager
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
-from ..task_manager import TaskManager, TaskSuccess
-from ..rate_limiter import RateLimiter
-from ..title_recognition import TitleRecognitionManager
-from ..search_utils import unified_search
-from ..season_mapper import ai_type_and_season_mapping_and_correction
-from ..search_timer import SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT
-from ..name_converter import convert_to_chinese_title
+from src.db import crud, models, ConfigManager
+from src.ai import AIMatcherManager
+from src.services import ScraperManager, MetadataSourceManager, TaskManager, TaskSuccess, TitleRecognitionManager
+from src.rate_limiter import RateLimiter
+from src.utils import (
+    ai_type_and_season_mapping_and_correction,
+    SearchTimer, SEARCH_TYPE_CONTROL_AUTO_IMPORT
+)
 
 logger = logging.getLogger(__name__)
 
 
 # 延迟导入辅助函数
+def _get_unified_search():
+    from src.services.search import unified_search
+    return unified_search
+
+def _get_convert_to_chinese_title():
+    from src.services.name_converter import convert_to_chinese_title
+    return convert_to_chinese_title
+
 def _get_parse_episode_ranges():
     from .utils import parse_episode_ranges
     return parse_episode_ranges
@@ -404,6 +408,7 @@ async def auto_search_and_import_task(
         # 🚀 名称转换功能 - 检测非中文标题并尝试转换为中文（在预处理规则之前执行）
         # 创建一个虚拟用户用于元数据调用
         auto_import_user = models.User(id=0, username="auto_import")
+        convert_to_chinese_title = _get_convert_to_chinese_title()
         converted_title, conversion_applied = await convert_to_chinese_title(
             main_title,
             config_manager,
@@ -472,6 +477,7 @@ async def auto_search_and_import_task(
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
         # 使用严格过滤模式和自定义别名
         # 外部控制API启用AI别名扩展（如果配置启用）
+        unified_search = _get_unified_search()
         all_results = await unified_search(
             search_term=search_title,
             session=session,
@@ -488,7 +494,7 @@ async def auto_search_and_import_task(
             alias_similarity_threshold=70,  # 使用 70% 别名相似度阈值（与 WebUI 一致）
         )
         # 收集单源搜索耗时信息
-        from ..search_timer import SubStepTiming
+        from src.utils.search_timer import SubStepTiming
         source_timing_sub_steps = [
             SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
             for name, dur, cnt in scraper_manager.last_search_timing
@@ -660,7 +666,7 @@ async def auto_search_and_import_task(
                 # 获取精确标记信息
                 favorited_info = {}
                 async with scraper_manager._session_factory() as ai_session:
-                    from ..orm_models import AnimeSource
+                    from src.db.orm_models import AnimeSource
                     from sqlalchemy import select
 
                     for result in all_results:

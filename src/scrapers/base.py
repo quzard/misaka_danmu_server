@@ -9,13 +9,13 @@ from functools import wraps
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..transport_manager import TransportManager
+from src.db import crud
+from src.db import models
 
-from .. import crud
-from .. import models
+from src.utils import TransportManager
 
 if TYPE_CHECKING:
-    from ..config_manager import ConfigManager
+    from src.db import ConfigManager
 
 def _roman_to_int(s: str) -> int:
     """将罗马数字字符串转换为整数。"""
@@ -55,10 +55,13 @@ def get_season_from_title(title: str) -> int:
         (re.compile(r"([一二三四五六七八九十壹贰叁肆伍陆柒捌玖拾])\s*之\s*章", re.I),
          lambda m: chinese_num_map.get(m.group(1))),
         # 格式: Unicode 罗马数字, e.g., Ⅲ
-        (re.compile(r"\s+([Ⅰ-Ⅻ])(?=\s|$)", re.I), 
+        (re.compile(r"\s+([Ⅰ-Ⅻ])(?=\s|$)", re.I),
          lambda m: {'Ⅰ': 1, 'Ⅱ': 2, 'Ⅲ': 3, 'Ⅳ': 4, 'Ⅴ': 5, 'Ⅵ': 6, 'Ⅶ': 7, 'Ⅷ': 8, 'Ⅸ': 9, 'Ⅹ': 10, 'Ⅺ': 11, 'Ⅻ': 12}.get(m.group(1).upper())),
         # 格式: ASCII 罗马数字, e.g., III
         (re.compile(r"\s+([IVXLCDM]+)\b", re.I), lambda m: _roman_to_int(m.group(1))),
+        # 格式: 标题末尾的阿拉伯数字, e.g., 刀剑神域2, 模范出租车3
+        # 匹配非数字字符后跟1-2位数字结尾，排除年份(4位数字)
+        (re.compile(r"[^\d](\d{1,2})\s*$"), lambda m: int(m.group(1)) if 1 <= int(m.group(1)) <= 20 else None),
     ]
 
     for pattern, handler in patterns:
