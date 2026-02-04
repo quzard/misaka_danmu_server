@@ -121,11 +121,19 @@ export function ThemeProvider({ children }) {
         borderRadius: 8,
         borderColor: '#FFD9E5',
         hoverBorderColor: '#FF6B9B',
+        colorBgContainer: '#FFF0F5',
+      },
+      InputNumber: {
+        colorBgContainer: '#FFF0F5',
+      },
+      Select: {
+        colorBgContainer: '#FFF0F5',
+        colorBgElevated: '#FFFFFF',
       },
       Modal: {
-        contentBg: '#FFFFFF',
-        headerBg: '#FFFFFF',
-        footerBg: '#FFFFFF',
+        contentBg: '#FFF9FB',
+        headerBg: '#FFF9FB',
+        footerBg: '#FFF9FB',
       },
     },
   }

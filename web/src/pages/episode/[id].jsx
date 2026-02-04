@@ -1540,7 +1540,7 @@ export const EpisodeDetail = () => {
         <Form form={form} layout="horizontal">
           {/* 自定义源 URL 导入模式 */}
           {isXmlImport && !isEditing && manualImportMode === 'url' && (
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
               <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
                 <LinkOutlined className="mr-1" />
                 输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源
@@ -1609,7 +1609,7 @@ export const EpisodeDetail = () => {
 
           {/* 非自定义源且非编辑模式时，显示URL解析功能 */}
           {!isXmlImport && !isEditing && (
-            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <div className="mb-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
               <div className="text-gray-500 dark:text-gray-400 text-sm mb-2">
                 <LinkOutlined className="mr-1" />
                 输入 {sourceInfo?.providerName} 平台的视频URL，可自动解析标题
