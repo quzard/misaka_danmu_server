@@ -122,6 +122,11 @@ export function ThemeProvider({ children }) {
         borderColor: '#FFD9E5',
         hoverBorderColor: '#FF6B9B',
       },
+      Modal: {
+        contentBg: '#FFFFFF',
+        headerBg: '#FFFFFF',
+        footerBg: '#FFFFFF',
+      },
     },
   }
 
@@ -177,10 +182,13 @@ export function ThemeProvider({ children }) {
         colorBorder: '#334155',
         borderRadius: 8,
         headerBg: '#273449',
+        rowHoverBg: '#273449',
+        colorBgContainer: '#1E293B',
       },
       List: {
         colorBorder: '#334155',
         itemHoverBg: '#273449',
+        colorSplit: '#334155',
       },
       Form: {
         colorBorder: '#334155',
@@ -190,6 +198,11 @@ export function ThemeProvider({ children }) {
         borderRadius: 8,
         borderColor: '#334155',
         hoverBorderColor: '#FF6B9B',
+      },
+      Modal: {
+        contentBg: '#1E293B',
+        headerBg: '#1E293B',
+        footerBg: '#1E293B',
       },
     },
   }

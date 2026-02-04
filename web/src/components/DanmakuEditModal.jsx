@@ -82,12 +82,12 @@ const SortableMergeItem = ({ item, index, onOffsetChange, onRemove }) => {
       className="flex items-center gap-3 p-3 mb-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
     >
       <div {...attributes} {...listeners} className="cursor-grab">
-        <HolderOutlined className="text-gray-400" />
+        <HolderOutlined className="text-gray-400 dark:text-gray-500" />
       </div>
       <div className="flex-1">
         <div className="font-medium">第{item.episodeIndex}集</div>
-        <div className="text-sm text-gray-500 truncate">{item.title}</div>
-        <div className="text-xs text-gray-400">弹幕: {item.commentCount}条</div>
+        <div className="text-sm text-gray-500 dark:text-gray-400 truncate">{item.title}</div>
+        <div className="text-xs text-gray-400 dark:text-gray-500">弹幕: {item.commentCount}条</div>
       </div>
       <div className="flex items-center gap-2">
         <span className="text-sm">偏移:</span>
@@ -354,12 +354,13 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
   // 渲染弹幕详情标签页
   const renderDetailTab = () => (
     <div className="space-y-4">
-      <div className="flex items-center gap-4">
-        <span>选择分集：</span>
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <span className="shrink-0">选择分集：</span>
         <Select
           value={selectedDetailEpisode}
           onChange={setSelectedDetailEpisode}
-          style={{ width: 300 }}
+          className="flex-1 min-w-[200px]"
+          style={{ maxWidth: 300 }}
           options={episodes?.map((e) => ({
             value: e.episodeId,
             label: `第${e.episodeIndex}集 - ${e.title} (${e.commentCount}条)`,
@@ -431,7 +432,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
           {/* 弹幕预览 */}
           <div>
             <div className="text-sm font-medium mb-2">弹幕预览（前100条）</div>
-            <div className="max-h-60 overflow-y-auto border rounded dark:border-gray-700">
+            <div className="max-h-60 overflow-y-auto border rounded border-gray-200 dark:border-gray-700">
               <Table
                 dataSource={detailData.comments}
                 columns={[
@@ -472,7 +473,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
 
       <div>
         <div className="text-sm font-medium mb-2">选择分集</div>
-        <div className="max-h-60 overflow-y-auto border rounded p-2 dark:border-gray-700">
+        <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
           <Checkbox
             checked={offsetEpisodes.length === episodes?.length}
             indeterminate={offsetEpisodes.length > 0 && offsetEpisodes.length < episodes?.length}
@@ -508,15 +509,15 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <span>偏移秒数：</span>
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <span className="shrink-0">偏移秒数：</span>
         <InputNumber
           value={offsetValue}
           onChange={setOffsetValue}
           addonAfter="秒"
           style={{ width: 150 }}
         />
-        <span className="text-gray-500 text-sm">
+        <span className="text-gray-500 dark:text-gray-400 text-sm">
           {offsetValue > 0 ? '弹幕将延后出现' : offsetValue < 0 ? '弹幕将提前出现' : ''}
         </span>
       </div>
@@ -542,15 +543,16 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         将一个分集的弹幕按时间范围拆分到多个新分集。适用于合集视频拆分为单集。
       </div>
 
-      <div className="flex items-center gap-4">
-        <span>源分集：</span>
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <span className="shrink-0">源分集：</span>
         <Select
           value={splitSourceEpisode}
           onChange={(val) => {
             setSplitSourceEpisode(val)
             setSplitConfigs([])
           }}
-          style={{ width: 300 }}
+          className="flex-1 min-w-[200px]"
+          style={{ maxWidth: 300 }}
           placeholder="选择要拆分的分集"
           options={episodes?.map((e) => ({
             value: e.episodeId,
@@ -575,44 +577,48 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
           {splitConfigs.map((config, index) => (
             <div
               key={config.id}
-              className="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-800 rounded"
+              className="p-3 bg-gray-50 dark:bg-gray-800 rounded"
             >
-              <span className="w-16">新分集{index + 1}</span>
-              <InputNumber
-                value={config.episodeIndex}
-                onChange={(val) => updateSplitConfig(config.id, 'episodeIndex', val)}
-                addonBefore="集数"
-                style={{ width: 100 }}
-                min={1}
-              />
-              <InputNumber
-                value={config.startTime}
-                onChange={(val) => updateSplitConfig(config.id, 'startTime', val)}
-                addonBefore="开始"
-                addonAfter="秒"
-                style={{ width: 140 }}
-                min={0}
-              />
-              <InputNumber
-                value={config.endTime}
-                onChange={(val) => updateSplitConfig(config.id, 'endTime', val)}
-                addonBefore="结束"
-                addonAfter="秒"
-                style={{ width: 140 }}
-                min={0}
-              />
-              <Input
-                value={config.title}
-                onChange={(e) => updateSplitConfig(config.id, 'title', e.target.value)}
-                placeholder="标题"
-                style={{ width: 150 }}
-              />
-              <Button
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => removeSplitConfig(config.id)}
-              />
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-medium text-sm">新分集 {index + 1}</span>
+                <Button
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => removeSplitConfig(config.id)}
+                />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <InputNumber
+                  value={config.episodeIndex}
+                  onChange={(val) => updateSplitConfig(config.id, 'episodeIndex', val)}
+                  addonBefore="集数"
+                  className="w-full"
+                  min={1}
+                />
+                <InputNumber
+                  value={config.startTime}
+                  onChange={(val) => updateSplitConfig(config.id, 'startTime', val)}
+                  addonBefore="开始"
+                  addonAfter="秒"
+                  className="w-full"
+                  min={0}
+                />
+                <InputNumber
+                  value={config.endTime}
+                  onChange={(val) => updateSplitConfig(config.id, 'endTime', val)}
+                  addonBefore="结束"
+                  addonAfter="秒"
+                  className="w-full"
+                  min={0}
+                />
+                <Input
+                  value={config.title}
+                  onChange={(e) => updateSplitConfig(config.id, 'title', e.target.value)}
+                  placeholder="标题"
+                  className="w-full"
+                />
+              </div>
             </div>
           ))}
           {splitConfigs.length === 0 && (
@@ -621,7 +627,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Checkbox checked={splitDeleteSource} onChange={(e) => setSplitDeleteSource(e.target.checked)}>
           删除原分集
         </Checkbox>
@@ -655,7 +661,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 左侧：可选分集 */}
         <div>
           <div className="text-sm font-medium mb-2">可选分集</div>
-          <div className="max-h-60 overflow-y-auto border rounded p-2 dark:border-gray-700">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
             {availableMergeEpisodes.length > 0 ? (
               availableMergeEpisodes.map((ep) => (
                 <div
@@ -665,7 +671,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
                 >
                   <div>
                     <div className="font-medium">第{ep.episodeIndex}集</div>
-                    <div className="text-sm text-gray-500 truncate">{ep.title}</div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 truncate">{ep.title}</div>
                   </div>
                   <Button size="small" icon={<PlusOutlined />} />
                 </div>
@@ -679,7 +685,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 右侧：已选分集（可拖拽排序） */}
         <div>
           <div className="text-sm font-medium mb-2">合并顺序（可拖拽调整）</div>
-          <div className="max-h-60 overflow-y-auto">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/50">
             {mergeEpisodes.length > 0 ? (
               <DndContext
                 sensors={sensors}
@@ -711,27 +717,28 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
       {/* 目标配置 */}
       <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded space-y-3">
         <div className="text-sm font-medium">目标分集配置</div>
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex items-center gap-2">
-            <span>集数：</span>
+            <span className="shrink-0">集数：</span>
             <InputNumber
               value={mergeTargetIndex}
               onChange={setMergeTargetIndex}
               min={1}
-              style={{ width: 80 }}
+              className="w-full"
+              style={{ maxWidth: 100 }}
             />
           </div>
-          <div className="flex items-center gap-2 flex-1">
-            <span>标题：</span>
+          <div className="flex items-center gap-2">
+            <span className="shrink-0">标题：</span>
             <Input
               value={mergeTargetTitle}
               onChange={(e) => setMergeTargetTitle(e.target.value)}
               placeholder="输入合并后的标题"
-              style={{ maxWidth: 300 }}
+              className="flex-1"
             />
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <Checkbox checked={mergeDeleteSources} onChange={(e) => setMergeDeleteSources(e.target.checked)}>
             删除原分集
           </Checkbox>

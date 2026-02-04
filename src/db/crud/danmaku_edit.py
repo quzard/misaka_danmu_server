@@ -293,6 +293,22 @@ async def split_episode_danmaku(
     provider_name = source_episode.source.providerName if source_episode.source else "misaka"
     new_episodes = []
 
+    # 预先检查所有目标集数是否已存在
+    target_indices = [s["episodeIndex"] for s in splits]
+    # 如果删除源分集，排除源分集的集数
+    exclude_ids = [source_episode_id] if delete_source else []
+    existing_check = await session.execute(
+        select(Episode).where(
+            Episode.sourceId == source_id,
+            Episode.episodeIndex.in_(target_indices),
+            Episode.id.notin_(exclude_ids) if exclude_ids else True
+        )
+    )
+    existing_episodes = existing_check.scalars().all()
+    if existing_episodes:
+        existing_indices = [e.episodeIndex for e in existing_episodes]
+        return {"success": False, "error": f"集数 {existing_indices} 已存在，请选择其他集数"}
+
     for split_config in splits:
         episode_index = split_config["episodeIndex"]
         start_time = split_config["startTime"]
@@ -461,15 +477,49 @@ async def merge_episodes_danmaku(
     # 按时间排序
     all_comments.sort(key=lambda x: x.get('t', 0))
 
-    # 创建新分集
-    new_episode = Episode(
-        sourceId=source_id,
-        episodeIndex=target_episode_index,
-        title=target_title,
-        commentCount=len(all_comments)
-    )
-    session.add(new_episode)
-    await session.flush()
+    # 检查目标集数是否与某个源分集的集数相同（可以复用）
+    reuse_episode = None
+    if delete_sources:
+        for episode, _ in episodes_to_delete:
+            if episode.episodeIndex == target_episode_index:
+                reuse_episode = episode
+                break
+
+    if reuse_episode:
+        # 复用已有分集，更新其信息
+        new_episode = reuse_episode
+        new_episode.title = target_title
+        new_episode.commentCount = len(all_comments)
+
+        # 从删除列表中移除（因为要复用）
+        episodes_to_delete = [(e, p) for e, p in episodes_to_delete if e.id != reuse_episode.id]
+
+        logger.info(f"复用已有分集: episode_id={new_episode.id}, index={target_episode_index}")
+    else:
+        # 检查目标集数是否已存在（排除将被删除的源分集）
+        source_episode_ids = [e.id for e, _ in episodes_to_delete] if delete_sources else []
+        existing_check = await session.execute(
+            select(Episode).where(
+                Episode.sourceId == source_id,
+                Episode.episodeIndex == target_episode_index,
+                Episode.id.notin_(source_episode_ids) if source_episode_ids else True
+            )
+        )
+        existing_episode = existing_check.scalar_one_or_none()
+        if existing_episode:
+            return {"success": False, "error": f"目标集数 {target_episode_index} 已存在，请选择其他集数"}
+
+        # 创建新分集
+        new_episode = Episode(
+            sourceId=source_id,
+            episodeIndex=target_episode_index,
+            title=target_title,
+            commentCount=len(all_comments)
+        )
+        session.add(new_episode)
+        await session.flush()
+
+        logger.info(f"合并创建新分集: episode_id={new_episode.id}, index={target_episode_index}")
 
     # 生成弹幕文件路径
     web_path, file_path = await _generate_danmaku_path(session, new_episode, config_manager)
@@ -481,8 +531,6 @@ async def merge_episodes_danmaku(
 
     # 更新分集信息
     await update_episode_danmaku_info(session, new_episode.id, web_path, len(all_comments))
-
-    logger.info(f"合并创建新分集: episode_id={new_episode.id}, index={target_episode_index}, comments={len(all_comments)}")
 
     # 删除源分集
     if delete_sources:
