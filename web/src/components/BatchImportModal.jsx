@@ -70,6 +70,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const [urlTitle, setUrlTitle] = useState('')
   const [urlSeason, setUrlSeason] = useState(1)
   const [urlMediaType, setUrlMediaType] = useState('tv_series')
+  const [urlEpisodeIndex, setUrlEpisodeIndex] = useState(1)  // 非自定义源URL导入时的集数
 
   const sensors = useSensors(
     useSensor(MouseSensor, {
@@ -101,6 +102,19 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     try {
       const res = await validateImportUrl({ url: urlInput.trim() })
       if (res.data) {
+        // 对于非自定义源，检查 URL 的 provider 是否匹配当前源
+        if (!isCustomSource && res.data.isValid) {
+          const currentProvider = sourceInfo?.providerName?.toLowerCase()
+          const urlProvider = res.data.provider?.toLowerCase()
+          if (currentProvider !== urlProvider) {
+            setUrlValidationResult({
+              isValid: false,
+              provider: res.data.provider,
+              errorMessage: `URL来源 (${res.data.provider}) 与当前源 (${sourceInfo?.providerName}) 不匹配，请输入 ${sourceInfo?.providerName} 平台的链接`
+            })
+            return
+          }
+        }
         setUrlValidationResult(res.data)
         if (res.data.isValid) {
           // 自动填充标题
@@ -133,13 +147,33 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
 
     setLoading(true)
     try {
-      const res = await importFromUrl({
-        url: urlInput.trim(),
-        provider: urlValidationResult.provider,
-        title: urlTitle || urlValidationResult.title,
-        media_type: urlMediaType,
-        season: urlSeason,
-      })
+      let res
+      if (isCustomSource) {
+        // 自定义源：使用 importFromUrl API 创建新的导入任务
+        res = await importFromUrl({
+          url: urlInput.trim(),
+          provider: urlValidationResult.provider,
+          title: urlTitle || urlValidationResult.title,
+          media_type: urlMediaType,
+          season: urlSeason,
+        })
+      } else {
+        // 非自定义源：使用 batchManualImport API 导入到已有源
+        // 需要用户输入集数
+        if (!urlEpisodeIndex || urlEpisodeIndex < 1) {
+          messageApi.warning('请输入有效的集数')
+          setLoading(false)
+          return
+        }
+        res = await batchManualImport({
+          sourceId: sourceInfo.sourceId,
+          items: [{
+            episodeIndex: urlEpisodeIndex,
+            content: urlInput.trim(),
+            title: urlTitle || urlValidationResult.title || undefined,
+          }]
+        })
+      }
       if (res.data) {
         messageApi.success(res.data.message || 'URL导入任务已提交')
         onSuccess(res.data)
@@ -160,6 +194,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
     setUrlTitle('')
     setUrlSeason(1)
     setUrlMediaType('tv_series')
+    setUrlEpisodeIndex(1)
   }
 
   const handleOk = async () => {
@@ -403,11 +438,17 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
   const renderUrlImport = () => (
     <div className="p-4">
       <div className="mb-4">
-        <div className="text-gray-500 mb-2">
-          输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源
+        <div className="text-gray-500 dark:text-gray-400 mb-2">
+          {isCustomSource
+            ? '输入其他平台的视频URL，系统将自动获取弹幕并导入到当前自定义源'
+            : `输入 ${sourceInfo?.providerName} 平台的视频URL，系统将自动获取弹幕`
+          }
         </div>
         <Input.Search
-          placeholder="请输入视频URL，如 https://www.XXXXX.com/bangumi/play/ss..."
+          placeholder={isCustomSource
+            ? '请输入视频URL，如 https://www.XXXXX.com/bangumi/play/ss...'
+            : `请输入 ${sourceInfo?.providerName} 的视频URL`
+          }
           value={urlInput}
           onChange={e => {
             setUrlInput(e.target.value)
@@ -425,24 +466,24 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
 
       {/* 校验结果显示 */}
       {urlValidationResult && (
-        <div className={`p-4 rounded-lg mb-4 ${urlValidationResult.isValid ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+        <div className={`p-4 rounded-lg mb-4 ${urlValidationResult.isValid ? 'bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-700' : 'bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700'}`}>
           {urlValidationResult.isValid ? (
             <div>
               <div className="flex items-center gap-2 mb-2">
                 <CheckCircleOutlined className="text-green-500" />
-                <span className="font-medium text-green-700">URL校验通过</span>
+                <span className="font-medium text-green-700 dark:text-green-400">URL校验通过</span>
               </div>
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-gray-500">平台：</span>{urlValidationResult.provider}</div>
-                <div><span className="text-gray-500">媒体ID：</span>{urlValidationResult.mediaId}</div>
+                <div><span className="text-gray-500 dark:text-gray-400">平台：</span><span className="dark:text-gray-200">{urlValidationResult.provider}</span></div>
+                <div><span className="text-gray-500 dark:text-gray-400">媒体ID：</span><span className="dark:text-gray-200">{urlValidationResult.mediaId}</span></div>
                 {urlValidationResult.title && (
-                  <div className="col-span-2"><span className="text-gray-500">标题：</span>{urlValidationResult.title}</div>
+                  <div className="col-span-2"><span className="text-gray-500 dark:text-gray-400">标题：</span><span className="dark:text-gray-200">{urlValidationResult.title}</span></div>
                 )}
                 {urlValidationResult.mediaType && (
-                  <div><span className="text-gray-500">类型：</span>{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</div>
+                  <div><span className="text-gray-500 dark:text-gray-400">类型：</span><span className="dark:text-gray-200">{urlValidationResult.mediaType === 'movie' ? '电影' : '剧集'}</span></div>
                 )}
                 {urlValidationResult.year && (
-                  <div><span className="text-gray-500">年份：</span>{urlValidationResult.year}</div>
+                  <div><span className="text-gray-500 dark:text-gray-400">年份：</span><span className="dark:text-gray-200">{urlValidationResult.year}</span></div>
                 )}
               </div>
               {urlValidationResult.imageUrl && (
@@ -454,7 +495,7 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
           ) : (
             <div className="flex items-center gap-2">
               <ExclamationCircleOutlined className="text-red-500" />
-              <span className="text-red-700">{urlValidationResult.errorMessage || 'URL校验失败'}</span>
+              <span className="text-red-700 dark:text-red-400">{urlValidationResult.errorMessage || 'URL校验失败'}</span>
             </div>
           )}
         </div>
@@ -462,37 +503,55 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
 
       {/* 导入参数设置 */}
       {urlValidationResult?.isValid && (
-        <div className="border rounded-lg p-4">
-          <div className="font-medium mb-3">导入设置</div>
+        <div className="border dark:border-gray-600 rounded-lg p-4">
+          <div className="font-medium mb-3 dark:text-gray-200">导入设置</div>
           <div className="grid grid-cols-2 gap-4">
+            {/* 非自定义源需要输入集数 */}
+            {!isCustomSource && (
+              <div>
+                <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">集数 <span className="text-red-500">*</span></div>
+                <InputNumber
+                  value={urlEpisodeIndex}
+                  onChange={setUrlEpisodeIndex}
+                  min={1}
+                  style={{ width: '100%' }}
+                  placeholder="请输入集数"
+                />
+              </div>
+            )}
             <div>
-              <div className="text-gray-500 text-sm mb-1">标题（可修改）</div>
+              <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">标题（可修改）</div>
               <Input
                 value={urlTitle}
                 onChange={e => setUrlTitle(e.target.value)}
                 placeholder="作品标题"
               />
             </div>
-            <div>
-              <div className="text-gray-500 text-sm mb-1">季度</div>
-              <InputNumber
-                value={urlSeason}
-                onChange={setUrlSeason}
-                min={1}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <div className="col-span-2">
-              <div className="text-gray-500 text-sm mb-1">媒体类型</div>
-              <Segmented
-                value={urlMediaType}
-                onChange={setUrlMediaType}
-                options={[
-                  { label: '剧集', value: 'tv_series' },
-                  { label: '电影', value: 'movie' },
-                ]}
-              />
-            </div>
+            {/* 自定义源显示季度和媒体类型 */}
+            {isCustomSource && (
+              <>
+                <div>
+                  <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">季度</div>
+                  <InputNumber
+                    value={urlSeason}
+                    onChange={setUrlSeason}
+                    min={1}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <div className="text-gray-500 dark:text-gray-400 text-sm mb-1">媒体类型</div>
+                  <Segmented
+                    value={urlMediaType}
+                    onChange={setUrlMediaType}
+                    options={[
+                      { label: '剧集', value: 'tv_series' },
+                      { label: '电影', value: 'movie' },
+                    ]}
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -513,28 +572,26 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
       }}
       width={importMode === 'url' ? 600 : 520}
     >
-      {/* 自定义源显示导入模式切换 */}
-      {isCustomSource && (
-        <div className="mb-4">
-          <Segmented
-            value={importMode}
-            onChange={value => {
-              setImportMode(value)
-              // 切换模式时清空状态
-              if (value === 'xml') {
-                clearUrlState()
-              } else {
-                clearAll()
-              }
-            }}
-            options={[
-              { label: <span><UploadOutlined className="mr-1" />XML文件导入</span>, value: 'xml' },
-              { label: <span><LinkOutlined className="mr-1" />URL导入</span>, value: 'url' },
-            ]}
-            block
-          />
-        </div>
-      )}
+      {/* 导入模式切换 - 所有源都显示 */}
+      <div className="mb-4">
+        <Segmented
+          value={importMode}
+          onChange={value => {
+            setImportMode(value)
+            // 切换模式时清空状态
+            if (value === 'xml') {
+              clearUrlState()
+            } else {
+              clearAll()
+            }
+          }}
+          options={[
+            { label: <span><UploadOutlined className="mr-1" />{isCustomSource ? 'XML文件导入' : 'XML/URL导入'}</span>, value: 'xml' },
+            { label: <span><LinkOutlined className="mr-1" />URL导入</span>, value: 'url' },
+          ]}
+          block
+        />
+      </div>
 
       {/* URL导入模式 */}
       {importMode === 'url' ? (
@@ -558,7 +615,10 @@ export const BatchImportModal = ({ open, sourceInfo, onCancel, onSuccess }) => {
                   <div className="ml-2">或直接拖拽文件到此处</div>
                 </div>
                 <div className="mt-2">
-                  支持批量上传，仅接受.xml格式文件
+                  {isCustomSource
+                    ? '支持批量上传，仅接受.xml格式文件'
+                    : `支持批量上传，接受.xml格式文件或 ${sourceInfo?.providerName} 的视频URL`
+                  }
                 </div>
               </div>
             </Upload>
