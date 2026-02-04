@@ -78,8 +78,8 @@ const SortableMergeItem = ({ item, index, onOffsetChange, onRemove }) => {
   return (
     <div
       ref={setNodeRef}
-      style={style}
-      className="flex items-center gap-3 p-3 mb-2 bg-gray-50 dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700"
+      style={{ ...style, backgroundColor: 'var(--color-hover)' }}
+      className="flex items-center gap-3 p-3 mb-2 rounded border border-gray-200 dark:border-gray-700"
     >
       <div {...attributes} {...listeners} className="cursor-grab">
         <HolderOutlined className="text-gray-400 dark:text-gray-500" />
@@ -473,7 +473,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
 
       <div>
         <div className="text-sm font-medium mb-2">选择分集</div>
-        <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+        <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700" style={{ backgroundColor: 'var(--color-hover)' }}>
           <Checkbox
             checked={offsetEpisodes.length === episodes?.length}
             indeterminate={offsetEpisodes.length > 0 && offsetEpisodes.length < episodes?.length}
@@ -577,7 +577,8 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
           {splitConfigs.map((config, index) => (
             <div
               key={config.id}
-              className="p-3 bg-gray-50 dark:bg-gray-800 rounded"
+              className="p-3 rounded"
+              style={{ backgroundColor: 'var(--color-hover)' }}
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="font-medium text-sm">新分集 {index + 1}</span>
@@ -661,7 +662,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 左侧：可选分集 */}
         <div>
           <div className="text-sm font-medium mb-2">可选分集</div>
-          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700" style={{ backgroundColor: 'var(--color-hover)' }}>
             {availableMergeEpisodes.length > 0 ? (
               availableMergeEpisodes.map((ep) => (
                 <div
@@ -685,7 +686,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
         {/* 右侧：已选分集（可拖拽排序） */}
         <div>
           <div className="text-sm font-medium mb-2">合并顺序（可拖拽调整）</div>
-          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+          <div className="max-h-60 overflow-y-auto border rounded p-2 border-gray-200 dark:border-gray-700" style={{ backgroundColor: 'var(--color-hover)' }}>
             {mergeEpisodes.length > 0 ? (
               <DndContext
                 sensors={sensors}
@@ -715,7 +716,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
       </div>
 
       {/* 目标配置 */}
-      <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded space-y-3">
+      <div className="p-3 rounded space-y-3" style={{ backgroundColor: 'var(--color-hover)' }}>
         <div className="text-sm font-medium">目标分集配置</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div className="flex items-center gap-2">
