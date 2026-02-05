@@ -1606,7 +1606,12 @@ async def download_progress_stream(
 
             # 任务完成则退出
             if current_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                logger.info(f"[SSE] 任务 {task_id} 状态为 {current_task.status.value}，准备发送 done 消息")
+                # 等待一小段时间，确保前端有时间处理最后的 progress 消息
+                await asyncio.sleep(0.1)
+                logger.info(f"[SSE] 任务 {task_id} 发送 done 消息")
                 yield f"data: {json.dumps({'type': 'done', 'status': current_task.status.value, 'need_restart': current_task.need_restart}, ensure_ascii=False)}\n\n"
+                logger.info(f"[SSE] 任务 {task_id} done 消息已发送，退出 SSE 流")
                 break
 
             await asyncio.sleep(0.5)  # 每 0.5 秒更新一次
