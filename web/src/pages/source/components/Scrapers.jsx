@@ -454,7 +454,19 @@ export const Scrapers = () => {
 
           if (data.type === 'progress') {
             // 更新进度
-            const progress = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0
+            // 当 total = 0 时（无需下载），显示 100%；否则按实际进度计算
+            // 当 current = total 且 total > 0 时，也显示 100%（下载完成，可能在热加载中）
+            let progress = 0
+            if (data.total === 0) {
+              // 无需下载的情况，直接显示 100%
+              progress = 100
+            } else if (data.current >= data.total) {
+              // 下载完成（可能在热加载或部署阶段）
+              progress = 100
+            } else {
+              progress = Math.round((data.current / data.total) * 100)
+            }
+
             setDownloadProgress(prev => ({
               ...prev,
               current: data.current,
@@ -464,50 +476,27 @@ export const Scrapers = () => {
               message: data.messages?.slice(-1)[0] || prev.message
             }))
 
-            // 检查状态
+            // 检查状态 - 只更新显示，不处理完成逻辑（统一在 done 消息中处理）
             if (data.status === 'completed') {
-              taskCompleted = true
               const downloadedCount = data.downloaded_count || 0
               const skippedCount = data.skipped_count || 0
               const failedCount = data.failed_count || 0
 
-              // 如果需要重启，不在这里刷新，等待 done 消息中的 checkServiceReady() 处理
+              // 只更新进度显示，完成逻辑统一在 done 消息中处理
               if (data.need_restart) {
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
                   message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，等待容器重启...`
                 }))
-                // 不刷新，等待 done 消息
               } else {
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
                   message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
                 }))
-
-                if (downloadedCount > 0) {
-                  messageApi.success('资源加载成功')
-                } else {
-                  messageApi.success('所有弹幕源都是最新的')
-                }
-
-                // 只有不需要重启时才延迟刷新
-                setTimeout(() => {
-                  setDownloadProgress({
-                    visible: false,
-                    current: 0,
-                    total: 0,
-                    progress: 0,
-                    message: '',
-                    scraper: '',
-                    isRestarting: false
-                  })
-                  getInfo()
-                  loadVersionInfo()
-                  setLoadingResources(false)
-                }, downloadedCount > 0 ? 2000 : 1000)
               }
+              // 不在这里设置 taskCompleted 和刷新，等待 done 消息统一处理
             }
 
             if (data.status === 'failed') {
@@ -688,7 +677,9 @@ export const Scrapers = () => {
 
               checkServiceReady()
             } else {
-              // 不需要重启的情况（首次下载热加载完成）
+              // 不需要重启的情况（首次下载热加载完成 或 所有弹幕源都是最新的）
+              messageApi.success('弹幕源加载完成')
+
               // 延迟关闭进度条并刷新数据
               setTimeout(() => {
                 setDownloadProgress({
