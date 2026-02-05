@@ -43,7 +43,7 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
 
 async def create_user(session: AsyncSession, user: models.UserCreate):
     """创建新用户"""
-    from .. import security
+    from src import security
     hashed_password = security.get_password_hash(user.password)
     new_user = User(
         username=user.username,
