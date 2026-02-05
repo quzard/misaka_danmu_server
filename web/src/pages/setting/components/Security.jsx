@@ -27,7 +27,8 @@ export const Security = () => {
     const checkDocker = async () => {
       try {
         const res = await getDockerStatus()
-        setDockerAvailable(res.data?.docker_available || false)
+        // API 返回 socketAvailable 字段
+        setDockerAvailable(res.data?.socketAvailable || false)
       } catch (error) {
         setDockerAvailable(false)
       }
