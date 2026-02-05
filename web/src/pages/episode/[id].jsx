@@ -396,7 +396,7 @@ export const EpisodeDetail = () => {
     const previewTitle = previewData[data.episodeId]
     const hasPreviewChange = isPreviewMode && previewTitle && previewTitle !== data.title
     return (
-      <tr ref={setNodeRef} style={{ ...style, backgroundColor: 'var(--color-card)' }}>
+      <tr ref={setNodeRef} style={style} className="bg-white dark:bg-gray-800">
         <td className="p-2 border border-gray-200 dark:border-gray-600 cursor-move" {...attributes} {...listeners}>
           <HolderOutlined />
         </td>
@@ -2180,10 +2180,10 @@ export const EpisodeDetail = () => {
         </div>
 
         {/* 可拖拽编辑表格 */}
-        <div className="border border-gray-200 dark:border-gray-600 rounded overflow-auto" style={{ maxHeight: 400 }}>
+        <div className="border border-gray-200 dark:border-gray-600 rounded overflow-auto" style={{ maxHeight: 400, backgroundColor: 'var(--color-card)' }}>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={batchEditData.map(item => item.episodeId)} strategy={verticalListSortingStrategy}>
-              <table className="w-full text-sm">
+              <table className="w-full text-sm text-gray-900 dark:text-gray-100">
                 <thead className="bg-gray-100 dark:bg-gray-700 sticky top-0 z-10">
                   <tr>
                     <th className="p-2 border border-gray-200 dark:border-gray-600 w-10">拖拽</th>
@@ -2192,7 +2192,7 @@ export const EpisodeDetail = () => {
                     <th className="p-2 border border-gray-200 dark:border-gray-600 w-24">集数</th>
                   </tr>
                 </thead>
-                <tbody style={{ backgroundColor: 'var(--color-card)' }}>
+                <tbody>
                   {batchEditData.map((item, index) => (
                     <SortableRow key={item.episodeId} id={item.episodeId} data={item} index={index} />
                   ))}
