@@ -218,35 +218,37 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
           </Radio.Group>
 
           {targetType === 'new' ? (
-            <Form form={form} layout="vertical" className="bg-gray-50 dark:bg-gray-800 p-3 rounded" requiredMark={false}>
-              <Form.Item
-                name="title"
-                label={<span className="text-gray-700 dark:text-gray-300">标题</span>}
-                rules={[{ required: true, message: '请输入标题' }]}
-                initialValue={animeTitle}
-              >
-                <Input placeholder="新条目标题" />
-              </Form.Item>
-              <div className="flex gap-4">
+            <div className="p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
+              <Form form={form} layout="vertical" requiredMark={false}>
                 <Form.Item
-                  name="season"
-                  label={<span className="text-gray-700 dark:text-gray-300">季数</span>}
-                  initialValue={1}
-                  className="flex-1 !mb-0"
+                  name="title"
+                  label="标题"
+                  rules={[{ required: true, message: '请输入标题' }]}
+                  initialValue={animeTitle}
                 >
-                  <InputNumber min={1} className="w-full" />
+                  <Input placeholder="新条目标题" />
                 </Form.Item>
-                <Form.Item
-                  name="year"
-                  label={<span className="text-gray-700 dark:text-gray-300">年份</span>}
-                  className="flex-1 !mb-0"
-                >
-                  <InputNumber min={1900} max={2100} className="w-full" placeholder="可选" />
-                </Form.Item>
-              </div>
-            </Form>
+                <div className="flex gap-4">
+                  <Form.Item
+                    name="season"
+                    label="季数"
+                    initialValue={1}
+                    className="flex-1 !mb-0"
+                  >
+                    <InputNumber min={1} className="w-full" />
+                  </Form.Item>
+                  <Form.Item
+                    name="year"
+                    label="年份"
+                    className="flex-1 !mb-0"
+                  >
+                    <InputNumber min={1900} max={2100} className="w-full" placeholder="可选" />
+                  </Form.Item>
+                </div>
+              </Form>
+            </div>
           ) : (
-            <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
+            <div className="p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
               <Input.Search
                 placeholder="搜索目标条目..."
                 value={searchKeyword}
