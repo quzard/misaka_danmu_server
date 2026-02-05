@@ -906,3 +906,13 @@ export const splitEpisodeDanmaku = (data) => api.post('/api/ui/danmaku/split', J
 
 /** 分集合并 */
 export const mergeEpisodesDanmaku = (data) => api.post('/api/ui/danmaku/merge', JSON.stringify(data))
+
+// ==================== 拆分数据源 ====================
+
+/** 获取数据源的分集列表（用于拆分选择） */
+export const getSourceEpisodesForSplit = (sourceId) =>
+  api.get(`/api/ui/library/source/${sourceId}/episodes-for-split`)
+
+/** 拆分数据源 */
+export const splitSource = (animeId, data) =>
+  api.post(`/api/ui/library/anime/${animeId}/split-source`, JSON.stringify(data))

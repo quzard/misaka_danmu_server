@@ -618,3 +618,31 @@ class ControlRateLimitStatusResponse(BaseModel):
     fallbackMatchCount: int = Field(0, description="匹配后备计数")
     fallbackSearchCount: int = Field(0, description="后备搜索计数")
     providers: List[ControlRateLimitProviderStatus]
+
+
+# --- 拆分数据源相关模型 ---
+
+class SplitSourceNewMediaInfo(BaseModel):
+    """创建新条目时的媒体信息"""
+    title: str = Field(..., description="新条目标题")
+    season: int = Field(1, description="季度")
+    year: Optional[int] = Field(None, description="年份")
+    imageUrl: Optional[str] = Field(None, description="封面图URL")
+
+
+class SplitSourceRequest(BaseModel):
+    """拆分数据源请求模型"""
+    sourceId: int = Field(..., description="源数据源ID")
+    episodeIds: List[int] = Field(..., description="要拆分的分集ID列表")
+    targetType: str = Field(..., description="目标类型: 'new' 创建新条目, 'existing' 合并到已有条目")
+    newMediaInfo: Optional[SplitSourceNewMediaInfo] = Field(None, description="新条目信息 (targetType='new' 时必填)")
+    existingMediaId: Optional[int] = Field(None, description="已有条目ID (targetType='existing' 时必填)")
+    reindexEpisodes: bool = Field(True, description="是否重新编号分集（从1开始）")
+
+
+class SplitSourceResponse(BaseModel):
+    """拆分数据源响应模型"""
+    success: bool
+    targetMediaId: int = Field(..., description="目标媒体ID（新创建或已有）")
+    movedEpisodeCount: int = Field(..., description="移动的分集数量")
+    message: str

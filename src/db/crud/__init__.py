@@ -174,6 +174,8 @@ from .source import (
     get_incremental_refresh_sources_grouped,
     batch_toggle_incremental_refresh,
     batch_set_favorite,
+    split_source_episodes,
+    get_source_episode_list,
 )
 
 # Danmaku模块
@@ -413,6 +415,8 @@ __all__ = [
     'disable_incremental_refresh',
     'get_sources_with_incremental_refresh_enabled',
     '_assign_source_order_if_missing',
+    'split_source_episodes',
+    'get_source_episode_list',
     # Danmaku
     'save_danmaku_for_episode',
     '_generate_danmaku_path',
