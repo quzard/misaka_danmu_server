@@ -1596,15 +1596,21 @@ async def download_progress_stream(
 
             yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
 
-            # 检测是否需要重启容器（在任务完成前发送特殊消息）
+            # 检测是否需要发送终止消息（restart_pending 用于通知 SSE 流退出）
             if current_task.restart_pending:
-                # 发送重启通知，让前端知道即将重启
-                yield f"data: {json.dumps({'type': 'restart', 'message': '弹幕源更新完成，容器即将重启...'}, ensure_ascii=False)}\n\n"
-                # 发送 done 消息并退出，让前端正常关闭连接
-                yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': True}, ensure_ascii=False)}\n\n"
+                if current_task.need_restart:
+                    # 需要重启容器的情况
+                    logger.info(f"[SSE] 任务 {task_id} 需要重启容器，发送 restart 和 done 消息")
+                    yield f"data: {json.dumps({'type': 'restart', 'message': '弹幕源更新完成，容器即将重启...'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': True}, ensure_ascii=False)}\n\n"
+                else:
+                    # 热加载完成，不需要重启容器
+                    logger.info(f"[SSE] 任务 {task_id} 热加载完成，发送 done 消息 (need_restart=False)")
+                    yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': False}, ensure_ascii=False)}\n\n"
+                logger.info(f"[SSE] 任务 {task_id} done 消息已发送，退出 SSE 流")
                 break
 
-            # 任务完成则退出
+            # 任务完成则退出（备用逻辑，正常情况下应该通过 restart_pending 退出）
             if current_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
                 logger.info(f"[SSE] 任务 {task_id} 状态为 {current_task.status.value}，准备发送 done 消息")
                 # 等待一小段时间，确保前端有时间处理最后的 progress 消息
