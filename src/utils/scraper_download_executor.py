@@ -715,8 +715,14 @@ class ScraperDownloadExecutor:
                     except Exception as e:
                         logger.warning(f"清理临时目录失败: {e}")
 
+                # 发送完成消息
+                self._log("✓ 弹幕源热加载完成，正在刷新页面...")
+
                 # 首次下载完成，设置任务状态为完成
                 self.task.status = TaskStatus.COMPLETED
+
+                # 等待 SSE 流发送 done 消息（SSE 每 0.5 秒检查一次状态）
+                await asyncio.sleep(1.0)
 
             else:
                 # 非首次下载（已有弹幕源）：只部署到 backup 目录，然后重启容器

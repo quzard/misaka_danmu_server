@@ -453,6 +453,7 @@ export const Scrapers = () => {
           const data = JSON.parse(event.data)
 
           if (data.type === 'progress') {
+            console.log('收到 progress 消息:', data.status, 'need_restart:', data.need_restart)
             // 更新进度
             // 当 total = 0 时（无需下载），显示 100%；否则按实际进度计算
             // 当 current = total 且 total > 0 时，也显示 100%（下载完成，可能在热加载中）
@@ -543,6 +544,7 @@ export const Scrapers = () => {
           }
 
           if (data.type === 'done') {
+            console.log('收到 done 消息:', data)
             taskCompleted = true
 
             // 检查是否需要重启
@@ -679,6 +681,14 @@ export const Scrapers = () => {
             } else {
               // 不需要重启的情况（首次下载热加载完成 或 所有弹幕源都是最新的）
               messageApi.success('弹幕源加载完成')
+
+              // 显示刷新动画
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: 100,
+                message: '正在刷新页面数据...',
+                isRestarting: true  // 复用重启动画
+              }))
 
               // 延迟关闭进度条并刷新数据
               setTimeout(() => {
