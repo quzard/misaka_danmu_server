@@ -706,6 +706,15 @@ class ScraperDownloadExecutor:
                 await self.scraper_manager.load_and_sync_scrapers()
                 self._log(f"✓ 成功加载了 {deploy_count} 个弹幕源")
 
+                # 先清理临时目录（在设置 COMPLETED 之前，确保 SSE 发送的最后消息是完成消息）
+                if temp_dir.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                        self._log("✓ 已清理临时下载目录")
+                    except Exception as e:
+                        logger.warning(f"清理临时目录失败: {e}")
+
                 # 首次下载完成，设置任务状态为完成
                 self.task.status = TaskStatus.COMPLETED
 
@@ -814,12 +823,14 @@ class ScraperDownloadExecutor:
             self.task.status = TaskStatus.COMPLETED
 
         finally:
-            # 清理临时下载目录
+            # 清理临时下载目录（如果还存在的话）
+            # 注意：热加载场景下，临时目录已在设置 COMPLETED 之前清理，这里不会重复清理
             if temp_dir.exists():
                 try:
                     import shutil
                     shutil.rmtree(temp_dir)
-                    self._log(f"已清理临时下载目录")
+                    # 不发送日志消息，避免在 COMPLETED 状态后添加新消息影响 SSE 流
+                    logger.info(f"[任务 {self.task.task_id}] 已清理临时下载目录")
                 except Exception as e:
                     logger.warning(f"清理临时目录失败: {e}")
 
