@@ -46,10 +46,13 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
 
   const loadEpisodes = async (sourceId) => {
     setLoading(true)
+    setSelectedEpisodeIds([]) // 切换数据源时清空已选分集
     try {
       const res = await getSourceEpisodesForSplit(sourceId)
+      console.log('分集列表响应:', res.data) // 调试日志
       setEpisodes(res.data?.episodes || [])
     } catch (error) {
+      console.error('加载分集列表失败:', error)
       messageApi.error('加载分集列表失败')
     } finally {
       setLoading(false)
@@ -156,11 +159,17 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
             className="w-full"
             placeholder="选择要拆分的数据源"
             value={selectedSourceId}
-            onChange={setSelectedSourceId}
-            options={sources?.map(s => ({
-              value: s.sourceId,
-              label: `${s.providerName} - ${s.mediaId} (${s.episodeCount || 0}集)`
-            }))}
+            onChange={(value) => {
+              console.log('选择的数据源ID:', value)
+              setSelectedSourceId(value)
+            }}
+            options={sources?.map(s => {
+              console.log('数据源:', s)
+              return {
+                value: s.sourceId,
+                label: `${s.providerName} - ${s.mediaId} (${s.episodeCount || 0}集)`
+              }
+            })}
           />
         </div>
 
@@ -209,20 +218,29 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
           </Radio.Group>
 
           {targetType === 'new' ? (
-            <Form form={form} layout="vertical" className="bg-gray-50 dark:bg-gray-800 p-3 rounded">
+            <Form form={form} layout="vertical" className="bg-gray-50 dark:bg-gray-800 p-3 rounded" requiredMark={false}>
               <Form.Item
                 name="title"
-                label="标题"
+                label={<span className="text-gray-700 dark:text-gray-300">标题</span>}
                 rules={[{ required: true, message: '请输入标题' }]}
                 initialValue={animeTitle}
               >
                 <Input placeholder="新条目标题" />
               </Form.Item>
               <div className="flex gap-4">
-                <Form.Item name="season" label="季数" initialValue={1} className="flex-1">
+                <Form.Item
+                  name="season"
+                  label={<span className="text-gray-700 dark:text-gray-300">季数</span>}
+                  initialValue={1}
+                  className="flex-1 !mb-0"
+                >
                   <InputNumber min={1} className="w-full" />
                 </Form.Item>
-                <Form.Item name="year" label="年份" className="flex-1">
+                <Form.Item
+                  name="year"
+                  label={<span className="text-gray-700 dark:text-gray-300">年份</span>}
+                  className="flex-1 !mb-0"
+                >
                   <InputNumber min={1900} max={2100} className="w-full" placeholder="可选" />
                 </Form.Item>
               </div>
