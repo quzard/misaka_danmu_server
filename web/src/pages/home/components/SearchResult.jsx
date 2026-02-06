@@ -107,6 +107,7 @@ export const SearchResult = () => {
   const [editConfirmLoading, setEditConfirmLoading] = useState(false)
   const [range, setRange] = useState([1, 1])
   const [episodePageSize, setEpisodePageSize] = useState(10)
+  const [episodePage, setEpisodePage] = useState(1)
   const [episodeOrder, setEpisodeOrder] = useState('asc') // 新增：排序状态
   const [editMediaType, setEditMediaType] = useState('tv_series') // 编辑导入：媒体类型
   const [editSeason, setEditSeason] = useState(1) // 编辑导入：季度
@@ -1464,9 +1465,9 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        <div>
+        <div className="flex flex-col" style={{ maxHeight: isMobile ? '65vh' : '70vh' }}>
           {isMobile ? (
-            <div className="space-y-4 my-6">
+            <div className="space-y-4 my-6 shrink-0">
               <div>
                 <div className="font-medium text-sm mb-2">作品标题</div>
                 <Input
@@ -1499,7 +1500,6 @@ export const SearchResult = () => {
                       { label: <span className="inline-flex items-center gap-1"><MyIcon icon="movie" size={14} /> 电影</span>, value: 'movie' },
                       { label: <span className="inline-flex items-center gap-1"><MyIcon icon="tv" size={14} /> 电视节目</span>, value: 'tv_series' },
                     ]}
-                    size="small"
                   />
                   <div className="flex items-center gap-2">
                     <span className="text-sm">季度:</span>
@@ -1510,7 +1510,6 @@ export const SearchResult = () => {
                       step={1}
                       disabled={editMediaType === 'movie'}
                       style={{ width: 70 }}
-                      size="small"
                     />
                   </div>
                 </div>
@@ -1554,7 +1553,7 @@ export const SearchResult = () => {
             </div>
           ) : (
             <>
-              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
                 <div className="shrink-0">作品标题:</div>
                 <div className="w-full">
                   <Input
@@ -1575,7 +1574,7 @@ export const SearchResult = () => {
                   重整分集导入
                 </Button>
               </div>
-              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
                 <div className="flex items-center gap-2">
                   <Segmented
                     value={editMediaType}
@@ -1601,7 +1600,7 @@ export const SearchResult = () => {
                   />
                 </div>
               </div>
-              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
                 <div className="shrink-0">集数区间:</div>
                 <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
                   <div className="flex items-center justify-start gap-2">
@@ -1647,7 +1646,7 @@ export const SearchResult = () => {
           )}
           <Card
             size="small"
-            className={isMobile ? "max-h-[45vh] overflow-y-auto" : "max-h-[50vh] overflow-y-auto"}
+            className="flex-1 min-h-0 overflow-y-auto"
             styles={{ body: { padding: '8px 12px' } }}
           >
             <DndContext
@@ -1663,15 +1662,8 @@ export const SearchResult = () => {
                 <List
                   itemLayout="vertical"
                   size="large"
-                  pagination={{
-                    pageSize: episodePageSize,
-                    onShowSizeChange: (_, size) => {
-                      setEpisodePageSize(size)
-                    },
-                    hideOnSinglePage: true,
-                    showLessItems: true,
-                  }}
-                  dataSource={editEpisodeList}
+                  pagination={false}
+                  dataSource={editEpisodeList.slice((episodePage - 1) * episodePageSize, episodePage * episodePageSize)}
                   renderItem={(item, index) => (
                     <SortableItem
                       key={item.episodeId}
@@ -1689,6 +1681,22 @@ export const SearchResult = () => {
               <DragOverlay>{renderDragOverlay()}</DragOverlay>
             </DndContext>
           </Card>
+          {editEpisodeList.length > episodePageSize && (
+            <div className="flex justify-center mt-3 shrink-0">
+              <Pagination
+                current={episodePage}
+                pageSize={episodePageSize}
+                total={editEpisodeList.length}
+                onChange={(page) => setEpisodePage(page)}
+                onShowSizeChange={(_, size) => {
+                  setEpisodePageSize(size)
+                  setEpisodePage(1)
+                }}
+                showLessItems
+                size="small"
+              />
+            </div>
+          )}
         </div>
       </Modal>
       {/* 重整分集导入子弹窗 */}
@@ -1780,7 +1788,11 @@ export const SearchResult = () => {
             }
           }}
         />
-        <div className="mt-3 max-h-[300px] overflow-y-auto">
+        <Card
+          size="small"
+          className="mt-3 max-h-[40vh] overflow-y-auto"
+          styles={{ body: { padding: '8px' } }}
+        >
           {reshuffleResults.length > 0 ? (
             <Radio.Group
               value={selectedReshuffleItem?.animeId}
@@ -1820,7 +1832,7 @@ export const SearchResult = () => {
               <Empty description="未找到匹配的条目" />
             )
           )}
-        </div>
+        </Card>
       </Modal>
     </>
   )

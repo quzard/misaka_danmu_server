@@ -304,6 +304,11 @@ a:hover {
     font-size: 16px; /* 防止iOS自动缩放 */
   }
 
+  .ant-input-number-input {
+    min-height: 44px;
+    line-height: 44px;
+  }
+
   .ant-input-search-button {
     height: 44px;
   }
