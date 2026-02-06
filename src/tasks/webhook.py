@@ -62,13 +62,14 @@ async def run_webhook_tasks_directly_manual(
     for task in tasks_to_run:
         try:
             payload = json.loads(task.payload)
-            task_coro = lambda s, cb: webhook_search_and_dispatch_task(
-                webhookSource=task.webhookSource, progress_callback=cb, session=s,
+            # 使用默认参数 t=task, p=payload 捕获当前循环变量的值,避免闭包问题
+            task_coro = lambda s, cb, t=task, p=payload: webhook_search_and_dispatch_task(
+                webhookSource=t.webhookSource, progress_callback=cb, session=s,
                 manager=scraper_manager, task_manager=task_manager,
                 metadata_manager=metadata_manager, config_manager=config_manager,
                 ai_matcher_manager=ai_matcher_manager,
                 rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager,
-                **payload
+                **p
             )
             await task_manager.submit_task(task_coro, task.taskTitle, unique_key=task.uniqueKey)
             await session.delete(task)

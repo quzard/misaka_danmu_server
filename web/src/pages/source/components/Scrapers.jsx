@@ -80,6 +80,7 @@ import {
   QuestionCircleOutlined,
 } from '@ant-design/icons'
 
+import ReactMarkdown from 'react-markdown'
 import { QRCodeCanvas } from 'qrcode.react'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store'
@@ -208,9 +209,13 @@ export const Scrapers = () => {
     localVersion: 'unknown',
     remoteVersion: null,
     officialVersion: null,
-    hasUpdate: false
+    hasUpdate: false,
+    localChangelog: null,
+    remoteChangelog: null,
+    officialChangelog: null
   })
   const [loadingVersions, setLoadingVersions] = useState(false)
+  const [changelogModal, setChangelogModal] = useState({ open: false, title: '', content: '' })
   const [uploadingPackage, setUploadingPackage] = useState(false)
   const [sseConnected, setSseConnected] = useState(false)
 
@@ -352,7 +357,10 @@ export const Scrapers = () => {
         localVersion: res.data?.localVersion || 'unknown',
         remoteVersion: res.data?.remoteVersion || null,
         officialVersion: res.data?.officialVersion || null,
-        hasUpdate: res.data?.hasUpdate || false
+        hasUpdate: res.data?.hasUpdate || false,
+        localChangelog: res.data?.localChangelog || null,
+        remoteChangelog: res.data?.remoteChangelog || null,
+        officialChangelog: res.data?.officialChangelog || null
       })
       return res.data
     } catch (error) {
@@ -1789,20 +1797,38 @@ export const Scrapers = () => {
                         {versionInfo.officialVersion && (
                           <>
                             <Typography.Text className="text-sm text-gray-600">主仓:</Typography.Text>
-                            <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                            <Typography.Text
+                              code
+                              style={{ color: '#ce1ea2ff', cursor: versionInfo.officialChangelog ? 'pointer' : 'default' }}
+                              onClick={() => versionInfo.officialChangelog && setChangelogModal({ open: true, title: '主仓版本日志', content: versionInfo.officialChangelog })}
+                            >
+                              {versionInfo.officialVersion}
+                            </Typography.Text>
                           </>
                         )}
                         {versionInfo.remoteVersion && (
                           <>
                             <Typography.Text className="text-sm text-gray-600">远程:</Typography.Text>
-                            <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                            <Typography.Text
+                              code
+                              style={{ color: '#52c41a', cursor: versionInfo.remoteChangelog ? 'pointer' : 'default' }}
+                              onClick={() => versionInfo.remoteChangelog && setChangelogModal({ open: true, title: '远程版本日志', content: versionInfo.remoteChangelog })}
+                            >
+                              {versionInfo.remoteVersion}
+                            </Typography.Text>
                           </>
                         )}
                       </div>
                       <div className="flex gap-3">
                         <div className="flex items-center gap-8">
                           <Typography.Text className="text-sm text-gray-600">本地:</Typography.Text>
-                          <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#1890ff', cursor: versionInfo.localChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.localChangelog && setChangelogModal({ open: true, title: '本地版本日志', content: versionInfo.localChangelog })}
+                          >
+                            {versionInfo.localVersion}
+                          </Typography.Text>
                         </div>
                         <div className="ml-auto">
                           <Button
@@ -1865,18 +1891,36 @@ export const Scrapers = () => {
                       {versionInfo.officialVersion && (
                         <div className="flex items-center gap-2">
                           <Typography.Text className="text-sm text-gray-600">主仓版本:</Typography.Text>
-                          <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#ce1ea2ff', cursor: versionInfo.officialChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.officialChangelog && setChangelogModal({ open: true, title: '主仓版本日志', content: versionInfo.officialChangelog })}
+                          >
+                            {versionInfo.officialVersion}
+                          </Typography.Text>
                         </div>
                       )}
                       {versionInfo.remoteVersion && (
                         <div className="flex items-center gap-2">
                           <Typography.Text className="text-sm text-gray-600">远程版本:</Typography.Text>
-                          <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#52c41a', cursor: versionInfo.remoteChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.remoteChangelog && setChangelogModal({ open: true, title: '远程版本日志', content: versionInfo.remoteChangelog })}
+                          >
+                            {versionInfo.remoteVersion}
+                          </Typography.Text>
                         </div>
                       )}
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
-                        <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                        <Typography.Text
+                          code
+                          style={{ color: '#1890ff', cursor: versionInfo.localChangelog ? 'pointer' : 'default' }}
+                          onClick={() => versionInfo.localChangelog && setChangelogModal({ open: true, title: '本地版本日志', content: versionInfo.localChangelog })}
+                        >
+                          {versionInfo.localVersion}
+                        </Typography.Text>
                       </div>
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
@@ -2575,6 +2619,49 @@ export const Scrapers = () => {
           </a>{' '}
           提供，为Blibili官方非公开接口。
           您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
+        </div>
+      </Modal>
+
+      {/* 版本日志弹窗 */}
+      <Modal
+        title={changelogModal.title}
+        open={changelogModal.open}
+        onCancel={() => setChangelogModal({ open: false, title: '', content: '' })}
+        footer={null}
+        width={isMobile ? '95%' : 520}
+        centered
+      >
+        <div className="max-h-[60vh] overflow-y-auto">
+          {changelogModal.content ? (
+            <div className="text-sm leading-relaxed">
+              <ReactMarkdown
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+                      {children}
+                    </a>
+                  ),
+                  p: ({ children }) => <p className="my-1">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc list-inside my-1 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside my-1 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2">{children}</li>,
+                  code: ({ children }) => (
+                    <code className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+                  ),
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-4 border-blue-400 pl-3 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r text-sm">
+                      {children}
+                    </blockquote>
+                  ),
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                }}
+              >
+                {changelogModal.content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <Typography.Text type="secondary">暂无版本日志</Typography.Text>
+          )}
         </div>
       </Modal>
     </div >
