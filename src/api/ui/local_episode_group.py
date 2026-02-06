@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query
 from pydantic import BaseModel
 
 from src import security
@@ -135,3 +135,22 @@ async def apply_local_episode_group(
     logger.info(f"已为 TMDB TV ID {tmdb_tv_id} 应用本地剧集组映射，共 {episode_counter} 条。")
     return {"message": "本地剧集组映射更新成功", "groupId": group_id, "episodeCount": episode_counter}
 
+
+
+@router.get("/local-episode-group/detail", summary="获取已保存的剧集组详情（从数据库读取）")
+async def get_episode_group_detail(
+    groupId: str = Query(..., description="剧集组ID，如 local-12345 或 TMDB 剧集组ID"),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    从数据库中读取已保存的剧集组映射，重建为分组结构返回。
+    支持本地剧集组（local-xxx）和 TMDB 剧集组。
+    """
+    data = await crud.get_episode_group_mappings(session, groupId)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"未找到剧集组 {groupId} 的映射数据，可能尚未保存到数据库"
+        )
+    return data

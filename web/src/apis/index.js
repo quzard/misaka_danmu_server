@@ -172,6 +172,10 @@ export const applyLocalEpisodeGroup = data =>
     localEpisodeGroup: data.localEpisodeGroup,
   })
 
+/** 获取已保存的剧集组详情（从数据库读取） */
+export const getEpisodeGroupDetail = (groupId) =>
+  api.get(`/api/ui/local-episode-group/detail?groupId=${encodeURIComponent(groupId)}`)
+
 /** 搜索BGM */
 export const getBgmSearch = data =>
   api.get(

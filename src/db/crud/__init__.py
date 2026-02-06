@@ -231,6 +231,7 @@ from .token_log import (
 # TMDB模块
 from .tmdb import (
     save_tmdb_episode_group_mappings,
+    get_episode_group_mappings,
 )
 
 # RateLimit模块
@@ -456,6 +457,7 @@ __all__ = [
     'delete_ua_rule',
     # TMDB
     'save_tmdb_episode_group_mappings',
+    'get_episode_group_mappings',
     # RateLimit
     'get_or_create_rate_limit_state',
     'get_all_rate_limit_states',

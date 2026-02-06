@@ -33,6 +33,7 @@ import {
   getBgmSearch,
   getDoubanSearch,
   getEgidSearch,
+  getEpisodeGroupDetail,
   getImdbSearch,
   getTmdbSearch,
   getTvdbSearch,
@@ -117,6 +118,7 @@ export const Library = () => {
   const type = Form.useWatch('type', form)
   const animeId = Form.useWatch('animeId', form)
   const imageUrl = Form.useWatch('imageUrl', form)
+  const egidValue = Form.useWatch('tmdbEpisodeGroupId', form)
   const [fetchedMetadata, setFetchedMetadata] = useState(null)
 
   const modalApi = useModal()
@@ -710,9 +712,11 @@ export const Library = () => {
   const [localEgOpen, setLocalEgOpen] = useState(false)
   const [localEgParsedData, setLocalEgParsedData] = useState(null)
   const [localEgApplyLoading, setLocalEgApplyLoading] = useState(false)
-  const localEgFileRef = useRef(null)
   const [pasteJsonOpen, setPasteJsonOpen] = useState(false)
   const [pasteJsonValue, setPasteJsonValue] = useState('')
+  const [localPathOpen, setLocalPathOpen] = useState(false)
+  const [localPathValue, setLocalPathValue] = useState('')
+  const [localPathLoading, setLocalPathLoading] = useState(false)
 
   // 公共校验：解析并校验剧集组JSON数据
   const validateAndApplyEgJson = (jsonStr) => {
@@ -737,18 +741,29 @@ export const Library = () => {
     }
   }
 
-  // 本地JSON文件选择后的校验处理
-  const handleLocalEgFileChange = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    e.target.value = ''
-    if (!file.name.endsWith('.json')) {
-      messageApi.error('请选择 .json 格式的文件')
+  // 查询服务端本地路径的JSON
+  const handleLocalPathConfirm = async () => {
+    const pathVal = localPathValue.trim()
+    if (!pathVal) {
+      messageApi.warning('请输入服务端路径或网络URL')
       return
     }
-    const reader = new FileReader()
-    reader.onload = (evt) => validateAndApplyEgJson(evt.target.result)
-    reader.readAsText(file)
+    try {
+      setLocalPathLoading(true)
+      const res = await fetchLocalEpisodeGroupUrl({ url: pathVal })
+      if (res?.data?.groups) {
+        setLocalEgParsedData(res.data)
+        setLocalEgOpen(true)
+        setLocalPathOpen(false)
+        setLocalPathValue('')
+      } else {
+        messageApi.error('获取的JSON格式不正确，缺少 groups 字段')
+      }
+    } catch (e) {
+      messageApi.error(`获取失败: ${e?.response?.data?.detail || e.message}`)
+    } finally {
+      setLocalPathLoading(false)
+    }
   }
 
   // 粘贴JSON确认
@@ -777,9 +792,9 @@ export const Library = () => {
     }
     try {
       setEditEgLoading(true)
-      const res = await getAllEpisode({ tmdbId: tmdbId, egid: egidValue })
+      // 从数据库读取已保存的剧集组映射
+      const res = await getEpisodeGroupDetail(egidValue)
       if (res?.data?.id) {
-        // 将 TMDB 返回的数据转换为可编辑结构
         const raw = res.data
         const groups = (raw.groups || []).map((g, gi) => ({
           _key: gi,
@@ -787,8 +802,8 @@ export const Library = () => {
           order: g.order ?? gi,
           episodes: (g.episodes || []).map((ep, ei) => ({
             _key: ei,
-            seasonNumber: ep.season_number ?? ep.seasonNumber ?? 0,
-            episodeNumber: ep.episode_number ?? ep.episodeNumber ?? 0,
+            seasonNumber: ep.seasonNumber ?? 0,
+            episodeNumber: ep.episodeNumber ?? 0,
             order: ep.order ?? ei,
             name: ep.name || '',
           })),
@@ -796,7 +811,7 @@ export const Library = () => {
         setEditEgData({ id: raw.id, name: raw.name || '', description: raw.description || '', groups })
         setEditEgOpen(true)
       } else {
-        messageApi.error('没有找到该剧集组的信息')
+        messageApi.error('没有找到该剧集组的映射数据')
       }
     } catch (error) {
       messageApi.error(`获取剧集组失败: ${error?.response?.data?.detail || error.message}`)
@@ -1364,6 +1379,7 @@ export const Library = () => {
               allowClear
               enterButton="搜索"
               loading={searchEgidLoading}
+              prefix={egidValue?.startsWith?.('local-') ? <Tag color="green" className="mr-0">本地</Tag> : null}
               onSearch={() => {
                 onEgidSearch()
               }}
@@ -1400,7 +1416,7 @@ export const Library = () => {
                         key: 'local-json',
                         label: '查询本地JSON',
                         onClick: () => {
-                          localEgFileRef.current?.click()
+                          setLocalPathOpen(true)
                         },
                       },
                       {
@@ -1429,13 +1445,6 @@ export const Library = () => {
                   />
                 </Dropdown>
               }
-            />
-            <input
-              type="file"
-              ref={localEgFileRef}
-              accept=".json"
-              style={{ display: 'none' }}
-              onChange={handleLocalEgFileChange}
             />
           </Form.Item>
           <Form.Item name="bangumiId" label="BGM ID">
@@ -2086,6 +2095,30 @@ export const Library = () => {
             </Button>
           </div>
         )}
+      </Modal>
+      {/* 查询本地JSON路径 Modal */}
+      <Modal
+        title="查询服务端剧集组 JSON"
+        open={localPathOpen}
+        onOk={handleLocalPathConfirm}
+        confirmLoading={localPathLoading}
+        okText="获取"
+        cancelText="取消"
+        zIndex={110}
+        onCancel={() => {
+          setLocalPathOpen(false)
+          setLocalPathValue('')
+        }}
+      >
+        <div className="text-gray-500 text-sm mb-3">
+          输入弹幕库服务端的本地文件路径或网络URL，服务端将读取并解析 JSON 文件。
+        </div>
+        <Input
+          placeholder="例如：/path/to/episodegroup.json 或 https://..."
+          value={localPathValue}
+          onChange={(e) => setLocalPathValue(e.target.value)}
+          onPressEnter={handleLocalPathConfirm}
+        />
       </Modal>
       {/* 粘贴JSON Modal */}
       <Modal
