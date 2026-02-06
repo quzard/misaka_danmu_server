@@ -390,6 +390,10 @@ class ExternalApiLogInfo(BaseModel):
     endpoint: str
     statusCode: int
     message: Optional[str] = None
+    requestHeaders: Optional[str] = None
+    requestBody: Optional[str] = None
+    responseHeaders: Optional[str] = None
+    responseBody: Optional[str] = None
 
     class Config:
         from_attributes = True

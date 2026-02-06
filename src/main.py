@@ -439,6 +439,70 @@ async def log_not_found_requests(request: Request, call_next):
         logging.getLogger(__name__).warning("未处理的请求详情 (原始请求范围):\n%s", json.dumps(log_details, indent=2, ensure_ascii=False))
     return response
 
+
+@app.middleware("http")
+async def capture_control_api_response(request: Request, call_next):
+    """
+    中间件：为外部控制API捕获响应头和响应体，更新到访问日志中。
+    仅对 /api/control/ 路径生效。
+    """
+    if not request.url.path.startswith("/api/control/"):
+        return await call_next(request)
+
+    response = await call_next(request)
+
+    # 检查是否有日志ID需要更新
+    log_id = getattr(request.state, 'external_log_id', None)
+    if log_id is None:
+        return response
+
+    try:
+        # 读取响应体（需要消费流并重建响应）
+        from starlette.responses import Response as StarletteResponse
+        response_body_bytes = b""
+        async for chunk in response.body_iterator:
+            response_body_bytes += chunk
+
+        response_headers_str = json.dumps(dict(response.headers), ensure_ascii=False, indent=2)
+        response_body_str = response_body_bytes.decode(errors='ignore') if response_body_bytes else None
+
+        # 截断过长的响应体（避免数据库存储过大）
+        max_body_len = 10000
+        if response_body_str and len(response_body_str) > max_body_len:
+            response_body_str = response_body_str[:max_body_len] + f"\n... (已截断，总长度: {len(response_body_bytes)} 字节)"
+
+        # 使用独立的数据库会话更新日志
+        session_factory = request.app.state.db_session_factory
+        async with session_factory() as session:
+            await crud.update_external_api_log_response(
+                session,
+                log_id=log_id,
+                status_code=response.status_code,
+                response_headers=response_headers_str,
+                response_body=response_body_str,
+            )
+
+        # 重建响应
+        return StarletteResponse(
+            content=response_body_bytes,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
+    except Exception as e:
+        logger.debug(f"捕获控制API响应信息失败: {e}")
+        # 如果出错，尝试返回原始响应体
+        try:
+            return StarletteResponse(
+                content=response_body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+        except Exception:
+            return response
+
+
 async def cleanup_task(app: FastAPI):
     """定期清理过期缓存和OAuth states的后台任务。"""
     session_factory = app.state.db_session_factory

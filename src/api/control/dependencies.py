@@ -3,6 +3,7 @@
 """
 
 import re
+import json
 import logging
 import secrets
 import ipaddress
@@ -124,10 +125,41 @@ async def verify_api_key(
 
     endpoint = request.url.path
 
+    # --- 捕获请求头和请求体 ---
+    try:
+        # 过滤敏感头信息，保留有用的请求头
+        filtered_headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in ('authorization', 'cookie')
+        }
+        # 从查询参数中移除 api_key
+        query_str = str(request.url.query) if request.url.query else ""
+        if query_str:
+            import re as _re
+            query_str = _re.sub(r'api_key=[^&]*', 'api_key=***', query_str)
+            filtered_headers['_query'] = query_str
+        request_headers_str = json.dumps(filtered_headers, ensure_ascii=False, indent=2)
+    except Exception:
+        request_headers_str = None
+
+    try:
+        raw_body = await request.body()
+        request_body_str = raw_body.decode(errors='ignore') if raw_body else None
+        # 将body放回请求流，确保后续端点能正常读取
+        if raw_body:
+            async def receive():
+                return {"type": "http.request", "body": raw_body}
+            request._receive = receive
+    except Exception:
+        request_body_str = None
+
     if not api_key:
-        await crud.create_external_api_log(
-            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失"
+        log_entry = await crud.create_external_api_log(
+            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "API Key缺失",
+            request_headers=request_headers_str,
+            request_body=request_body_str,
         )
+        request.state.external_log_id = log_entry.id
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated: API Key is missing.",
@@ -136,15 +168,21 @@ async def verify_api_key(
     stored_key = await config_manager.get("externalApiKey", "")
 
     if not stored_key or not secrets.compare_digest(api_key, stored_key):
-        await crud.create_external_api_log(
-            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥"
+        log_entry = await crud.create_external_api_log(
+            session, client_ip_str, endpoint, status.HTTP_401_UNAUTHORIZED, "无效的API密钥",
+            request_headers=request_headers_str,
+            request_body=request_body_str,
         )
+        request.state.external_log_id = log_entry.id
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的API密钥"
         )
     # 记录成功的API Key验证
-    await crud.create_external_api_log(
-        session, client_ip_str, endpoint, status.HTTP_200_OK, "API Key验证通过"
+    log_entry = await crud.create_external_api_log(
+        session, client_ip_str, endpoint, status.HTTP_200_OK, "API Key验证通过",
+        request_headers=request_headers_str,
+        request_body=request_body_str,
     )
+    request.state.external_log_id = log_entry.id
     return api_key
 

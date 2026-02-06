@@ -1,9 +1,55 @@
-import { Card, Table, Tag, Typography } from 'antd'
+import { Card, Collapse, Table, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { getControlApiKeyLog } from '../../../apis'
 import dayjs from 'dayjs'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store'
+
+const DetailBlock = ({ label, content }) => {
+  if (!content) return null
+  return (
+    <div className="mb-3">
+      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">{label}</div>
+      <pre className="text-xs bg-gray-50 dark:bg-gray-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all max-h-[200px] overflow-y-auto m-0">
+        {content}
+      </pre>
+    </div>
+  )
+}
+
+const LogDetailPanel = ({ log }) => {
+  const hasRequest = log.requestHeaders || log.requestBody
+  const hasResponse = log.responseHeaders || log.responseBody
+  if (!hasRequest && !hasResponse) {
+    return <div className="text-xs text-gray-400 py-2">暂无详细请求/响应记录</div>
+  }
+  const items = []
+  if (hasRequest) {
+    items.push({
+      key: 'request',
+      label: '📤 请求信息',
+      children: (
+        <div>
+          <DetailBlock label="请求头" content={log.requestHeaders} />
+          <DetailBlock label="请求内容" content={log.requestBody} />
+        </div>
+      ),
+    })
+  }
+  if (hasResponse) {
+    items.push({
+      key: 'response',
+      label: '📥 响应信息',
+      children: (
+        <div>
+          <DetailBlock label="响应头" content={log.responseHeaders} />
+          <DetailBlock label="响应内容" content={log.responseBody} />
+        </div>
+      ),
+    })
+  }
+  return <Collapse size="small" items={items} />
+}
 
 export const ApiLogs = () => {
   const [loading, setLoading] = useState(true)
@@ -115,6 +161,7 @@ export const ApiLogs = () => {
                         </div>
                       )}
                     </div>
+                    <LogDetailPanel log={log} />
                   </div>
                 </Card>
               );
@@ -126,7 +173,11 @@ export const ApiLogs = () => {
             size="small"
             dataSource={logs}
             columns={columns}
-            rowKey={'accessTime'}
+            rowKey={(_, index) => index}
+            expandable={{
+              expandedRowRender: (record) => <LogDetailPanel log={record} />,
+              rowExpandable: (record) => !!(record.requestHeaders || record.requestBody || record.responseHeaders || record.responseBody),
+            }}
             scroll={{
               x: '100%',
               y: 400,

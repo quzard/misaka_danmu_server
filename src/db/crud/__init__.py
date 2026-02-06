@@ -244,6 +244,7 @@ from .rate_limit import (
 # ExternalLog模块
 from .external_log import (
     create_external_api_log,
+    update_external_api_log_response,
     get_external_api_logs,
 )
 
@@ -462,6 +463,7 @@ __all__ = [
     'increment_rate_limit_count',
     # ExternalLog
     'create_external_api_log',
+    'update_external_api_log_response',
     'get_external_api_logs',
     # Utility
     '_is_docker_environment',
