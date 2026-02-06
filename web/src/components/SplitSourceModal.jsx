@@ -212,10 +212,12 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
         {/* 第三步：目标设置 */}
         <div>
           <div className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>📌 第三步：选择目标</div>
-          <Radio.Group value={targetType} onChange={e => setTargetType(e.target.value)} className="mb-3">
-            <Radio value="new"><span style={{ color: 'var(--color-text)' }}>创建新条目</span></Radio>
-            <Radio value="existing"><span style={{ color: 'var(--color-text)' }}>合并到已有条目</span></Radio>
-          </Radio.Group>
+          <div className="mb-3">
+            <Radio.Group value={targetType} onChange={e => setTargetType(e.target.value)}>
+              <Radio value="new"><span style={{ color: 'var(--color-text)' }}>创建新条目</span></Radio>
+              <Radio value="existing"><span style={{ color: 'var(--color-text)' }}>合并到已有条目</span></Radio>
+            </Radio.Group>
+          </div>
 
           {targetType === 'new' ? (
             <div className="p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
