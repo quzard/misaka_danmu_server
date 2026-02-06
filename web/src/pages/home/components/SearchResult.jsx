@@ -28,7 +28,7 @@ import {
   Select,
   Pagination,
   Spin,
-  Switch,
+  Segmented,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -1476,22 +1476,31 @@ export const SearchResult = () => {
                     setEditAnimeTitle(e.target.value)
                   }}
                 />
+                <Button
+                  type="default"
+                  block
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReshuffleOpen(true)}
+                  className="mt-2"
+                >
+                  重整分集导入
+                </Button>
               </div>
               <div>
                 <div className="font-medium text-sm mb-2">类型 / 季度</div>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1" style={{ opacity: editMediaType === 'movie' ? 1 : 0.5 }}><MyIcon icon="movie" size={16} /> 电影</span>
-                    <Switch
-                      checked={editMediaType === 'tv_series'}
-                      onChange={checked => {
-                        setEditMediaType(checked ? 'tv_series' : 'movie')
-                        if (!checked) setEditSeason(1)
-                      }}
-                      size="small"
-                    />
-                    <span className="inline-flex items-center gap-1" style={{ opacity: editMediaType === 'tv_series' ? 1 : 0.5 }}><MyIcon icon="tv" size={16} /> 电视节目</span>
-                  </div>
+                  <Segmented
+                    value={editMediaType}
+                    onChange={value => {
+                      setEditMediaType(value)
+                      if (value === 'movie') setEditSeason(1)
+                    }}
+                    options={[
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="movie" size={14} /> 电影</span>, value: 'movie' },
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="tv" size={14} /> 电视节目</span>, value: 'tv_series' },
+                    ]}
+                    size="small"
+                  />
                   <div className="flex items-center gap-2">
                     <span className="text-sm">季度:</span>
                     <InputNumber
@@ -1527,30 +1536,20 @@ export const SearchResult = () => {
                     step={1}
                   />
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    type="primary"
-                    block
-                    onClick={() => {
-                      setEditEpisodeList(list => {
-                        return list.filter(
-                          it =>
-                            it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
-                        )
-                      })
-                    }}
-                  >
-                    确认区间
-                  </Button>
-                  <Button
-                    type="default"
-                    block
-                    icon={<ReloadOutlined />}
-                    onClick={() => setReshuffleOpen(true)}
-                  >
-                    重整分集导入
-                  </Button>
-                </div>
+                <Button
+                  type="primary"
+                  block
+                  onClick={() => {
+                    setEditEpisodeList(list => {
+                      return list.filter(
+                        it =>
+                          it.episodeIndex >= range[0] && it.episodeIndex <= range[1]
+                      )
+                    })
+                  }}
+                >
+                  确认区间
+                </Button>
               </div>
             </div>
           ) : (
@@ -1567,18 +1566,28 @@ export const SearchResult = () => {
                     style={{ width: '100%' }}
                   />
                 </div>
+                <Button
+                  type="default"
+                  onClick={() => setReshuffleOpen(true)}
+                  icon={<ReloadOutlined />}
+                  className="shrink-0"
+                >
+                  重整分集导入
+                </Button>
               </div>
               <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1" style={{ opacity: editMediaType === 'movie' ? 1 : 0.5 }}><MyIcon icon="movie" size={16} /> 电影</span>
-                  <Switch
-                    checked={editMediaType === 'tv_series'}
-                    onChange={checked => {
-                      setEditMediaType(checked ? 'tv_series' : 'movie')
-                      if (!checked) setEditSeason(1)
+                  <Segmented
+                    value={editMediaType}
+                    onChange={value => {
+                      setEditMediaType(value)
+                      if (value === 'movie') setEditSeason(1)
                     }}
+                    options={[
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="movie" size={14} /> 电影</span>, value: 'movie' },
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="tv" size={14} /> 电视节目</span>, value: 'tv_series' },
+                    ]}
                   />
-                  <span className="inline-flex items-center gap-1" style={{ opacity: editMediaType === 'tv_series' ? 1 : 0.5 }}><MyIcon icon="tv" size={16} /> 电视节目</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="shrink-0">季度:</span>
@@ -1631,13 +1640,6 @@ export const SearchResult = () => {
                     }}
                   >
                     确认区间
-                  </Button>
-                  <Button
-                    type="default"
-                    onClick={() => setReshuffleOpen(true)}
-                    icon={<ReloadOutlined />}
-                  >
-                    重整分集导入
                   </Button>
                 </div>
               </div>
