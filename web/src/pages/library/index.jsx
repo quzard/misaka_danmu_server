@@ -763,6 +763,127 @@ export const Library = () => {
     }
   }
 
+  // ---- 查看/编辑剧集组 ----
+  const [editEgOpen, setEditEgOpen] = useState(false)
+  const [editEgData, setEditEgData] = useState(null) // { id, name, description, groups: [...] }
+  const [editEgLoading, setEditEgLoading] = useState(false)
+  const [editEgSaving, setEditEgSaving] = useState(false)
+
+  const handleOpenEditEg = async () => {
+    const egidValue = form.getFieldValue('tmdbEpisodeGroupId')?.trim()
+    if (!egidValue) {
+      messageApi.warning('当前没有剧集组ID')
+      return
+    }
+    try {
+      setEditEgLoading(true)
+      const res = await getAllEpisode({ tmdbId: tmdbId, egid: egidValue })
+      if (res?.data?.id) {
+        // 将 TMDB 返回的数据转换为可编辑结构
+        const raw = res.data
+        const groups = (raw.groups || []).map((g, gi) => ({
+          _key: gi,
+          name: g.name || '',
+          order: g.order ?? gi,
+          episodes: (g.episodes || []).map((ep, ei) => ({
+            _key: ei,
+            seasonNumber: ep.season_number ?? ep.seasonNumber ?? 0,
+            episodeNumber: ep.episode_number ?? ep.episodeNumber ?? 0,
+            order: ep.order ?? ei,
+            name: ep.name || '',
+          })),
+        }))
+        setEditEgData({ id: raw.id, name: raw.name || '', description: raw.description || '', groups })
+        setEditEgOpen(true)
+      } else {
+        messageApi.error('没有找到该剧集组的信息')
+      }
+    } catch (error) {
+      messageApi.error(`获取剧集组失败: ${error?.response?.data?.detail || error.message}`)
+    } finally {
+      setEditEgLoading(false)
+    }
+  }
+
+  // 编辑剧集组内部操作
+  const updateEditEgField = (path, value) => {
+    setEditEgData(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      let target = next
+      for (let i = 0; i < path.length - 1; i++) target = target[path[i]]
+      target[path[path.length - 1]] = value
+      return next
+    })
+  }
+
+  const addEgGroup = () => {
+    setEditEgData(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      next.groups.push({ _key: Date.now(), name: '', order: next.groups.length, episodes: [] })
+      return next
+    })
+  }
+
+  const removeEgGroup = (gi) => {
+    setEditEgData(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      next.groups.splice(gi, 1)
+      return next
+    })
+  }
+
+  const addEgEpisode = (gi) => {
+    setEditEgData(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      const eps = next.groups[gi].episodes
+      eps.push({ _key: Date.now(), seasonNumber: 0, episodeNumber: 0, order: eps.length, name: '' })
+      return next
+    })
+  }
+
+  const removeEgEpisode = (gi, ei) => {
+    setEditEgData(prev => {
+      const next = JSON.parse(JSON.stringify(prev))
+      next.groups[gi].episodes.splice(ei, 1)
+      return next
+    })
+  }
+
+  const handleSaveEditEg = async () => {
+    if (!editEgData) return
+    if (!tmdbId) { messageApi.warning('请先填写 TMDB ID'); return }
+    try {
+      setEditEgSaving(true)
+      // 转换为 applyLocalEpisodeGroup 需要的格式
+      const localEpisodeGroup = {
+        description: editEgData.name || '本地剧集组',
+        groups: editEgData.groups.map(g => ({
+          name: g.name,
+          order: g.order,
+          episodes: g.episodes.map(ep => ({
+            season_number: ep.seasonNumber,
+            episode_number: ep.episodeNumber,
+            order: ep.order,
+          })),
+        })),
+      }
+      const res = await applyLocalEpisodeGroup({
+        tmdbId: Number(tmdbId),
+        localEpisodeGroup,
+      })
+      if (res?.data?.groupId) {
+        form.setFieldsValue({ tmdbEpisodeGroupId: res.data.groupId })
+        messageApi.success(`剧集组已保存，共 ${res.data.episodeCount} 条映射`)
+        setEditEgOpen(false)
+        setEditEgData(null)
+      }
+    } catch (e) {
+      messageApi.error(`保存失败: ${e?.response?.data?.detail || e.message}`)
+    } finally {
+      setEditEgSaving(false)
+    }
+  }
+
   const handleLocalEgApply = async () => {
     if (!localEgParsedData) { messageApi.warning('请先解析剧集组数据'); return }
     if (!tmdbId) { messageApi.warning('请先填写 TMDB ID'); return }
@@ -1287,6 +1408,14 @@ export const Library = () => {
                         label: '粘贴JSON',
                         onClick: () => {
                           setPasteJsonOpen(true)
+                        },
+                      },
+                      { type: 'divider' },
+                      {
+                        key: 'edit-eg',
+                        label: '查看/编辑剧集组',
+                        onClick: () => {
+                          handleOpenEditEg()
                         },
                       },
                     ],
@@ -1977,6 +2106,145 @@ export const Library = () => {
           value={pasteJsonValue}
           onChange={(e) => setPasteJsonValue(e.target.value)}
         />
+      </Modal>
+      {/* 查看/编辑剧集组 Modal */}
+      <Modal
+        title={`查看/编辑剧集组 ${editEgData?.id || ''}`}
+        open={editEgOpen}
+        width={700}
+        zIndex={110}
+        onCancel={() => { setEditEgOpen(false); setEditEgData(null) }}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => { setEditEgOpen(false); setEditEgData(null) }}>取消</Button>
+            <Button type="primary" loading={editEgSaving} onClick={handleSaveEditEg}>
+              保存修改
+            </Button>
+          </div>
+        }
+      >
+        {editEgData && (
+          <div className="max-h-[60vh] overflow-y-auto">
+            <div className="flex gap-3 mb-4">
+              <div className="flex-1">
+                <div className="text-xs text-gray-500 mb-1">剧集组名称</div>
+                <Input
+                  value={editEgData.name}
+                  onChange={e => updateEditEgField(['name'], e.target.value)}
+                  placeholder="剧集组名称"
+                />
+              </div>
+              <div className="flex-1">
+                <div className="text-xs text-gray-500 mb-1">描述</div>
+                <Input
+                  value={editEgData.description}
+                  onChange={e => updateEditEgField(['description'], e.target.value)}
+                  placeholder="描述"
+                />
+              </div>
+            </div>
+            <Collapse
+              size="small"
+              defaultActiveKey={editEgData.groups.map((_, i) => i)}
+              items={editEgData.groups.map((group, gi) => ({
+                key: gi,
+                label: (
+                  <div className="flex items-center gap-2 w-full">
+                    <span className="font-bold">{group.name || `组 ${gi + 1}`}</span>
+                    <Tag>{group.episodes.length} 集</Tag>
+                    <span className="text-xs text-gray-400">Order: {group.order}</span>
+                  </div>
+                ),
+                extra: (
+                  <Button
+                    type="text" danger size="small"
+                    onClick={e => { e.stopPropagation(); removeEgGroup(gi) }}
+                  >
+                    删除组
+                  </Button>
+                ),
+                children: (
+                  <div>
+                    <div className="flex gap-2 mb-2">
+                      <Input
+                        size="small" placeholder="组名"
+                        value={group.name}
+                        onChange={e => updateEditEgField(['groups', gi, 'name'], e.target.value)}
+                        style={{ width: 150 }}
+                      />
+                      <InputNumber
+                        size="small" placeholder="Order"
+                        value={group.order} min={0}
+                        onChange={v => updateEditEgField(['groups', gi, 'order'], v ?? 0)}
+                        style={{ width: 90 }}
+                      />
+                    </div>
+                    <Table
+                      size="small" pagination={false}
+                      dataSource={group.episodes}
+                      rowKey={(_, i) => i}
+                      columns={[
+                        {
+                          title: '季', dataIndex: 'seasonNumber', width: 70,
+                          render: (v, _, ei) => (
+                            <InputNumber size="small" value={v} min={0}
+                              onChange={val => updateEditEgField(['groups', gi, 'episodes', ei, 'seasonNumber'], val ?? 0)}
+                              style={{ width: '100%' }}
+                            />
+                          ),
+                        },
+                        {
+                          title: '集', dataIndex: 'episodeNumber', width: 70,
+                          render: (v, _, ei) => (
+                            <InputNumber size="small" value={v} min={0}
+                              onChange={val => updateEditEgField(['groups', gi, 'episodes', ei, 'episodeNumber'], val ?? 0)}
+                              style={{ width: '100%' }}
+                            />
+                          ),
+                        },
+                        {
+                          title: '顺序', dataIndex: 'order', width: 70,
+                          render: (v, _, ei) => (
+                            <InputNumber size="small" value={v} min={0}
+                              onChange={val => updateEditEgField(['groups', gi, 'episodes', ei, 'order'], val ?? 0)}
+                              style={{ width: '100%' }}
+                            />
+                          ),
+                        },
+                        {
+                          title: '标题', dataIndex: 'name',
+                          render: (v, _, ei) => (
+                            <Input size="small" value={v}
+                              onChange={e => updateEditEgField(['groups', gi, 'episodes', ei, 'name'], e.target.value)}
+                            />
+                          ),
+                        },
+                        {
+                          title: '', width: 50,
+                          render: (_, __, ei) => (
+                            <Button type="text" danger size="small"
+                              onClick={() => removeEgEpisode(gi, ei)}
+                            >
+                              删除
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
+                    <Button size="small" type="dashed" className="mt-2 w-full"
+                      onClick={() => addEgEpisode(gi)}
+                    >
+                      + 添加分集
+                    </Button>
+                  </div>
+                ),
+              }))}
+            />
+            <Button type="dashed" className="mt-3 w-full" onClick={addEgGroup}>
+              + 添加组
+            </Button>
+          </div>
+        )}
       </Modal>
     </div>
   )
