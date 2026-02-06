@@ -223,7 +223,7 @@ export const Library = () => {
           imageSrc = imageSrc.replace('/images/', '/data/images/')
         }
         // 如果两个地址都为空，则不渲染img标签，避免出现损坏的图片图标
-        return imageSrc ? <img src={imageSrc} className="w-12" /> : null
+        return imageSrc ? <img src={imageSrc} className="w-12 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => navigate(`/anime/${record.animeId}`)} /> : null
       },
     },
     {
@@ -903,9 +903,9 @@ export const Library = () => {
                     imageSrc = imageSrc.replace('/images/', '/data/images/')
                   }
                   return imageSrc ? (
-                    <img src={imageSrc} className="w-20 h-28 object-cover rounded" alt={record.title} />
+                    <img src={imageSrc} className="w-20 h-28 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity" alt={record.title} onClick={() => navigate(`/anime/${record.animeId}`)} />
                   ) : (
-                    <div className="w-20 h-28 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center">
+                    <div className="w-20 h-28 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center cursor-pointer hover:opacity-70 transition-opacity" onClick={() => navigate(`/anime/${record.animeId}`)}>
                       <MyIcon icon="image" size={32} />
                     </div>
                   )

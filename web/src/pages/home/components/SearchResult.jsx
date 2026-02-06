@@ -1295,9 +1295,12 @@ export const SearchResult = () => {
                 pageSize={pageSize}
                 total={total}
                 onChange={(page) => handlePageChange(page, pageSize)}
-                showQuickJumper
+                onShowSizeChange={(_, size) => handlePageChange(1, size)}
+                showQuickJumper={!isMobile}
+                showSizeChanger
+                pageSizeOptions={['5', '10', '20', '50']}
+                showLessItems={isMobile}
                 size={isMobile ? 'small' : 'default'}
-                simple={isMobile}
               />
             </div>
           )}
