@@ -1464,10 +1464,10 @@ export const SearchResult = () => {
             确认导入
           </Button>,
         ]}
+        styles={{ body: { overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: isMobile ? '75vh' : '70vh', padding: isMobile ? '12px 16px' : undefined } }}
       >
-        <div className="flex flex-col" style={{ maxHeight: isMobile ? '65vh' : '70vh' }}>
           {isMobile ? (
-            <div className="space-y-4 my-6 shrink-0">
+            <div className="space-y-3 mb-3 shrink-0">
               <div>
                 <div className="font-medium text-sm mb-2">作品标题</div>
                 <Input
@@ -1646,8 +1646,9 @@ export const SearchResult = () => {
           )}
           <Card
             size="small"
-            className="flex-1 min-h-0 overflow-y-auto"
-            styles={{ body: { padding: '8px 12px' } }}
+            className="flex-1 min-h-0"
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            styles={{ body: { padding: '8px 12px', flex: 1, minHeight: 0, overflowY: 'auto' } }}
           >
             <DndContext
               sensors={sensors}
@@ -1692,12 +1693,13 @@ export const SearchResult = () => {
                   setEpisodePageSize(size)
                   setEpisodePage(1)
                 }}
+                showSizeChanger
+                pageSizeOptions={['5', '10', '20', '50']}
                 showLessItems
                 size="small"
               />
             </div>
           )}
-        </div>
       </Modal>
       {/* 重整分集导入子弹窗 */}
       <Modal
@@ -1790,7 +1792,7 @@ export const SearchResult = () => {
         />
         <Card
           size="small"
-          className="mt-3 max-h-[40vh] overflow-y-auto"
+          className="mt-3 h-[40vh] overflow-y-auto"
           styles={{ body: { padding: '8px' } }}
         >
           {reshuffleResults.length > 0 ? (
