@@ -565,6 +565,7 @@ async def import_media_items(
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
+    from src.db.crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
 
     all_item_ids = set()
 
