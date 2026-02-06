@@ -226,7 +226,7 @@ const createFolderChain = (currentPath) => {
   return chain;
 };
 
-const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
+const DirectoryBrowser = ({ visible, onClose, onSelect, selectMode = 'directory', fileFilter }) => {
   const [loading, setLoading] = useState(false);
   const [currentPath, setCurrentPath] = useState('/');
   const [files, setFiles] = useState([]);
@@ -385,14 +385,29 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
   // 创建文件夹链
   const folderChain = useMemo(() => createFolderChain(currentPath), [currentPath]);
 
-  // 选择当前目录
+  // 选择当前目录 / 选择文件
   const handleSelectCurrent = () => {
-    // 如果有选中的文件夹，使用选中文件夹的路径，否则使用当前路径
-    const rawPath = selectedFile ? selectedFile.id : currentPath;
-    const pathToSelect = rawPath.replace(/^\/+/, '/');
-    console.log('选择目录 - selectedFile:', selectedFile, 'pathToSelect:', pathToSelect);
-    onSelect(pathToSelect);
-    onClose();
+    if (selectMode === 'file') {
+      // 文件选择模式：必须选中一个非目录文件
+      if (!selectedFile || selectedFile.isDir) {
+        message.warning('请先选择一个文件');
+        return;
+      }
+      if (fileFilter && !selectedFile.name?.toLowerCase().endsWith(fileFilter.toLowerCase())) {
+        message.warning(`请选择 ${fileFilter} 格式的文件`);
+        return;
+      }
+      const pathToSelect = selectedFile.id.replace(/^\/+/, '/');
+      onSelect(pathToSelect);
+      onClose();
+    } else {
+      // 目录选择模式（原有逻辑）
+      const rawPath = selectedFile ? selectedFile.id : currentPath;
+      const pathToSelect = rawPath.replace(/^\/+/, '/');
+      console.log('选择目录 - selectedFile:', selectedFile, 'pathToSelect:', pathToSelect);
+      onSelect(pathToSelect);
+      onClose();
+    }
   };
 
   return (
@@ -469,6 +484,7 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
           <Button
             type="primary"
             onClick={handleSelectCurrent}
+            disabled={selectMode === 'file' && (!selectedFile || selectedFile.isDir)}
             style={{
               borderRadius: '6px',
               background: 'var(--color-primary)',
@@ -479,7 +495,10 @@ const DirectoryBrowser = ({ visible, onClose, onSelect }) => {
               fontSize: '14px'
             }}
           >
-            {selectedFile && selectedFile.isDir ? `选择选中目录` : '选择当前目录'}
+            {selectMode === 'file'
+              ? (selectedFile && !selectedFile.isDir ? '选择此文件' : '请选择文件')
+              : (selectedFile && selectedFile.isDir ? '选择选中目录' : '选择当前目录')
+            }
           </Button>
         </div>
       }

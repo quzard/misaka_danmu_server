@@ -20,7 +20,7 @@ import {
   Typography,
   Dropdown,
 } from 'antd'
-import { QuestionCircleOutlined, MenuOutlined } from '@ant-design/icons'
+import { QuestionCircleOutlined, MenuOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
@@ -53,6 +53,7 @@ import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { ResponsiveTable } from '@/components/ResponsiveTable'
+import DirectoryBrowser from '../media-fetch/components/DirectoryBrowser'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store/index.js'
 import { useDefaultPageSize } from '../../hooks/useDefaultPageSize'
@@ -717,6 +718,7 @@ export const Library = () => {
   const [localPathOpen, setLocalPathOpen] = useState(false)
   const [localPathValue, setLocalPathValue] = useState('')
   const [localPathLoading, setLocalPathLoading] = useState(false)
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false)
 
   // 公共校验：解析并校验剧集组JSON数据
   const validateAndApplyEgJson = (jsonStr) => {
@@ -2113,13 +2115,31 @@ export const Library = () => {
         <div className="text-gray-500 text-sm mb-3">
           输入弹幕库服务端的本地文件路径或网络URL，服务端将读取并解析 JSON 文件。
         </div>
-        <Input
-          placeholder="例如：/path/to/episodegroup.json 或 https://..."
-          value={localPathValue}
-          onChange={(e) => setLocalPathValue(e.target.value)}
-          onPressEnter={handleLocalPathConfirm}
-        />
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            placeholder="例如：/path/to/episodegroup.json 或 https://..."
+            value={localPathValue}
+            onChange={(e) => setLocalPathValue(e.target.value)}
+            onPressEnter={handleLocalPathConfirm}
+          />
+          <Button
+            icon={<FolderOpenOutlined />}
+            onClick={() => setFileBrowserOpen(true)}
+            title="浏览服务端文件"
+          />
+        </Space.Compact>
       </Modal>
+      {/* 服务端文件浏览器（选择JSON文件） */}
+      <DirectoryBrowser
+        visible={fileBrowserOpen}
+        onClose={() => setFileBrowserOpen(false)}
+        onSelect={(path) => {
+          setLocalPathValue(path)
+          setFileBrowserOpen(false)
+        }}
+        selectMode="file"
+        fileFilter=".json"
+      />
       {/* 粘贴JSON Modal */}
       <Modal
         title="粘贴剧集组 JSON"
