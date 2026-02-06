@@ -154,7 +154,7 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
 
         {/* 第一步：选择数据源 */}
         <div>
-          <div className="font-medium mb-2 text-gray-900 dark:text-gray-100">📌 第一步：选择数据源</div>
+          <div className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>📌 第一步：选择数据源</div>
           <Select
             className="w-full"
             placeholder="选择要拆分的数据源"
@@ -175,7 +175,7 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
 
         {/* 第二步：选择分集 */}
         <div>
-          <div className="font-medium mb-2 text-gray-900 dark:text-gray-100 flex items-center justify-between">
+          <div className="font-medium mb-2 flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
             <span>📌 第二步：选择要拆分的分集</span>
             {episodes.length > 0 && (
               <Button size="small" onClick={handleSelectAll}>
@@ -196,7 +196,7 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
               >
                 {episodes.map(ep => (
                   <Checkbox key={ep.episodeId} value={ep.episodeId} className="!ml-0">
-                    <span className="text-gray-900 dark:text-gray-100">
+                    <span style={{ color: 'var(--color-text)' }}>
                       第{ep.episodeIndex}集 - {ep.title} ({ep.commentCount}条弹幕)
                     </span>
                   </Checkbox>
@@ -211,10 +211,10 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
 
         {/* 第三步：目标设置 */}
         <div>
-          <div className="font-medium mb-2 text-gray-900 dark:text-gray-100">📌 第三步：选择目标</div>
+          <div className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>📌 第三步：选择目标</div>
           <Radio.Group value={targetType} onChange={e => setTargetType(e.target.value)} className="mb-3">
-            <Radio value="new">创建新条目</Radio>
-            <Radio value="existing">合并到已有条目</Radio>
+            <Radio value="new"><span style={{ color: 'var(--color-text)' }}>创建新条目</span></Radio>
+            <Radio value="existing"><span style={{ color: 'var(--color-text)' }}>合并到已有条目</span></Radio>
           </Radio.Group>
 
           {targetType === 'new' ? (
