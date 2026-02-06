@@ -16,11 +16,15 @@ import {
   Table,
   Tooltip,
   Tag,
+  Collapse,
+  Typography,
 } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
+  fetchLocalEpisodeGroupUrl,
+  applyLocalEpisodeGroup,
   getAllEpisode,
   getAnimeDetail,
   getAnimeInfoAsSource,
@@ -701,22 +705,77 @@ export const Library = () => {
   const [allEpisode, setAllEpisode] = useState({})
   const [episodeOpen, setEpisodeOpen] = useState(false)
 
+  // ---- 本地剧集组 state ----
+  const [localEgOpen, setLocalEgOpen] = useState(false)
+  const [localEgParsedData, setLocalEgParsedData] = useState(null)
+  const [localEgApplyLoading, setLocalEgApplyLoading] = useState(false)
+
+  const handleLocalEgApply = async () => {
+    if (!localEgParsedData) { messageApi.warning('请先解析剧集组数据'); return }
+    if (!tmdbId) { messageApi.warning('请先填写 TMDB ID'); return }
+    try {
+      setLocalEgApplyLoading(true)
+      const res = await applyLocalEpisodeGroup({
+        tmdbId: Number(tmdbId),
+        localEpisodeGroup: localEgParsedData,
+      })
+      if (res?.data?.groupId) {
+        form.setFieldsValue({ tmdbEpisodeGroupId: res.data.groupId })
+        messageApi.success(`本地剧集组已应用，共 ${res.data.episodeCount} 条映射`)
+        setLocalEgOpen(false)
+        setLocalEgParsedData(null)
+      }
+    } catch (e) {
+      messageApi.error(`应用失败: ${e?.response?.data?.detail || e.message}`)
+    } finally {
+      setLocalEgApplyLoading(false)
+    }
+  }
+
+  // 判断输入是否为 URL 或本地路径
+  const isEgidInputPath = (val) => {
+    if (!val) return false
+    const v = val.trim()
+    return v.startsWith('http://') || v.startsWith('https://') || v.endsWith('.json')
+  }
+
   const onEgidSearch = async () => {
     try {
       if (searchEgidLoading) return
       setSearchEgidLoading(true)
-      const res = await getEgidSearch({
-        tmdbId: tmdbId,
-        keyword: title,
-      })
-      if (!!res?.data?.length) {
-        setEgidResult(res?.data || [])
-        setEgidOpen(true)
+
+      const egidValue = form.getFieldValue('tmdbEpisodeGroupId')?.trim()
+
+      if (isEgidInputPath(egidValue)) {
+        // URL 或本地路径 → 获取JSON → 弹预览窗
+        const res = await fetchLocalEpisodeGroupUrl({ url: egidValue })
+        if (res?.data?.groups) {
+          setLocalEgParsedData(res.data)
+          setLocalEgOpen(true)
+        } else {
+          messageApi.error('获取的JSON格式不正确')
+        }
+      } else if (egidValue) {
+        // 有内容但不是路径 → 当作剧集组ID直接查详情
+        const res = await getAllEpisode({ tmdbId: tmdbId, egid: egidValue })
+        if (res?.data?.id) {
+          setAllEpisode(res.data)
+          setEpisodeOpen(true)
+        } else {
+          messageApi.error('没有找到该剧集组的分集信息')
+        }
       } else {
-        messageApi.error('没有找到相关内容')
+        // 空 → 按标题搜索剧集组列表（原逻辑）
+        const res = await getEgidSearch({ tmdbId: tmdbId, keyword: title })
+        if (res?.data?.length) {
+          setEgidResult(res.data)
+          setEgidOpen(true)
+        } else {
+          messageApi.error('没有找到相关内容')
+        }
       }
     } catch (error) {
-      messageApi.error(`剧集组搜索失败:${error.message}`)
+      messageApi.error(`剧集组搜索失败: ${error?.response?.data?.detail || error.message}`)
     } finally {
       setSearchEgidLoading(false)
     }
@@ -1123,7 +1182,7 @@ export const Library = () => {
           </Form.Item>
           <Form.Item name="tmdbEpisodeGroupId" label="剧集组ID">
             <Input.Search
-              placeholder="TMDB Episode Group Id"
+              placeholder="剧集组ID / URL / 本地路径(.json)"
               allowClear
               enterButton="搜索"
               loading={searchEgidLoading}
@@ -1726,6 +1785,61 @@ export const Library = () => {
             }
           </div>
         </div>
+      </Modal>
+      {/* 本地剧集组预览 Modal */}
+      <Modal
+        title="本地剧集组预览"
+        open={localEgOpen}
+        footer={null}
+        zIndex={110}
+        onCancel={() => {
+          setLocalEgOpen(false)
+          setLocalEgParsedData(null)
+        }}
+        width={600}
+      >
+        {localEgParsedData && (
+          <div>
+            <Card size="small" title={
+              <span>
+                共 {localEgParsedData.groups?.length || 0} 组，
+                {localEgParsedData.groups?.reduce((sum, g) => sum + (g.episodes?.length || 0), 0)} 集
+              </span>
+            }>
+              {localEgParsedData.description && (
+                <Typography.Paragraph type="secondary" ellipsis={{ rows: 2, expandable: true }}>
+                  {localEgParsedData.description}
+                </Typography.Paragraph>
+              )}
+              <Collapse
+                size="small"
+                items={localEgParsedData.groups?.map((g, i) => ({
+                  key: i,
+                  label: `${g.name || `组 ${i + 1}`} (${g.episodes?.length || 0} 集)`,
+                  children: (
+                    <div className="max-h-40 overflow-y-auto text-sm">
+                      {g.episodes?.map((ep, j) => (
+                        <div key={j}>
+                          S{String(ep.season_number ?? 0).padStart(2, '0')}
+                          E{String(ep.episode_number ?? 0).padStart(2, '0')}
+                          {' → '}Order: {ep.order}
+                        </div>
+                      ))}
+                    </div>
+                  ),
+                }))}
+              />
+            </Card>
+            <Button
+              type="primary"
+              className="mt-3 w-full"
+              loading={localEgApplyLoading}
+              onClick={handleLocalEgApply}
+            >
+              应用此剧集组
+            </Button>
+          </div>
+        )}
       </Modal>
     </div>
   )

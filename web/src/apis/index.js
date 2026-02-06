@@ -161,6 +161,17 @@ export const getAllEpisode = data =>
     tmdbId: data.tmdbId,
   })
 
+/** 获取本地剧集组JSON（支持URL和本地路径） */
+export const fetchLocalEpisodeGroupUrl = data =>
+  api.post(`/api/ui/local-episode-group/fetch`, { url: data.url })
+
+/** 应用本地剧集组映射 */
+export const applyLocalEpisodeGroup = data =>
+  api.post(`/api/ui/local-episode-group/apply`, {
+    tmdbId: data.tmdbId,
+    localEpisodeGroup: data.localEpisodeGroup,
+  })
+
 /** 搜索BGM */
 export const getBgmSearch = data =>
   api.get(
