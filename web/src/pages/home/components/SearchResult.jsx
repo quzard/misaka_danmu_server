@@ -1464,7 +1464,7 @@ export const SearchResult = () => {
           </Button>,
         ]}
       >
-        <div className={isMobile ? "max-h-[60vh]" : "max-h-[70vh] overflow-y-auto"}>
+        <div>
           {isMobile ? (
             <div className="space-y-4 my-6">
               <div>
@@ -1645,7 +1645,11 @@ export const SearchResult = () => {
               </div>
             </>
           )}
-          <div>
+          <Card
+            size="small"
+            className={isMobile ? "max-h-[45vh] overflow-y-auto" : "max-h-[50vh] overflow-y-auto"}
+            styles={{ body: { padding: '8px 12px' } }}
+          >
             <DndContext
               sensors={sensors}
               collisionDetection={closestCorners}
@@ -1684,7 +1688,7 @@ export const SearchResult = () => {
               {/* 拖拽覆盖层 */}
               <DragOverlay>{renderDragOverlay()}</DragOverlay>
             </DndContext>
-          </div>
+          </Card>
         </div>
       </Modal>
       {/* 重整分集导入子弹窗 */}
