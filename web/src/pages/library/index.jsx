@@ -18,8 +18,9 @@ import {
   Tag,
   Collapse,
   Typography,
+  Dropdown,
 } from 'antd'
-import { QuestionCircleOutlined } from '@ant-design/icons'
+import { QuestionCircleOutlined, MenuOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
@@ -709,6 +710,58 @@ export const Library = () => {
   const [localEgOpen, setLocalEgOpen] = useState(false)
   const [localEgParsedData, setLocalEgParsedData] = useState(null)
   const [localEgApplyLoading, setLocalEgApplyLoading] = useState(false)
+  const localEgFileRef = useRef(null)
+  const [pasteJsonOpen, setPasteJsonOpen] = useState(false)
+  const [pasteJsonValue, setPasteJsonValue] = useState('')
+
+  // 公共校验：解析并校验剧集组JSON数据
+  const validateAndApplyEgJson = (jsonStr) => {
+    try {
+      const data = JSON.parse(jsonStr)
+      if (!data.groups || !Array.isArray(data.groups) || data.groups.length === 0) {
+        messageApi.error('JSON 格式不正确：缺少有效的 groups 数组')
+        return false
+      }
+      for (const g of data.groups) {
+        if (!g.episodes || !Array.isArray(g.episodes)) {
+          messageApi.error('JSON 格式不正确：每个 group 需要包含 episodes 数组')
+          return false
+        }
+      }
+      setLocalEgParsedData(data)
+      setLocalEgOpen(true)
+      return true
+    } catch {
+      messageApi.error('内容不是有效的 JSON')
+      return false
+    }
+  }
+
+  // 本地JSON文件选择后的校验处理
+  const handleLocalEgFileChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    if (!file.name.endsWith('.json')) {
+      messageApi.error('请选择 .json 格式的文件')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (evt) => validateAndApplyEgJson(evt.target.result)
+    reader.readAsText(file)
+  }
+
+  // 粘贴JSON确认
+  const handlePasteJsonConfirm = () => {
+    if (!pasteJsonValue.trim()) {
+      messageApi.warning('请粘贴 JSON 内容')
+      return
+    }
+    if (validateAndApplyEgJson(pasteJsonValue)) {
+      setPasteJsonOpen(false)
+      setPasteJsonValue('')
+    }
+  }
 
   const handleLocalEgApply = async () => {
     if (!localEgParsedData) { messageApi.warning('请先解析剧集组数据'); return }
@@ -765,7 +818,11 @@ export const Library = () => {
           messageApi.error('没有找到该剧集组的分集信息')
         }
       } else {
-        // 空 → 按标题搜索剧集组列表（原逻辑）
+        // 空 → 按TMDB ID搜索剧集组列表
+        if (!tmdbId) {
+          messageApi.warning('请先填写 TMDB ID，或输入本地剧集组路径 / 网络URL')
+          return
+        }
         const res = await getEgidSearch({ tmdbId: tmdbId, keyword: title })
         if (res?.data?.length) {
           setEgidResult(res.data)
@@ -1189,7 +1246,67 @@ export const Library = () => {
               onSearch={() => {
                 onEgidSearch()
               }}
-              disabled={type === DANDAN_TYPE_MAPPING.movie || !tmdbId}
+              suffix={
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'id-search',
+                        label: '剧集组ID直搜',
+                        onClick: async () => {
+                          const egidValue = form.getFieldValue('tmdbEpisodeGroupId')?.trim()
+                          if (!egidValue) {
+                            messageApi.warning('请先输入剧集组ID')
+                            return
+                          }
+                          try {
+                            setSearchEgidLoading(true)
+                            const res = await getAllEpisode({ tmdbId: tmdbId, egid: egidValue })
+                            if (res?.data?.id) {
+                              setAllEpisode(res.data)
+                              setEpisodeOpen(true)
+                            } else {
+                              messageApi.error('没有找到该剧集组的分集信息')
+                            }
+                          } catch (error) {
+                            messageApi.error(`搜索失败: ${error?.response?.data?.detail || error.message}`)
+                          } finally {
+                            setSearchEgidLoading(false)
+                          }
+                        },
+                      },
+                      {
+                        key: 'local-json',
+                        label: '查询本地JSON',
+                        onClick: () => {
+                          localEgFileRef.current?.click()
+                        },
+                      },
+                      {
+                        key: 'paste-json',
+                        label: '粘贴JSON',
+                        onClick: () => {
+                          setPasteJsonOpen(true)
+                        },
+                      },
+                    ],
+                  }}
+                  trigger={['click']}
+                  placement="bottomRight"
+                >
+                  <MenuOutlined
+                    className="cursor-pointer opacity-60 transition-all hover:opacity-100"
+                    style={{ fontSize: 14 }}
+                  />
+                </Dropdown>
+              }
+            />
+            <input
+              type="file"
+              ref={localEgFileRef}
+              accept=".json"
+              style={{ display: 'none' }}
+              onChange={handleLocalEgFileChange}
             />
           </Form.Item>
           <Form.Item name="bangumiId" label="BGM ID">
@@ -1840,6 +1957,26 @@ export const Library = () => {
             </Button>
           </div>
         )}
+      </Modal>
+      {/* 粘贴JSON Modal */}
+      <Modal
+        title="粘贴剧集组 JSON"
+        open={pasteJsonOpen}
+        onOk={handlePasteJsonConfirm}
+        okText="确认"
+        cancelText="取消"
+        zIndex={110}
+        onCancel={() => {
+          setPasteJsonOpen(false)
+          setPasteJsonValue('')
+        }}
+      >
+        <Input.TextArea
+          rows={12}
+          placeholder='请粘贴 StrmAssistant 格式的剧集组 JSON，需包含 "groups" 数组'
+          value={pasteJsonValue}
+          onChange={(e) => setPasteJsonValue(e.target.value)}
+        />
       </Modal>
     </div>
   )
