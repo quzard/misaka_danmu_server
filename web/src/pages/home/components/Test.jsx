@@ -554,7 +554,6 @@ export const Test = () => {
                             size="small"
                             showSizeChanger
                             pageSizeOptions={[10, 20, 50, 100]}
-                            showTotal={(total) => `共 ${total} 条`}
                             onChange={(page, size) => {
                               setCurrentPage(page)
                               setPageSize(size)
