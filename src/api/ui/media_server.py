@@ -227,7 +227,7 @@ async def test_media_server_connection(
 
         # 如果没有找到(可能是禁用的服务器),从数据库读取配置并临时创建实例
         if not server:
-            config = await get_media_server_by_id(session, server_id)
+            config = await crud.get_media_server_by_id(session, server_id)
             if not config:
                 raise HTTPException(status_code=404, detail="媒体服务器不存在")
 
@@ -271,7 +271,7 @@ async def get_media_server_libraries(
 
     # 如果没有找到,从数据库读取配置并临时创建实例
     if not server:
-        config = await get_media_server_by_id(session, server_id)
+        config = await crud.get_media_server_by_id(session, server_id)
         if not config:
             raise HTTPException(status_code=404, detail="媒体服务器不存在")
 
@@ -316,7 +316,7 @@ async def scan_media_server_library(
         raise HTTPException(status_code=404, detail="媒体服务器不存在")
 
     # 从数据库获取服务器配置以获取名称
-    server_config = await get_media_server_by_id(session, server_id)
+    server_config = await crud.get_media_server_by_id(session, server_id)
     server_name = server_config.get('name', f'服务器{server_id}') if server_config else f'服务器{server_id}'
 
     # 创建协程工厂函数
@@ -565,6 +565,7 @@ async def import_media_items(
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
+    from src.db.crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
 
     all_item_ids = set()
 

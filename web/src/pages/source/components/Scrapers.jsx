@@ -80,6 +80,7 @@ import {
   QuestionCircleOutlined,
 } from '@ant-design/icons'
 
+import ReactMarkdown from 'react-markdown'
 import { QRCodeCanvas } from 'qrcode.react'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store'
@@ -208,9 +209,13 @@ export const Scrapers = () => {
     localVersion: 'unknown',
     remoteVersion: null,
     officialVersion: null,
-    hasUpdate: false
+    hasUpdate: false,
+    localChangelog: null,
+    remoteChangelog: null,
+    officialChangelog: null
   })
   const [loadingVersions, setLoadingVersions] = useState(false)
+  const [changelogModal, setChangelogModal] = useState({ open: false, title: '', content: '' })
   const [uploadingPackage, setUploadingPackage] = useState(false)
   const [sseConnected, setSseConnected] = useState(false)
 
@@ -352,7 +357,10 @@ export const Scrapers = () => {
         localVersion: res.data?.localVersion || 'unknown',
         remoteVersion: res.data?.remoteVersion || null,
         officialVersion: res.data?.officialVersion || null,
-        hasUpdate: res.data?.hasUpdate || false
+        hasUpdate: res.data?.hasUpdate || false,
+        localChangelog: res.data?.localChangelog || null,
+        remoteChangelog: res.data?.remoteChangelog || null,
+        officialChangelog: res.data?.officialChangelog || null
       })
       return res.data
     } catch (error) {
@@ -453,8 +461,21 @@ export const Scrapers = () => {
           const data = JSON.parse(event.data)
 
           if (data.type === 'progress') {
+            console.log('收到 progress 消息:', data.status, 'need_restart:', data.need_restart)
             // 更新进度
-            const progress = data.total > 0 ? Math.round((data.current / data.total) * 100) : 0
+            // 当 total = 0 时（无需下载），显示 100%；否则按实际进度计算
+            // 当 current = total 且 total > 0 时，也显示 100%（下载完成，可能在热加载中）
+            let progress = 0
+            if (data.total === 0) {
+              // 无需下载的情况，直接显示 100%
+              progress = 100
+            } else if (data.current >= data.total) {
+              // 下载完成（可能在热加载或部署阶段）
+              progress = 100
+            } else {
+              progress = Math.round((data.current / data.total) * 100)
+            }
+
             setDownloadProgress(prev => ({
               ...prev,
               current: data.current,
@@ -464,50 +485,27 @@ export const Scrapers = () => {
               message: data.messages?.slice(-1)[0] || prev.message
             }))
 
-            // 检查状态
+            // 检查状态 - 只更新显示，不处理完成逻辑（统一在 done 消息中处理）
             if (data.status === 'completed') {
-              taskCompleted = true
               const downloadedCount = data.downloaded_count || 0
               const skippedCount = data.skipped_count || 0
               const failedCount = data.failed_count || 0
 
-              // 如果需要重启，不在这里刷新，等待 done 消息中的 checkServiceReady() 处理
+              // 只更新进度显示，完成逻辑统一在 done 消息中处理
               if (data.need_restart) {
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
                   message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}，等待容器重启...`
                 }))
-                // 不刷新，等待 done 消息
               } else {
                 setDownloadProgress(prev => ({
                   ...prev,
                   progress: 100,
                   message: `下载完成! 成功: ${downloadedCount}, 跳过: ${skippedCount}, 失败: ${failedCount}`
                 }))
-
-                if (downloadedCount > 0) {
-                  messageApi.success('资源加载成功')
-                } else {
-                  messageApi.success('所有弹幕源都是最新的')
-                }
-
-                // 只有不需要重启时才延迟刷新
-                setTimeout(() => {
-                  setDownloadProgress({
-                    visible: false,
-                    current: 0,
-                    total: 0,
-                    progress: 0,
-                    message: '',
-                    scraper: '',
-                    isRestarting: false
-                  })
-                  getInfo()
-                  loadVersionInfo()
-                  setLoadingResources(false)
-                }, downloadedCount > 0 ? 2000 : 1000)
               }
+              // 不在这里设置 taskCompleted 和刷新，等待 done 消息统一处理
             }
 
             if (data.status === 'failed') {
@@ -554,6 +552,7 @@ export const Scrapers = () => {
           }
 
           if (data.type === 'done') {
+            console.log('收到 done 消息:', data)
             taskCompleted = true
 
             // 检查是否需要重启
@@ -687,6 +686,33 @@ export const Scrapers = () => {
               }
 
               checkServiceReady()
+            } else {
+              // 不需要重启的情况（首次下载热加载完成 或 所有弹幕源都是最新的）
+              messageApi.success('弹幕源加载完成')
+
+              // 显示刷新动画
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: 100,
+                message: '正在刷新页面数据...',
+                isRestarting: true  // 复用重启动画
+              }))
+
+              // 延迟关闭进度条并刷新数据
+              setTimeout(() => {
+                setDownloadProgress({
+                  visible: false,
+                  current: 0,
+                  total: 0,
+                  progress: 0,
+                  message: '',
+                  scraper: '',
+                  isRestarting: false
+                })
+                getInfo()
+                loadVersionInfo()
+                setLoadingResources(false)
+              }, 1500)
             }
 
             // SSE 流正常结束
@@ -931,17 +957,148 @@ export const Scrapers = () => {
           'Content-Type': 'multipart/form-data'
         }
       })
-      messageApi.success(res.data?.message || '上传成功')
 
-      // 延迟刷新,等待后台重载完成
-      setTimeout(async () => {
-        try {
-          await getInfo()
-          await loadVersionInfo()
-        } catch (error) {
-          console.error('刷新信息失败:', error)
+      const responseData = res.data || {}
+      const needRestart = responseData.need_restart
+      const autoRestart = responseData.auto_restart
+
+      if (needRestart) {
+        // 需要重启容器
+        if (autoRestart) {
+          // 自动重启：显示等待进度
+          messageApi.info(responseData.message || '上传成功，容器正在重启...')
+          setDownloadProgress({
+            visible: true,
+            current: 0,
+            total: 0,
+            progress: 0,
+            message: '容器正在重启中...',
+            scraper: '',
+            isRestarting: true
+          })
+
+          // 轮询检测服务是否恢复
+          const checkServiceReady = async () => {
+            const maxWaitSeconds = 120
+            let waitSeconds = 0
+            let serviceWentDown = false
+
+            // 第一阶段：等待服务停止
+            setDownloadProgress(prev => ({
+              ...prev,
+              progress: 0,
+              message: '等待容器停止...'
+            }))
+
+            for (let i = 0; i < 30; i++) {
+              waitSeconds++
+              const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: Math.min(restartProgress, 25),
+                message: `等待容器停止... (${waitSeconds}秒)`
+              }))
+
+              try {
+                const response = await fetch('/api/ui/version', {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(2000)
+                })
+                if (!response.ok) {
+                  serviceWentDown = true
+                  break
+                }
+              } catch (e) {
+                serviceWentDown = true
+                break
+              }
+
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+
+            // 第二阶段：等待服务恢复
+            for (let i = 0; i < 60; i++) {
+              const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+              setDownloadProgress(prev => ({
+                ...prev,
+                progress: Math.min(restartProgress, 95),
+                message: `正在等待服务恢复... (${waitSeconds}秒)`
+              }))
+
+              try {
+                const response = await fetch('/api/ui/version', {
+                  method: 'GET',
+                  signal: AbortSignal.timeout(3000)
+                })
+                if (response.ok) {
+                  setDownloadProgress(prev => ({
+                    ...prev,
+                    progress: 100,
+                    message: '服务已恢复，正在刷新...'
+                  }))
+                  await new Promise(resolve => setTimeout(resolve, 500))
+                  setDownloadProgress({
+                    visible: false,
+                    current: 0,
+                    total: 0,
+                    progress: 0,
+                    message: '',
+                    scraper: '',
+                    isRestarting: false
+                  })
+                  messageApi.success('容器重启完成')
+                  await getInfo()
+                  await loadVersionInfo()
+                  return
+                }
+              } catch (e) {
+                // 继续等待
+              }
+
+              for (let j = 0; j < 2; j++) {
+                await new Promise(resolve => setTimeout(resolve, 1000))
+                waitSeconds++
+                const restartProgress = Math.round((waitSeconds / maxWaitSeconds) * 100)
+                setDownloadProgress(prev => ({
+                  ...prev,
+                  progress: Math.min(restartProgress, 95),
+                  message: `正在等待服务恢复... (${waitSeconds}秒)`
+                }))
+              }
+            }
+
+            // 超时
+            setDownloadProgress({
+              visible: false,
+              current: 0,
+              total: 0,
+              progress: 0,
+              message: '',
+              scraper: '',
+              isRestarting: false
+            })
+            messageApi.warning('容器重启超时，请手动刷新页面')
+          }
+
+          checkServiceReady()
+        } else {
+          // 手动重启：显示提示信息
+          messageApi.warning(responseData.message || '上传成功，请手动重启容器以加载新的弹幕源')
         }
-      }, 2500) // 延迟2.5秒
+      } else {
+        // 不需要重启（首次上传热加载）
+        messageApi.success(responseData.message || '上传成功')
+
+        // 延迟刷新,等待后台热加载完成
+        setTimeout(async () => {
+          try {
+            await getInfo()
+            await loadVersionInfo()
+          } catch (error) {
+            console.error('刷新信息失败:', error)
+          }
+        }, 2500)
+      }
     } catch (error) {
       messageApi.error(error.response?.data?.detail || '上传失败')
     } finally {
@@ -1640,20 +1797,38 @@ export const Scrapers = () => {
                         {versionInfo.officialVersion && (
                           <>
                             <Typography.Text className="text-sm text-gray-600">主仓:</Typography.Text>
-                            <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                            <Typography.Text
+                              code
+                              style={{ color: '#ce1ea2ff', cursor: versionInfo.officialChangelog ? 'pointer' : 'default' }}
+                              onClick={() => versionInfo.officialChangelog && setChangelogModal({ open: true, title: '主仓版本日志', content: versionInfo.officialChangelog })}
+                            >
+                              {versionInfo.officialVersion}
+                            </Typography.Text>
                           </>
                         )}
                         {versionInfo.remoteVersion && (
                           <>
                             <Typography.Text className="text-sm text-gray-600">远程:</Typography.Text>
-                            <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                            <Typography.Text
+                              code
+                              style={{ color: '#52c41a', cursor: versionInfo.remoteChangelog ? 'pointer' : 'default' }}
+                              onClick={() => versionInfo.remoteChangelog && setChangelogModal({ open: true, title: '远程版本日志', content: versionInfo.remoteChangelog })}
+                            >
+                              {versionInfo.remoteVersion}
+                            </Typography.Text>
                           </>
                         )}
                       </div>
                       <div className="flex gap-3">
                         <div className="flex items-center gap-8">
                           <Typography.Text className="text-sm text-gray-600">本地:</Typography.Text>
-                          <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#1890ff', cursor: versionInfo.localChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.localChangelog && setChangelogModal({ open: true, title: '本地版本日志', content: versionInfo.localChangelog })}
+                          >
+                            {versionInfo.localVersion}
+                          </Typography.Text>
                         </div>
                         <div className="ml-auto">
                           <Button
@@ -1716,18 +1891,36 @@ export const Scrapers = () => {
                       {versionInfo.officialVersion && (
                         <div className="flex items-center gap-2">
                           <Typography.Text className="text-sm text-gray-600">主仓版本:</Typography.Text>
-                          <Typography.Text code style={{ color: '#ce1ea2ff' }}>{versionInfo.officialVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#ce1ea2ff', cursor: versionInfo.officialChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.officialChangelog && setChangelogModal({ open: true, title: '主仓版本日志', content: versionInfo.officialChangelog })}
+                          >
+                            {versionInfo.officialVersion}
+                          </Typography.Text>
                         </div>
                       )}
                       {versionInfo.remoteVersion && (
                         <div className="flex items-center gap-2">
                           <Typography.Text className="text-sm text-gray-600">远程版本:</Typography.Text>
-                          <Typography.Text code style={{ color: '#52c41a' }}>{versionInfo.remoteVersion}</Typography.Text>
+                          <Typography.Text
+                            code
+                            style={{ color: '#52c41a', cursor: versionInfo.remoteChangelog ? 'pointer' : 'default' }}
+                            onClick={() => versionInfo.remoteChangelog && setChangelogModal({ open: true, title: '远程版本日志', content: versionInfo.remoteChangelog })}
+                          >
+                            {versionInfo.remoteVersion}
+                          </Typography.Text>
                         </div>
                       )}
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">本地版本:</Typography.Text>
-                        <Typography.Text code style={{ color: '#1890ff' }}>{versionInfo.localVersion}</Typography.Text>
+                        <Typography.Text
+                          code
+                          style={{ color: '#1890ff', cursor: versionInfo.localChangelog ? 'pointer' : 'default' }}
+                          onClick={() => versionInfo.localChangelog && setChangelogModal({ open: true, title: '本地版本日志', content: versionInfo.localChangelog })}
+                        >
+                          {versionInfo.localVersion}
+                        </Typography.Text>
                       </div>
                       <div className="flex items-center gap-2">
                         <Typography.Text className="text-sm text-gray-600">自动更新:</Typography.Text>
@@ -2426,6 +2619,49 @@ export const Scrapers = () => {
           </a>{' '}
           提供，为Blibili官方非公开接口。
           您的登录凭据将加密存储在您自己的数据库中。登录行为属用户个人行为，通过该登录获取数据同等于使用您的账号获取，由登录用户自行承担相关责任，与本工具无关。使用本接口登录等同于认同该声明。
+        </div>
+      </Modal>
+
+      {/* 版本日志弹窗 */}
+      <Modal
+        title={changelogModal.title}
+        open={changelogModal.open}
+        onCancel={() => setChangelogModal({ open: false, title: '', content: '' })}
+        footer={null}
+        width={isMobile ? '95%' : 520}
+        centered
+      >
+        <div className="max-h-[60vh] overflow-y-auto">
+          {changelogModal.content ? (
+            <div className="text-sm leading-relaxed">
+              <ReactMarkdown
+                components={{
+                  a: ({ href, children }) => (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+                      {children}
+                    </a>
+                  ),
+                  p: ({ children }) => <p className="my-1">{children}</p>,
+                  ul: ({ children }) => <ul className="list-disc list-inside my-1 space-y-0.5">{children}</ul>,
+                  ol: ({ children }) => <ol className="list-decimal list-inside my-1 space-y-0.5">{children}</ol>,
+                  li: ({ children }) => <li className="ml-2">{children}</li>,
+                  code: ({ children }) => (
+                    <code className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+                  ),
+                  blockquote: ({ children }) => (
+                    <blockquote className="border-l-4 border-blue-400 pl-3 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r text-sm">
+                      {children}
+                    </blockquote>
+                  ),
+                  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                }}
+              >
+                {changelogModal.content}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <Typography.Text type="secondary">暂无版本日志</Typography.Text>
+          )}
         </div>
       </Modal>
     </div >

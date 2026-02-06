@@ -368,7 +368,7 @@ class TmdbMetadataSource(BaseMetadataSource):
                         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少 tmdbId 或 groupId")
                     await self.update_tmdb_mappings(int(tmdb_id), group_id, user)
                     return {"message": "映射更新成功"}
-                
+
                 raise NotImplementedError(f"操作 '{action_name}' 在 {self.provider_name} 中未实现。")
         except ValueError as e:
             # 捕获 _create_client 中的 API Key 未配置错误

@@ -378,21 +378,21 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded">
               <div className="text-sm text-gray-500 dark:text-gray-400">总弹幕数</div>
-              <div className="text-xl font-bold">{detailData.totalCount}</div>
+              <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{detailData.totalCount}</div>
             </div>
             <div className="p-3 bg-green-50 dark:bg-green-900/30 rounded">
               <div className="text-sm text-gray-500 dark:text-gray-400">时间范围</div>
-              <div className="text-xl font-bold">
+              <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {formatTime(detailData.timeRange.start)} - {formatTime(detailData.timeRange.end)}
               </div>
             </div>
             <div className="p-3 bg-purple-50 dark:bg-purple-900/30 rounded">
               <div className="text-sm text-gray-500 dark:text-gray-400">来源数</div>
-              <div className="text-xl font-bold">{detailData.sources.length}</div>
+              <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{detailData.sources.length}</div>
             </div>
             <div className="p-3 bg-orange-50 dark:bg-orange-900/30 rounded">
               <div className="text-sm text-gray-500 dark:text-gray-400">时长</div>
-              <div className="text-xl font-bold">
+              <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
                 {Math.ceil((detailData.timeRange.end - detailData.timeRange.start) / 60)}分钟
               </div>
             </div>
@@ -466,7 +466,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
   // 渲染时间偏移标签页
   const renderOffsetTab = () => (
     <div className="space-y-4">
-      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm">
+      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm text-yellow-800 dark:text-yellow-200">
         <InfoCircleOutlined className="mr-2" />
         选择要调整的分集，设置偏移秒数（正数延后，负数提前），然后点击应用。
       </div>
@@ -538,7 +538,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
   // 渲染分集拆分标签页
   const renderSplitTab = () => (
     <div className="space-y-4">
-      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm">
+      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm text-yellow-800 dark:text-yellow-200">
         <InfoCircleOutlined className="mr-2" />
         将一个分集的弹幕按时间范围拆分到多个新分集。适用于合集视频拆分为单集。
       </div>
@@ -653,7 +653,7 @@ export const DanmakuEditModal = ({ open, onCancel, onSuccess, episodes, sourceIn
   // 渲染分集合并标签页
   const renderMergeTab = () => (
     <div className="space-y-4">
-      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm">
+      <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded text-sm text-yellow-800 dark:text-yellow-200">
         <InfoCircleOutlined className="mr-2" />
         将多个分集的弹幕合并到一个新分集。可拖拽调整顺序，并为每个源分集设置时间偏移。
       </div>

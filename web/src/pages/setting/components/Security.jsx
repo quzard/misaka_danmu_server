@@ -3,9 +3,9 @@ import {
   EyeOutlined,
   LockOutlined,
 } from '@ant-design/icons'
-import { Button, Card, Form, Input, message } from 'antd'
-import { useState } from 'react'
-import { changePassword, logout } from '../../../apis'
+import { Button, Card, Form, Input, message, Popconfirm } from 'antd'
+import { useState, useEffect } from 'react'
+import { changePassword, logout, getDockerStatus, restartService } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 import { useNavigate } from 'react-router-dom'
 import { RoutePaths } from '../../../general/RoutePaths'
@@ -17,8 +17,24 @@ export const Security = () => {
   const [showPassword2, setShowPassword2] = useState(false)
   const [showPassword3, setShowPassword3] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [dockerAvailable, setDockerAvailable] = useState(false)
+  const [restartLoading, setRestartLoading] = useState(false)
   const messageApi = useMessage()
   const navigate = useNavigate()
+
+  // 检查 Docker 套接字是否可用
+  useEffect(() => {
+    const checkDocker = async () => {
+      try {
+        const res = await getDockerStatus()
+        // API 返回 socketAvailable 字段
+        setDockerAvailable(res.data?.socketAvailable || false)
+      } catch (error) {
+        setDockerAvailable(false)
+      }
+    }
+    checkDocker()
+  }, [])
 
   const onSave = async () => {
     try {
@@ -54,6 +70,18 @@ export const Security = () => {
     await logout()
     Cookies.remove('danmu_token', { path: '/' })
     navigate(RoutePaths.LOGIN)
+  }
+
+  const handleRestart = async () => {
+    try {
+      setRestartLoading(true)
+      await restartService()
+      messageApi.success('重启指令已发送，请稍候...')
+    } catch (error) {
+      messageApi.error(error.response?.data?.detail || '重启失败')
+    } finally {
+      setRestartLoading(false)
+    }
   }
 
   return (
@@ -144,6 +172,27 @@ export const Security = () => {
           </Form.Item>
         </Form>
       </Card>
+
+      {dockerAvailable && (
+        <Card title="重启服务" className="mb-4">
+          <div className="mb-4">
+            重启容器服务。通常在更新弹幕源或修改配置后需要重启。
+          </div>
+          <div className="px-6 pb-6">
+            <Popconfirm
+              title="确认重启"
+              description="确定要重启服务吗？"
+              onConfirm={handleRestart}
+              okText="确定"
+              cancelText="取消"
+            >
+              <Button type="primary" loading={restartLoading}>
+                重启服务
+              </Button>
+            </Popconfirm>
+          </div>
+        </Card>
+      )}
 
       <Card title="退出登录">
         <div className="mb-4">

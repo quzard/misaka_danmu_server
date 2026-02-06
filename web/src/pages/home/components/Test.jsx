@@ -6,7 +6,7 @@ import {
   getCommentTest,
   getTokenList,
 } from '../../../apis'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Button,
   Card,
@@ -19,7 +19,9 @@ import {
   Select,
   Tag,
   Alert,
+  Pagination,
 } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
 
 export const Test = () => {
   const [loading, setLoading] = useState(false)
@@ -28,6 +30,9 @@ export const Test = () => {
   const [activeTab, setActiveTab] = useState('match')
   const [tokens, setTokens] = useState([])
   const [tokensLoading, setTokensLoading] = useState(false)
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
 
   // 加载 token 列表
   useEffect(() => {
@@ -70,72 +75,55 @@ export const Test = () => {
           component: Input,
         },
       ],
-      renderResult: data => {
-        // 检查是否有匹配结果
+      getListData: data => data?.matches || [],
+      searchFilter: (item, keyword) => {
+        const kw = keyword.toLowerCase()
+        return (item.animeTitle || '').toLowerCase().includes(kw) ||
+          (item.episodeTitle || '').toLowerCase().includes(kw)
+      },
+      renderHeader: data => {
         const hasMatches = data?.matches && data.matches.length > 0
-
-        if (!hasMatches) {
-          return <div className="text-red-600">[匹配失败] 未匹配到任何结果</div>
-        }
-
-        // 有匹配结果
+        if (!hasMatches) return <div className="text-red-600">[匹配失败] 未匹配到任何结果</div>
         const statusColor = data.isMatched ? 'text-green-600' : 'text-orange-600'
         const statusText = data.isMatched
           ? '[精确匹配]'
-          : `[多个匹配] 找到 ${data.matches.length} 个可能的匹配，请选择：`
-
-        return (
-          <>
-            <div className={`font-bold ${statusColor} mb-2`}>{statusText}</div>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {data.matches.map((it, index) => (
-                <div
-                  key={index}
-                  className={`p-3 rounded border ${
-                    data.isMatched
-                      ? 'bg-green-50 border-green-200'
-                      : 'bg-blue-50 border-blue-200 hover:bg-blue-100 cursor-pointer transition-colors'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    {it.imageUrl && (
-                      <img
-                        src={it.imageUrl}
-                        alt={it.animeTitle}
-                        className="w-16 h-24 object-cover rounded"
-                      />
-                    )}
-                    <div className="flex-1">
-                      <div className="font-semibold text-gray-800">
-                        {it.animeTitle}
-                        <span className="ml-2 text-xs text-gray-500">
-                          (作品ID: {it.animeId})
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-600 mt-1">
-                        {it.episodeTitle}
-                        <span className="ml-2 text-xs text-gray-400">
-                          (分集ID: {it.episodeId})
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">
-                        <Tag color={it.type === 'tvseries' ? 'blue' : 'purple'}>
-                          {it.typeDescription}
-                        </Tag>
-                        {it.shift !== 0 && (
-                          <Tag color="orange" className="ml-1">
-                            偏移: {it.shift > 0 ? `+${it.shift}` : it.shift}
-                          </Tag>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )
+          : `[多个匹配] 找到 ${data.matches.length} 个可能的匹配`
+        return <div className={`font-bold ${statusColor}`}>{statusText}</div>
       },
+      renderItem: (it, index, data) => (
+        <div
+          key={index}
+          className={`p-3 rounded border ${
+            data?.isMatched
+              ? 'bg-green-50 border-green-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            {it.imageUrl && (
+              <img src={it.imageUrl} alt={it.animeTitle} className="w-16 h-24 object-cover rounded" />
+            )}
+            <div className="flex-1">
+              <div className="font-semibold text-gray-800">
+                {it.animeTitle}
+                <span className="ml-2 text-xs text-gray-500">(作品ID: {it.animeId})</span>
+              </div>
+              <div className="text-sm text-gray-600 mt-1">
+                {it.episodeTitle}
+                <span className="ml-2 text-xs text-gray-400">(分集ID: {it.episodeId})</span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                <Tag color={it.type === 'tvseries' ? 'blue' : 'purple'}>{it.typeDescription}</Tag>
+                {it.shift !== 0 && (
+                  <Tag color="orange" className="ml-1">
+                    偏移: {it.shift > 0 ? `+${it.shift}` : it.shift}
+                  </Tag>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ),
     },
     searchEpisodes: {
       label: '搜索分集',
@@ -160,32 +148,25 @@ export const Test = () => {
           component: Input,
         },
       ],
-      renderResult: data => {
+      getListData: data => data?.animes || [],
+      searchFilter: (item, keyword) => {
+        const kw = keyword.toLowerCase()
+        return (item.animeTitle || '').toLowerCase().includes(kw) ||
+          (item.typeDescription || '').toLowerCase().includes(kw)
+      },
+      renderHeader: data => {
         if (data?.animes && data.animes.length > 0) {
-          return (
-            <>
-              <div className="font-bold text-green-600">
-                [搜索成功] 找到 {data.animes.length} 个结果
-              </div>
-              {data.animes.slice(0, 3).map((anime, index) => (
-                <div key={index} className="mt-2 p-2 bg-blue-50 rounded">
-                  <div>番剧: {anime.animeTitle} (ID: {anime.animeId})</div>
-                  <div>类型: {anime.typeDescription}</div>
-                  {anime.episodes && (
-                    <div>分集数: {anime.episodes.length}</div>
-                  )}
-                </div>
-              ))}
-              {data.animes.length > 3 && (
-                <div className="text-gray-500 mt-2">
-                  ... 还有 {data.animes.length - 3} 个结果
-                </div>
-              )}
-            </>
-          )
+          return <div className="font-bold text-green-600">[搜索成功] 找到 {data.animes.length} 个结果</div>
         }
         return <div className="text-red-600">[搜索失败] 未找到结果</div>
       },
+      renderItem: (anime, index) => (
+        <div key={index} className="p-2 bg-blue-50 rounded">
+          <div>番剧: {anime.animeTitle} (ID: {anime.animeId})</div>
+          <div>类型: {anime.typeDescription}</div>
+          {anime.episodes && <div>分集数: {anime.episodes.length}</div>}
+        </div>
+      ),
     },
     searchAnime: {
       label: '搜索作品',
@@ -202,30 +183,25 @@ export const Test = () => {
           component: Input,
         },
       ],
-      renderResult: data => {
+      getListData: data => data?.animes || [],
+      searchFilter: (item, keyword) => {
+        const kw = keyword.toLowerCase()
+        return (item.animeTitle || '').toLowerCase().includes(kw) ||
+          (item.typeDescription || '').toLowerCase().includes(kw)
+      },
+      renderHeader: data => {
         if (data?.animes && data.animes.length > 0) {
-          return (
-            <>
-              <div className="font-bold text-green-600">
-                [搜索成功] 找到 {data.animes.length} 个结果
-              </div>
-              {data.animes.slice(0, 3).map((anime, index) => (
-                <div key={index} className="mt-2 p-2 bg-blue-50 rounded">
-                  <div>番剧: {anime.animeTitle} (ID: {anime.animeId})</div>
-                  <div>类型: {anime.typeDescription}</div>
-                  <div>分集数: {anime.episodeCount || 0}</div>
-                </div>
-              ))}
-              {data.animes.length > 3 && (
-                <div className="text-gray-500 mt-2">
-                  ... 还有 {data.animes.length - 3} 个结果
-                </div>
-              )}
-            </>
-          )
+          return <div className="font-bold text-green-600">[搜索成功] 找到 {data.animes.length} 个结果</div>
         }
         return <div className="text-red-600">[搜索失败] 未找到结果</div>
       },
+      renderItem: (anime, index) => (
+        <div key={index} className="p-2 bg-blue-50 rounded">
+          <div>番剧: {anime.animeTitle} (ID: {anime.animeId})</div>
+          <div>类型: {anime.typeDescription}</div>
+          <div>分集数: {anime.episodeCount || 0}</div>
+        </div>
+      ),
     },
     bangumiDetail: {
       label: '番剧详情',
@@ -240,9 +216,10 @@ export const Test = () => {
           placeholder: '请输入番剧ID',
           required: true,
           component: InputNumber,
-          componentProps: { className: 'w-full' },
+          componentProps: { className: 'w-full', style: { width: '100%' } },
         },
       ],
+      // 番剧详情是单条数据，不需要分页
       renderResult: data => {
         if (data?.bangumi) {
           const bangumi = data.bangumi
@@ -276,29 +253,26 @@ export const Test = () => {
           placeholder: '请输入分集ID',
           required: true,
           component: InputNumber,
-          componentProps: { className: 'w-full' },
+          componentProps: { className: 'w-full', style: { width: '100%' } },
         },
       ],
-      renderResult: data => {
+      getListData: data => data?.comments || [],
+      searchFilter: (item, keyword) => {
+        const kw = keyword.toLowerCase()
+        return (item.m || '').toLowerCase().includes(kw) ||
+          (item.p || '').toLowerCase().includes(kw)
+      },
+      renderHeader: data => {
         if (data?.comments && data.comments.length > 0) {
-          return (
-            <>
-              <div className="font-bold text-green-600">
-                [获取成功] 共 {data.count || data.comments.length} 条弹幕
-              </div>
-              <div className="mt-2 p-2 bg-purple-50 rounded">
-                <div>显示前 5 条:</div>
-                {data.comments.slice(0, 5).map((comment, index) => (
-                  <div key={index} className="text-sm mt-1">
-                    [{comment.p}] {comment.m}
-                  </div>
-                ))}
-              </div>
-            </>
-          )
+          return <div className="font-bold text-green-600">[获取成功] 共 {data.count || data.comments.length} 条弹幕</div>
         }
         return <div className="text-red-600">[获取失败] 未找到弹幕</div>
       },
+      renderItem: (comment, index) => (
+        <div key={index} className="text-sm py-1 px-2 bg-purple-50 rounded">
+          <span className="text-gray-400">[{comment.p}]</span> {comment.m}
+        </div>
+      ),
     },
   }
 
@@ -306,6 +280,8 @@ export const Test = () => {
     try {
       setLoading(true)
       setResult(null)
+      setSearchKeyword('')
+      setCurrentPage(1)
 
       const config = testConfigs[activeTab]
       const res = await config.handler({ apiToken: values.apiToken, ...values })
@@ -325,6 +301,25 @@ export const Test = () => {
 
   const currentConfig = testConfigs[activeTab]
 
+  // 是否为列表型结果（有 getListData 的 tab）
+  const isListResult = !!currentConfig.getListData
+
+  // 过滤 + 分页计算
+  const { pagedList, totalFiltered } = useMemo(() => {
+    if (!isListResult || !result || result.error) {
+      return { pagedList: [], totalFiltered: 0 }
+    }
+    const allItems = currentConfig.getListData(result) || []
+    // 搜索过滤
+    const filtered = searchKeyword && currentConfig.searchFilter
+      ? allItems.filter(item => currentConfig.searchFilter(item, searchKeyword))
+      : allItems
+    // 分页
+    const start = (currentPage - 1) * pageSize
+    const paged = filtered.slice(start, start + pageSize)
+    return { pagedList: paged, totalFiltered: filtered.length }
+  }, [result, activeTab, searchKeyword, currentPage, pageSize])
+
   return (
     <div className="my-4">
       <Card title="API 接口测试">
@@ -334,6 +329,8 @@ export const Test = () => {
             setActiveTab(key)
             form.resetFields()
             setResult(null)
+            setSearchKeyword('')
+            setCurrentPage(1)
           }}
           items={Object.entries(testConfigs).map(([key, config]) => ({
             key,
@@ -500,13 +497,71 @@ export const Test = () => {
           <Col md={12} sm={24}>
             <div className="px-6">
               <div className="text-sm text-gray-500 mb-2">测试结果:</div>
-              <div className="max-h-[400px] overflow-y-auto p-4 bg-gray-50 rounded">
+              <div className="p-4 bg-gray-50 rounded">
                 {result ? (
                   result.error ? (
                     <div className="text-red-600">
                       <div className="font-bold">[错误]</div>
                       <div className="mt-2">{result.message}</div>
                     </div>
+                  ) : isListResult ? (
+                    <>
+                      {/* 头部信息 */}
+                      {currentConfig.renderHeader(result)}
+
+                      {/* 搜索栏 */}
+                      {(currentConfig.getListData(result) || []).length > 0 && (
+                        <div className="mt-2 mb-2 flex items-center gap-2">
+                          <Input
+                            placeholder="搜索结果..."
+                            prefix={<SearchOutlined className="text-gray-400" />}
+                            allowClear
+                            value={searchKeyword}
+                            onChange={e => {
+                              setSearchKeyword(e.target.value)
+                              setCurrentPage(1)
+                            }}
+                            size="small"
+                          />
+                          {searchKeyword && (
+                            <span className="text-xs text-gray-400 whitespace-nowrap">
+                              {totalFiltered} 条
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* 滚动列表 */}
+                      <div className="max-h-[400px] overflow-y-auto space-y-2">
+                        {pagedList.length > 0 ? (
+                          pagedList.map((item, index) =>
+                            currentConfig.renderItem(item, (currentPage - 1) * pageSize + index, result)
+                          )
+                        ) : (
+                          <div className="text-gray-400 text-center py-4">
+                            {searchKeyword ? '没有匹配的结果' : '暂无数据'}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 分页 */}
+                      {totalFiltered > pageSize && (
+                        <div className="mt-3 flex justify-center">
+                          <Pagination
+                            current={currentPage}
+                            pageSize={pageSize}
+                            total={totalFiltered}
+                            size="small"
+                            showSizeChanger
+                            pageSizeOptions={[10, 20, 50, 100]}
+                            onChange={(page, size) => {
+                              setCurrentPage(page)
+                              setPageSize(size)
+                            }}
+                          />
+                        </div>
+                      )}
+                    </>
                   ) : (
                     currentConfig.renderResult(result)
                   )

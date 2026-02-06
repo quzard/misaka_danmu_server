@@ -706,6 +706,36 @@ class ScraperDownloadExecutor:
                 await self.scraper_manager.load_and_sync_scrapers()
                 self._log(f"✓ 成功加载了 {deploy_count} 个弹幕源")
 
+                # 先清理临时目录（在设置 COMPLETED 之前，确保 SSE 发送的最后消息是完成消息）
+                if temp_dir.exists():
+                    try:
+                        import shutil
+                        shutil.rmtree(temp_dir)
+                        self._log("✓ 已清理临时下载目录")
+                    except Exception as e:
+                        logger.warning(f"清理临时目录失败: {e}")
+
+                # 发送完成消息
+                self._log("✓ 弹幕源热加载完成，正在刷新页面...")
+
+                # 首次下载完成，设置任务状态为完成
+                # 注意：need_restart = False 表示不需要重启容器
+                self.task.need_restart = False
+                self.task.status = TaskStatus.COMPLETED
+
+                # 等待 1 秒让 SSE 发送最新的日志消息
+                await asyncio.sleep(1.0)
+
+                # 设置 restart_pending，让 SSE 发送终止消息并退出
+                # 这里复用 restart_pending 标志，但 need_restart = False
+                # SSE 流会检测到 restart_pending 并发送 done 消息
+                self.task.restart_pending = True
+                logger.info(f"[任务 {self.task.task_id}] 热加载完成，设置 restart_pending=True，等待 SSE 发送 done 消息")
+
+                # 等待 SSE 发送 done 消息
+                await asyncio.sleep(2.0)
+                logger.info(f"[任务 {self.task.task_id}] SSE done 消息应该已发送")
+
             else:
                 # 非首次下载（已有弹幕源）：只部署到 backup 目录，然后重启容器
                 # 这样可以避免在运行时替换 .so 文件导致的冲突
@@ -811,12 +841,14 @@ class ScraperDownloadExecutor:
             self.task.status = TaskStatus.COMPLETED
 
         finally:
-            # 清理临时下载目录
+            # 清理临时下载目录（如果还存在的话）
+            # 注意：热加载场景下，临时目录已在设置 COMPLETED 之前清理，这里不会重复清理
             if temp_dir.exists():
                 try:
                     import shutil
                     shutil.rmtree(temp_dir)
-                    self._log(f"已清理临时下载目录")
+                    # 不发送日志消息，避免在 COMPLETED 状态后添加新消息影响 SSE 流
+                    logger.info(f"[任务 {self.task.task_id}] 已清理临时下载目录")
                 except Exception as e:
                     logger.warning(f"清理临时目录失败: {e}")
 

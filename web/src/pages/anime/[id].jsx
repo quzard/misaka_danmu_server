@@ -42,6 +42,7 @@ import { EditOutlined, HomeOutlined } from '@ant-design/icons'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
+import { SplitSourceModal } from '../../components/SplitSourceModal'
 import { useDebounce } from '../../hooks/useDebounce'
 import ReassociationConflictModal from './components/ReassociationConflictModal'
 import { useAtomValue } from 'jotai'
@@ -62,6 +63,7 @@ export const AnimeDetail = () => {
   const [targetAnimeTitle, setTargetAnimeTitle] = useState('')
   const [selectedRows, setSelectedRows] = useState([])
   const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false)
+  const [isSplitSourceModalOpen, setIsSplitSourceModalOpen] = useState(false)
   const isMobile = useAtomValue(isMobileAtom)
 
   const [pagination, setPagination] = useState({
@@ -634,7 +636,7 @@ export const AnimeDetail = () => {
             </div>
           </Col>
           <Col md={4} xs={24}>
-            <div className="h-full flex items-center">
+            <div className="h-full flex flex-col items-center justify-center gap-2">
               <Button
                 type="primary"
                 block
@@ -643,6 +645,15 @@ export const AnimeDetail = () => {
                 }}
               >
                 调整关联数据源
+              </Button>
+              <Button
+                block
+                onClick={() => {
+                  setIsSplitSourceModalOpen(true)
+                }}
+                disabled={!sourceList?.length}
+              >
+                拆分数据源
               </Button>
             </div>
           </Col>
@@ -1062,6 +1073,18 @@ export const AnimeDetail = () => {
         onConfirm={handleResolveConflict}
         conflictData={conflictData}
         targetAnimeTitle={targetAnimeTitle}
+      />
+
+      <SplitSourceModal
+        open={isSplitSourceModalOpen}
+        animeId={Number(id)}
+        animeTitle={animeDetail.title}
+        sources={sourceList}
+        onCancel={() => setIsSplitSourceModalOpen(false)}
+        onSuccess={() => {
+          setIsSplitSourceModalOpen(false)
+          getDetail() // 刷新数据
+        }}
       />
     </div>
   )

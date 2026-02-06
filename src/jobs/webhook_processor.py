@@ -39,8 +39,9 @@ class WebhookProcessorJob(BaseJob):
                     payload = json.loads(payload)
 
                 # 使用 webhook_search_and_dispatch_task 的逻辑
-                task_coro = lambda s, cb: webhook_search_and_dispatch_task(
-                    webhookSource=task.webhookSource,
+                # 使用默认参数 t=task, p=payload 捕获当前循环变量的值,避免闭包问题
+                task_coro = lambda s, cb, t=task, p=payload: webhook_search_and_dispatch_task(
+                    webhookSource=t.webhookSource,
                     progress_callback=cb,
                     session=s,
                     manager=self.scraper_manager,
@@ -50,7 +51,7 @@ class WebhookProcessorJob(BaseJob):
                     ai_matcher_manager=self.ai_matcher_manager,
                     rate_limiter=self.rate_limiter,
                     title_recognition_manager=self.title_recognition_manager,
-                    **payload
+                    **p
                 )
                 # 修正：不使用 run_immediately，让任务正常进入队列
                 # 这样任务可以正确处理流控暂停和恢复

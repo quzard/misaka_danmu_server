@@ -181,17 +181,19 @@ async def import_media_items(
 
         try:
             # 触发webhook式搜索
+            # 注意: lambda 使用默认参数 m=movie 来捕获当前循环变量的值,
+            # 避免闭包捕获引用导致所有任务都使用最后一个 movie 的数据
             task_id, _ = await task_manager.submit_task(
-                lambda session, progress_callback: webhook_search_and_dispatch_task(
-                    animeTitle=movie.title,
+                lambda session, progress_callback, m=movie: webhook_search_and_dispatch_task(
+                    animeTitle=m.title,
                     mediaType="movie",
                     season=1,
                     currentEpisodeIndex=1,
-                    searchKeyword=movie.title,
-                    year=movie.year,
-                    tmdbId=movie.tmdbId,
-                    tvdbId=movie.tvdbId,
-                    imdbId=movie.imdbId,
+                    searchKeyword=m.title,
+                    year=m.year,
+                    tmdbId=m.tmdbId,
+                    tvdbId=m.tvdbId,
+                    imdbId=m.imdbId,
                     doubanId=None,
                     bangumiId=None,
                     webhookSource="media_server",

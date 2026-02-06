@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import security, tasks
-from src.db import crud, models, get_db_session, ConfigManager
+from src.db import crud, models, get_db_session, ConfigManager, orm_models
+from src.core.timezone import get_now
 from src.services import TaskManager, ScraperManager, MetadataSourceManager, SchedulerManager
 from src.rate_limiter import RateLimiter
 
@@ -435,6 +436,130 @@ async def batch_unset_favorite(
     """批量取消标记。"""
     count = await crud.batch_unset_favorite(session, payload.sourceIds)
     return {"message": f"成功取消 {count} 个源的标记", "count": count}
+
+
+# --- 拆分数据源 ---
+
+@router.get("/library/source/{sourceId}/episodes-for-split", summary="获取数据源的分集列表（用于拆分选择）")
+async def get_source_episodes_for_split(
+    sourceId: int,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """获取指定数据源的分集列表，用于拆分数据源时选择分集。"""
+    source_info = await crud.get_anime_source_info(session, sourceId)
+    if not source_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
+    episodes = await crud.get_source_episode_list(session, sourceId)
+    return {"episodes": episodes, "sourceInfo": source_info}
+
+
+@router.post("/library/anime/{animeId}/split-source", response_model=models.SplitSourceResponse, summary="拆分数据源")
+async def split_source(
+    animeId: int,
+    payload: models.SplitSourceRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """
+    将一个数据源中的部分分集拆分到新的或已有的媒体条目。
+
+    - targetType='new': 创建新的媒体条目，并将选中的分集移动到新条目
+    - targetType='existing': 将选中的分集移动到已有的媒体条目
+    """
+    # 验证源数据源属于当前媒体
+    source_info = await crud.get_anime_source_info(session, payload.sourceId)
+    if not source_info:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据源未找到")
+    if source_info['animeId'] != animeId:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="数据源不属于当前媒体")
+
+    # 验证分集ID列表不为空
+    if not payload.episodeIds:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请选择要拆分的分集")
+
+    target_anime_id: int
+
+    if payload.targetType == "new":
+        # 创建新的媒体条目
+        if not payload.newMediaInfo:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="创建新条目时必须提供媒体信息")
+
+        # 检查是否已存在同名同季度的作品
+        existing = await crud.find_anime_by_title_season_year(
+            session,
+            payload.newMediaInfo.title,
+            payload.newMediaInfo.season,
+            payload.newMediaInfo.year
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"已存在同名同季度的作品: {payload.newMediaInfo.title} (第 {payload.newMediaInfo.season} 季)"
+            )
+
+        # 创建新的 Anime 记录
+        new_anime = orm_models.Anime(
+            title=payload.newMediaInfo.title,
+            type="tv_series",
+            season=payload.newMediaInfo.season,
+            year=payload.newMediaInfo.year,
+            imageUrl=payload.newMediaInfo.imageUrl,
+            createdAt=get_now()
+        )
+        session.add(new_anime)
+        await session.flush()
+
+        # 创建关联的元数据和别名记录
+        new_metadata = orm_models.AnimeMetadata(animeId=new_anime.id)
+        new_alias = orm_models.AnimeAlias(animeId=new_anime.id)
+        session.add_all([new_metadata, new_alias])
+        await session.flush()
+
+        target_anime_id = new_anime.id
+        logger.info(f"用户 '{current_user.username}' 创建了新媒体条目: {payload.newMediaInfo.title} (ID: {target_anime_id})")
+
+    elif payload.targetType == "existing":
+        # 使用已有的媒体条目
+        if not payload.existingMediaId:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="合并到已有条目时必须提供目标媒体ID")
+
+        # 验证目标媒体存在
+        target_anime = await crud.get_anime_full_details(session, payload.existingMediaId)
+        if not target_anime:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="目标媒体条目未找到")
+
+        target_anime_id = payload.existingMediaId
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的目标类型，必须是 'new' 或 'existing'")
+
+    # 执行分集移动
+    try:
+        moved_count = await crud.split_source_episodes(
+            session,
+            source_id=payload.sourceId,
+            episode_ids=payload.episodeIds,
+            target_anime_id=target_anime_id,
+            reindex_episodes=payload.reindexEpisodes
+        )
+        await session.commit()
+
+        logger.info(f"用户 '{current_user.username}' 将 {moved_count} 个分集从媒体 {animeId} 拆分到媒体 {target_anime_id}")
+
+        return models.SplitSourceResponse(
+            success=True,
+            targetMediaId=target_anime_id,
+            movedEpisodeCount=moved_count,
+            message=f"成功拆分 {moved_count} 个分集到{'新' if payload.targetType == 'new' else '已有'}条目"
+        )
+    except ValueError as e:
+        await session.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"拆分数据源失败: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"拆分失败: {str(e)}")
 
 
 

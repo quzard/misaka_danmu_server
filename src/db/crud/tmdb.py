@@ -39,3 +39,49 @@ async def save_tmdb_episode_group_mappings(session: AsyncSession, tmdb_tv_id: in
     await session.commit()
     logging.info(f"成功为剧集组 {group_id} 保存了 {len(mappings_to_insert)} 条分集映射。")
 
+
+async def get_episode_group_mappings(session: AsyncSession, group_id: str) -> Optional[Dict[str, Any]]:
+    """
+    从数据库读取已保存的剧集组映射，重建为分组结构返回。
+    返回格式: { id, tmdbTvId, groups: [{ name, order, episodes: [{ seasonNumber, episodeNumber, order, name }] }] }
+    """
+    stmt = (
+        select(TmdbEpisodeMapping)
+        .where(TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id)
+        .order_by(TmdbEpisodeMapping.customSeasonNumber, TmdbEpisodeMapping.customEpisodeNumber)
+    )
+    result = await session.execute(stmt)
+    mappings = result.scalars().all()
+
+    if not mappings:
+        return None
+
+    tmdb_tv_id = mappings[0].tmdbTvId
+
+    # 按 customSeasonNumber 分组重建结构
+    groups_dict: Dict[int, Dict[str, Any]] = {}
+    for m in mappings:
+        season = m.customSeasonNumber
+        if season not in groups_dict:
+            groups_dict[season] = {
+                "name": f"第 {season} 组" if season > 0 else "特别篇",
+                "order": season,
+                "episodes": [],
+            }
+        groups_dict[season]["episodes"].append({
+            "seasonNumber": m.tmdbSeasonNumber,
+            "episodeNumber": m.tmdbEpisodeNumber,
+            "order": m.customEpisodeNumber - 1,  # customEpisodeNumber 从1开始，order从0开始
+            "name": "",
+        })
+
+    groups = sorted(groups_dict.values(), key=lambda g: g["order"])
+
+    return {
+        "id": group_id,
+        "tmdbTvId": tmdb_tv_id,
+        "name": "本地剧集组" if group_id.startswith("local-") else group_id,
+        "description": "",
+        "groups": groups,
+    }
+

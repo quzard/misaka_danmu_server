@@ -174,6 +174,8 @@ from .source import (
     get_incremental_refresh_sources_grouped,
     batch_toggle_incremental_refresh,
     batch_set_favorite,
+    split_source_episodes,
+    get_source_episode_list,
 )
 
 # Danmaku模块
@@ -229,6 +231,7 @@ from .token_log import (
 # TMDB模块
 from .tmdb import (
     save_tmdb_episode_group_mappings,
+    get_episode_group_mappings,
 )
 
 # RateLimit模块
@@ -242,6 +245,7 @@ from .rate_limit import (
 # ExternalLog模块
 from .external_log import (
     create_external_api_log,
+    update_external_api_log_response,
     get_external_api_logs,
 )
 
@@ -413,6 +417,8 @@ __all__ = [
     'disable_incremental_refresh',
     'get_sources_with_incremental_refresh_enabled',
     '_assign_source_order_if_missing',
+    'split_source_episodes',
+    'get_source_episode_list',
     # Danmaku
     'save_danmaku_for_episode',
     '_generate_danmaku_path',
@@ -451,6 +457,7 @@ __all__ = [
     'delete_ua_rule',
     # TMDB
     'save_tmdb_episode_group_mappings',
+    'get_episode_group_mappings',
     # RateLimit
     'get_or_create_rate_limit_state',
     'get_all_rate_limit_states',
@@ -458,6 +465,7 @@ __all__ = [
     'increment_rate_limit_count',
     # ExternalLog
     'create_external_api_log',
+    'update_external_api_log_response',
     'get_external_api_logs',
     # Utility
     '_is_docker_environment',

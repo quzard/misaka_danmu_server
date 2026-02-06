@@ -161,6 +161,21 @@ export const getAllEpisode = data =>
     tmdbId: data.tmdbId,
   })
 
+/** 获取本地剧集组JSON（支持URL和本地路径） */
+export const fetchLocalEpisodeGroupUrl = data =>
+  api.post(`/api/ui/local-episode-group/fetch`, { url: data.url })
+
+/** 应用本地剧集组映射 */
+export const applyLocalEpisodeGroup = data =>
+  api.post(`/api/ui/local-episode-group/apply`, {
+    tmdbId: data.tmdbId,
+    localEpisodeGroup: data.localEpisodeGroup,
+  })
+
+/** 获取已保存的剧集组详情（从数据库读取） */
+export const getEpisodeGroupDetail = (groupId) =>
+  api.get(`/api/ui/local-episode-group/detail?groupId=${encodeURIComponent(groupId)}`)
+
 /** 搜索BGM */
 export const getBgmSearch = data =>
   api.get(
@@ -906,3 +921,13 @@ export const splitEpisodeDanmaku = (data) => api.post('/api/ui/danmaku/split', J
 
 /** 分集合并 */
 export const mergeEpisodesDanmaku = (data) => api.post('/api/ui/danmaku/merge', JSON.stringify(data))
+
+// ==================== 拆分数据源 ====================
+
+/** 获取数据源的分集列表（用于拆分选择） */
+export const getSourceEpisodesForSplit = (sourceId) =>
+  api.get(`/api/ui/library/source/${sourceId}/episodes-for-split`)
+
+/** 拆分数据源 */
+export const splitSource = (animeId, data) =>
+  api.post(`/api/ui/library/anime/${animeId}/split-source`, JSON.stringify(data))

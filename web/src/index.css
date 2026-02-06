@@ -304,6 +304,26 @@ a:hover {
     font-size: 16px; /* 防止iOS自动缩放 */
   }
 
+  /* 修复输入框文字垂直居中 */
+  input.ant-input,
+  .ant-input-affix-wrapper > input.ant-input {
+    height: 44px;
+    line-height: 44px;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .ant-input-affix-wrapper {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .ant-input-number-input {
+    min-height: 44px;
+    line-height: 44px;
+  }
+
   .ant-input-search-button {
     height: 44px;
   }

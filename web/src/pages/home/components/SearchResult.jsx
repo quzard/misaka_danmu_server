@@ -5,6 +5,7 @@ import {
   importDanmu,
   importEdit,
   getSearchResult,
+  getAnimeLibrary,
 } from '../../../apis'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import {
@@ -27,6 +28,7 @@ import {
   Select,
   Pagination,
   Spin,
+  Segmented,
 } from 'antd'
 import { useAtom } from 'jotai'
 import {
@@ -105,7 +107,18 @@ export const SearchResult = () => {
   const [editConfirmLoading, setEditConfirmLoading] = useState(false)
   const [range, setRange] = useState([1, 1])
   const [episodePageSize, setEpisodePageSize] = useState(10)
+  const [episodePage, setEpisodePage] = useState(1)
   const [episodeOrder, setEpisodeOrder] = useState('asc') // 新增：排序状态
+  const [editMediaType, setEditMediaType] = useState('tv_series') // 编辑导入：媒体类型
+  const [editSeason, setEditSeason] = useState(1) // 编辑导入：季度
+
+  // 重整分集导入子弹窗状态
+  const [reshuffleOpen, setReshuffleOpen] = useState(false)
+  const [reshuffleKeyword, setReshuffleKeyword] = useState('')
+  const [reshuffleResults, setReshuffleResults] = useState([])
+  const [reshuffleLoading, setReshuffleLoading] = useState(false)
+  const [selectedReshuffleItem, setSelectedReshuffleItem] = useState(null)
+  const [reshuffleConfirmLoading, setReshuffleConfirmLoading] = useState(false)
 
   // 补充源状态管理
   const [supplementMap, setSupplementMap] = useState({})
@@ -375,20 +388,16 @@ export const SearchResult = () => {
     try {
       if (editConfirmLoading) return
       setEditConfirmLoading(true)
+      const finalTitle = editAnimeTitle || editItem.title
+      const finalMediaType = editMediaType
+      const finalSeason = editMediaType === 'movie' ? 1 : editSeason
+      const { animeTitle: _a, mediaType: _m, season: _s, episodes: _e, ...restEditItem } = editItem
       const res = await importEdit(
         JSON.stringify({
-          provider: editItem.provider,
-          mediaId: editItem.mediaId,
-          animeTitle: editItem.title,
-          mediaType: editItem.type,
-          // 关键修正：如果用户搜索时指定了季度，则优先使用该季度
-          // 否则，使用从单个结果中解析出的季度
-          season: searchSeason !== null ? searchSeason : editItem.season,
-          year: editItem.year, // 新增年份
-          imageUrl: editItem.imageUrl,
-          doubanId: editItem.doubanId,
-          currentEpisodeIndex: editItem.currentEpisodeIndex,
-          ...editItem,
+          ...restEditItem,
+          animeTitle: finalTitle,
+          mediaType: finalMediaType,
+          season: finalSeason,
           episodes: editEpisodeList ?? [],
         })
       )
@@ -401,6 +410,8 @@ export const SearchResult = () => {
       setEditEpisodeList([])
       setEditItem({})
       setEditAnimeTitle('')
+      setEditMediaType('tv_series')
+      setEditSeason(1)
     }
   }
 
@@ -1162,11 +1173,7 @@ export const SearchResult = () => {
                             <div className="text-xl font-bold mb-3">
                               {item.title}
                               {item.type === 'movie' ? (
-                                <MyIcon
-                                  icon="movie"
-                                  size={20}
-                                  className="ml-2"
-                                />
+                                <MyIcon icon="movie" size={20} className="ml-2" />
                               ) : (
                                 <MyIcon icon="tv" size={20} className="ml-2" />
                               )}
@@ -1243,6 +1250,8 @@ export const SearchResult = () => {
                               setEditEpisodeList(res.data)
                               setEditImportOpen(true)
                               setEditItem(item)
+                              setEditMediaType(item.type || 'tv_series')
+                              setEditSeason(item.season ?? 1)
                               // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
                               const endValue = item.episodeCount > 0 ? item.episodeCount : 1
                               setRange([1, endValue])
@@ -1286,9 +1295,12 @@ export const SearchResult = () => {
                 pageSize={pageSize}
                 total={total}
                 onChange={(page) => handlePageChange(page, pageSize)}
-                showQuickJumper
+                onShowSizeChange={(_, size) => handlePageChange(1, size)}
+                showQuickJumper={!isMobile}
+                showSizeChanger
+                pageSizeOptions={['5', '10', '20', '50']}
+                showLessItems={isMobile}
                 size={isMobile ? 'small' : 'default'}
-                simple={isMobile}
               />
             </div>
           )}
@@ -1421,7 +1433,12 @@ export const SearchResult = () => {
       <Modal
         title={`编辑导入: ${editItem.title}`}
         open={editImportOpen}
-        onCancel={() => setEditImportOpen(false)}
+        onCancel={() => {
+          setEditImportOpen(false)
+          setEditAnimeTitle('')
+          setEditMediaType('tv_series')
+          setEditSeason(1)
+        }}
         footer={[
           <Button
             key="order"
@@ -1431,7 +1448,12 @@ export const SearchResult = () => {
           >
             {episodeOrder === 'asc' ? '正序' : '倒序'}
           </Button>,
-          <Button key="cancel" onClick={() => setEditImportOpen(false)}>
+          <Button key="cancel" onClick={() => {
+            setEditImportOpen(false)
+            setEditAnimeTitle('')
+            setEditMediaType('tv_series')
+            setEditSeason(1)
+          }}>
             取消
           </Button>,
           <Button
@@ -1445,10 +1467,10 @@ export const SearchResult = () => {
             确认导入
           </Button>,
         ]}
+        styles={{ body: { overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: isMobile ? '75vh' : '70vh', padding: isMobile ? '12px 16px' : undefined } }}
       >
-        <div className={isMobile ? "max-h-[60vh]" : "max-h-[70vh] overflow-y-auto"}>
           {isMobile ? (
-            <div className="space-y-4 my-6">
+            <div className="space-y-3 mb-3 shrink-0">
               <div>
                 <div className="font-medium text-sm mb-2">作品标题</div>
                 <Input
@@ -1458,46 +1480,43 @@ export const SearchResult = () => {
                     setEditAnimeTitle(e.target.value)
                   }}
                 />
+                <Button
+                  type="default"
+                  block
+                  icon={<ReloadOutlined />}
+                  onClick={() => setReshuffleOpen(true)}
+                  className="mt-2"
+                >
+                  重整分集导入
+                </Button>
               </div>
-              <Button
-                type="primary"
-                icon={<ReloadOutlined />}
-                block
-                onClick={async () => {
-                  try {
-                    const res = await getInLibraryEpisodes({
-                      title: editAnimeTitle || editItem.title,
-                      season: editItem.season ?? 1,
-                    })
-                    if (!res.data?.length) {
-                      messageApi.error(
-                        `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
-                      )
-                      return
-                    }
-                    setEditEpisodeList(list => {
-                      return list.filter(
-                        it => !(res.data ?? []).includes(it.episodeIndex)
-                      )
-                    })
-                    const removedCount = editEpisodeList.reduce((total, item) => {
-                      return (
-                        total +
-                        (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
-                      )
-                    }, 0)
-
-                    messageApi.success(
-                      `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
-                    )
-                  } catch (error) {
-                    messageApi.error(`查询已存在分集失败: ${error.message}`)
-                  }
-                }}
-              >
-                重整分集导入
-              </Button>
-              
+              <div>
+                <div className="font-medium text-sm mb-2">类型 / 季度</div>
+                <div className="flex items-center justify-between">
+                  <Segmented
+                    value={editMediaType}
+                    onChange={value => {
+                      setEditMediaType(value)
+                      if (value === 'movie') setEditSeason(1)
+                    }}
+                    options={[
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="movie" size={14} /> 电影</span>, value: 'movie' },
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="tv" size={14} /> 电视节目</span>, value: 'tv_series' },
+                    ]}
+                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm">季度:</span>
+                    <InputNumber
+                      value={editSeason}
+                      onChange={value => setEditSeason(value)}
+                      min={1}
+                      step={1}
+                      disabled={editMediaType === 'movie'}
+                      style={{ width: 70 }}
+                    />
+                  </div>
+                </div>
+              </div>
               <div>
                 <div className="font-medium text-sm mb-2">集数区间</div>
                 <div className="flex items-center gap-2 mb-3">
@@ -1523,7 +1542,6 @@ export const SearchResult = () => {
                   type="primary"
                   block
                   onClick={() => {
-                    console.log(range)
                     setEditEpisodeList(list => {
                       return list.filter(
                         it =>
@@ -1538,7 +1556,7 @@ export const SearchResult = () => {
             </div>
           ) : (
             <>
-              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
                 <div className="shrink-0">作品标题:</div>
                 <div className="w-full">
                   <Input
@@ -1550,46 +1568,42 @@ export const SearchResult = () => {
                     style={{ width: '100%' }}
                   />
                 </div>
-                <div>
-                  <Button
-                    type="default"
-                    onClick={async () => {
-                      try {
-                        const res = await getInLibraryEpisodes({
-                          title: editAnimeTitle || editItem.title,
-                          season: editItem.season ?? 1,
-                        })
-                        if (!res.data?.length) {
-                          messageApi.error(
-                            `在弹幕库中未找到作品 "${editAnimeTitle || editItem.title}" 或该作品没有任何分集。`
-                          )
-                          return
-                        }
-                        setEditEpisodeList(list => {
-                          return list.filter(
-                            it => !(res.data ?? []).includes(it.episodeIndex)
-                          )
-                        })
-                        const removedCount = editEpisodeList.reduce((total, item) => {
-                          return (
-                            total +
-                            (res.data ?? []).includes(item.episodeIndex ? 1 : 0)
-                          )
-                        }, 0)
-
-                        messageApi.success(
-                          `重整完成！根据库内记录，移除了 ${removedCount} 个已存在的分集。`
-                        )
-                      } catch (error) {
-                        messageApi.error(`查询已存在分集失败: ${error.message}`)
-                      }
+                <Button
+                  type="default"
+                  onClick={() => setReshuffleOpen(true)}
+                  icon={<ReloadOutlined />}
+                  className="shrink-0"
+                >
+                  重整分集导入
+                </Button>
+              </div>
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
+                <div className="flex items-center gap-2">
+                  <Segmented
+                    value={editMediaType}
+                    onChange={value => {
+                      setEditMediaType(value)
+                      if (value === 'movie') setEditSeason(1)
                     }}
-                  >
-                    重整分集导入
-                  </Button>
+                    options={[
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="movie" size={14} /> 电影</span>, value: 'movie' },
+                      { label: <span className="inline-flex items-center gap-1"><MyIcon icon="tv" size={14} /> 电视节目</span>, value: 'tv_series' },
+                    ]}
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0">季度:</span>
+                  <InputNumber
+                    value={editSeason}
+                    onChange={value => setEditSeason(value)}
+                    min={1}
+                    step={1}
+                    disabled={editMediaType === 'movie'}
+                    style={{ width: 80 }}
+                  />
                 </div>
               </div>
-              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6">
+              <div className="flex items-wrap md:flex-nowrap justify-between items-center gap-3 my-6 shrink-0">
                 <div className="shrink-0">集数区间:</div>
                 <div className="w-full flex items-center justify-between flex-wrap md:flex-nowrap gap-2">
                   <div className="flex items-center justify-start gap-2">
@@ -1619,7 +1633,6 @@ export const SearchResult = () => {
                     type="primary"
                     block
                     onClick={() => {
-                      console.log(range)
                       setEditEpisodeList(list => {
                         return list.filter(
                           it =>
@@ -1634,7 +1647,12 @@ export const SearchResult = () => {
               </div>
             </>
           )}
-          <div>
+          <Card
+            size="small"
+            className="flex-1 min-h-0"
+            style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+            styles={{ body: { padding: '8px 12px', flex: 1, minHeight: 0, overflowY: 'auto' } }}
+          >
             <DndContext
               sensors={sensors}
               collisionDetection={closestCorners}
@@ -1648,15 +1666,8 @@ export const SearchResult = () => {
                 <List
                   itemLayout="vertical"
                   size="large"
-                  pagination={{
-                    pageSize: episodePageSize,
-                    onShowSizeChange: (_, size) => {
-                      setEpisodePageSize(size)
-                    },
-                    hideOnSinglePage: true,
-                    showLessItems: true,
-                  }}
-                  dataSource={editEpisodeList}
+                  pagination={false}
+                  dataSource={editEpisodeList.slice((episodePage - 1) * episodePageSize, episodePage * episodePageSize)}
                   renderItem={(item, index) => (
                     <SortableItem
                       key={item.episodeId}
@@ -1673,8 +1684,160 @@ export const SearchResult = () => {
               {/* 拖拽覆盖层 */}
               <DragOverlay>{renderDragOverlay()}</DragOverlay>
             </DndContext>
-          </div>
+          </Card>
+          {editEpisodeList.length > episodePageSize && (
+            <div className="flex justify-center mt-3 shrink-0">
+              <Pagination
+                current={episodePage}
+                pageSize={episodePageSize}
+                total={editEpisodeList.length}
+                onChange={(page) => setEpisodePage(page)}
+                onShowSizeChange={(_, size) => {
+                  setEpisodePageSize(size)
+                  setEpisodePage(1)
+                }}
+                showSizeChanger
+                pageSizeOptions={['5', '10', '20', '50']}
+                showLessItems
+                size="small"
+              />
+            </div>
+          )}
+      </Modal>
+      {/* 重整分集导入子弹窗 */}
+      <Modal
+        title="重整分集导入"
+        open={reshuffleOpen}
+        onCancel={() => {
+          setReshuffleOpen(false)
+          setReshuffleKeyword('')
+          setReshuffleResults([])
+          setSelectedReshuffleItem(null)
+        }}
+        footer={[
+          <Button key="cancel" onClick={() => {
+            setReshuffleOpen(false)
+            setReshuffleKeyword('')
+            setReshuffleResults([])
+            setSelectedReshuffleItem(null)
+          }}>
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            disabled={!selectedReshuffleItem}
+            loading={reshuffleConfirmLoading}
+            onClick={async () => {
+              if (!selectedReshuffleItem) return
+              setReshuffleConfirmLoading(true)
+              try {
+                const res = await getInLibraryEpisodes({
+                  title: selectedReshuffleItem.title,
+                  season: selectedReshuffleItem.season ?? 1,
+                })
+                if (!res.data?.length) {
+                  messageApi.error(
+                    `所选条目 "${selectedReshuffleItem.title}" 没有任何已存在的分集。`
+                  )
+                  return
+                }
+                const existingIndices = new Set(res.data)
+                setEditEpisodeList(list =>
+                  list.filter(it => !existingIndices.has(it.episodeIndex))
+                )
+                const removedCount = editEpisodeList.filter(it =>
+                  existingIndices.has(it.episodeIndex)
+                ).length
+                messageApi.success(
+                  `重整完成！根据 "${selectedReshuffleItem.title}" 的库内记录，移除了 ${removedCount} 个已存在的分集。`
+                )
+                setReshuffleOpen(false)
+                setReshuffleKeyword('')
+                setReshuffleResults([])
+                setSelectedReshuffleItem(null)
+              } catch (error) {
+                messageApi.error(`查询已存在分集失败: ${error.message}`)
+              } finally {
+                setReshuffleConfirmLoading(false)
+              }
+            }}
+          >
+            确认过滤
+          </Button>,
+        ]}
+      >
+        <div className="mb-3" style={{ color: 'var(--color-text)' }}>
+          💡 选择库内已有条目，将自动移除已存在的分集
         </div>
+        <Input.Search
+          placeholder="搜索库内条目..."
+          allowClear
+          enterButton={<SearchOutlined />}
+          loading={reshuffleLoading}
+          value={reshuffleKeyword}
+          onChange={e => setReshuffleKeyword(e.target.value)}
+          onSearch={async (value) => {
+            if (!value?.trim()) {
+              setReshuffleResults([])
+              return
+            }
+            setReshuffleLoading(true)
+            try {
+              const res = await getAnimeLibrary({ keyword: value.trim(), pageSize: 20 })
+              setReshuffleResults(res.data?.list || [])
+            } catch (error) {
+              messageApi.error('搜索失败')
+            } finally {
+              setReshuffleLoading(false)
+            }
+          }}
+        />
+        <Card
+          size="small"
+          className="mt-3 h-[40vh] overflow-y-auto"
+          styles={{ body: { padding: '8px' } }}
+        >
+          {reshuffleResults.length > 0 ? (
+            <Radio.Group
+              value={selectedReshuffleItem?.animeId}
+              onChange={e => {
+                const item = reshuffleResults.find(r => r.animeId === e.target.value)
+                setSelectedReshuffleItem(item)
+              }}
+              className="w-full"
+            >
+              <div className="space-y-2">
+                {reshuffleResults.map(item => (
+                  <div
+                    key={item.animeId}
+                    className="p-2 rounded-lg border border-gray-300/45 cursor-pointer hover:border-pink-400/60 transition-colors"
+                    style={{
+                      backgroundColor: selectedReshuffleItem?.animeId === item.animeId
+                        ? 'var(--color-hover)' : undefined,
+                    }}
+                    onClick={() => setSelectedReshuffleItem(item)}
+                  >
+                    <Radio value={item.animeId}>
+                      <span style={{ color: 'var(--color-text)' }}>
+                        {item.title}
+                        {item.type === 'movie' ? <MyIcon icon="movie" size={14} className="ml-1" /> : <MyIcon icon="tv" size={14} className="ml-1" />}
+                        {item.type !== 'movie' && ` (S${String(item.season).padStart(2, '0')})`}
+                        <span className="text-gray-400 ml-2 text-sm">
+                          {item.year ? `${item.year}年` : ''} · {item.episodeCount}集
+                        </span>
+                      </span>
+                    </Radio>
+                  </div>
+                ))}
+              </div>
+            </Radio.Group>
+          ) : (
+            reshuffleKeyword && !reshuffleLoading && (
+              <Empty description="未找到匹配的条目" />
+            )
+          )}
+        </Card>
       </Modal>
     </>
   )

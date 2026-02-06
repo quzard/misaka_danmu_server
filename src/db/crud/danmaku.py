@@ -161,10 +161,37 @@ def _normalize_p_attr(p_attr: str, provider_name: Optional[str] = None) -> str:
     # 需要在 index 2 插入默认字体大小 25
     if len(core_parts) == 3:
         core_parts.insert(2, '25')
-    # 场景2: 字体大小为空或无效 (e.g., "1.23,1,,16777215")
-    elif len(core_parts) == 4 and (not core_parts[2] or not core_parts[2].strip().isdigit()):
-        core_parts[2] = '25'
-    # 场景3: 参数不足 3 个，补全默认值
+    # 场景2: 4 个核心参数，需要区分两种格式：
+    #   - 标准/Bilibili格式: 时间,模式,字号,颜色 (第3个是字号，通常 < 100)
+    #   - Dandanplay API格式: 时间,模式,颜色,用户ID (第3个是颜色，通常 > 1000；第4个是用户ID哈希)
+    elif len(core_parts) == 4:
+        fontsize_candidate = core_parts[2].strip()
+        userid_candidate = core_parts[3].strip()
+        is_dandanplay_format = False
+
+        if fontsize_candidate.isdigit() and int(fontsize_candidate) > 1000:
+            # 第3个参数 > 1000，不可能是字号，实际是颜色值 → dandanplay格式
+            is_dandanplay_format = True
+        elif not userid_candidate.isdigit():
+            # 第4个参数包含非数字字符（如十六进制哈希 0d3ed9dd）→ 不是颜色值 → dandanplay格式
+            is_dandanplay_format = True
+        elif userid_candidate.isdigit() and int(userid_candidate) > 16777215:
+            # 第4个参数超过RGB最大值(16777215)，不可能是颜色 → dandanplay格式
+            is_dandanplay_format = True
+
+        if is_dandanplay_format:
+            # Dandanplay格式: 时间,模式,颜色,用户ID → 丢弃用户ID，插入默认字号
+            core_parts = [core_parts[0], core_parts[1], '25', core_parts[2]]
+        elif not fontsize_candidate or not fontsize_candidate.isdigit():
+            # 字体大小为空或无效，使用默认值
+            core_parts[2] = '25'
+    # 场景3: 超过4个核心参数 (如Bilibili 8参数格式)，只保留前4个
+    elif len(core_parts) > 4:
+        core_parts = core_parts[:4]
+        fontsize_val = core_parts[2].strip()
+        if not fontsize_val or not fontsize_val.isdigit():
+            core_parts[2] = '25'
+    # 场景4: 参数不足 3 个，补全默认值
     elif len(core_parts) < 3:
         while len(core_parts) < 4:
             if len(core_parts) == 0:

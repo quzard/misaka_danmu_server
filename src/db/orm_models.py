@@ -307,6 +307,10 @@ class ExternalApiLog(Base):
     endpoint: Mapped[str] = mapped_column(String(500))
     statusCode: Mapped[int] = mapped_column("status_code", Integer)
     message: Mapped[Optional[str]] = mapped_column(TEXT().with_variant(MEDIUMTEXT, "mysql"))
+    requestHeaders: Mapped[Optional[str]] = mapped_column("request_headers", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    requestBody: Mapped[Optional[str]] = mapped_column("request_body", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    responseHeaders: Mapped[Optional[str]] = mapped_column("response_headers", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
+    responseBody: Mapped[Optional[str]] = mapped_column("response_body", TEXT().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
 
 class RateLimitState(Base):
     __tablename__ = "rate_limit_state"

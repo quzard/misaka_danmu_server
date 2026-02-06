@@ -529,3 +529,140 @@ async def batch_unset_favorite(session: AsyncSession, source_ids: List[int]) -> 
     await session.commit()
     return result.rowcount
 
+
+async def split_source_episodes(
+    session: AsyncSession,
+    source_id: int,
+    episode_ids: List[int],
+    target_anime_id: int,
+    reindex_episodes: bool = True
+) -> int:
+    """
+    将指定分集从源数据源移动到目标媒体条目。
+
+    Args:
+        session: 数据库会话
+        source_id: 源数据源ID
+        episode_ids: 要移动的分集ID列表
+        target_anime_id: 目标媒体ID
+        reindex_episodes: 是否重新编号分集
+
+    Returns:
+        移动的分集数量
+    """
+    if not episode_ids:
+        return 0
+
+    # 1. 获取源数据源信息
+    source = await session.get(AnimeSource, source_id)
+    if not source:
+        raise ValueError(f"源数据源 ID {source_id} 不存在")
+
+    # 2. 检查目标媒体是否存在
+    target_anime = await session.get(Anime, target_anime_id)
+    if not target_anime:
+        raise ValueError(f"目标媒体 ID {target_anime_id} 不存在")
+
+    # 3. 为目标媒体创建或获取相同提供商的数据源
+    # 检查目标媒体是否已有相同提供商的数据源
+    existing_target_source_stmt = select(AnimeSource).where(
+        AnimeSource.animeId == target_anime_id,
+        AnimeSource.providerName == source.providerName,
+        AnimeSource.mediaId == source.mediaId
+    )
+    existing_target_source_result = await session.execute(existing_target_source_stmt)
+    target_source = existing_target_source_result.scalar_one_or_none()
+
+    if not target_source:
+        # 创建新的数据源关联
+        max_order_stmt = select(func.max(AnimeSource.sourceOrder)).where(AnimeSource.animeId == target_anime_id)
+        max_order_result = await session.execute(max_order_stmt)
+        current_max_order = max_order_result.scalar_one_or_none() or 0
+
+        target_source = AnimeSource(
+            animeId=target_anime_id,
+            providerName=source.providerName,
+            mediaId=source.mediaId,
+            sourceOrder=current_max_order + 1,
+            createdAt=get_now()
+        )
+        session.add(target_source)
+        await session.flush()
+        logger.info(f"为目标媒体 {target_anime_id} 创建了新的数据源 {target_source.id}")
+
+    # 4. 获取要移动的分集
+    episodes_stmt = select(Episode).where(
+        Episode.id.in_(episode_ids),
+        Episode.sourceId == source_id
+    ).order_by(Episode.episodeIndex)
+    episodes_result = await session.execute(episodes_stmt)
+    episodes = episodes_result.scalars().all()
+
+    if not episodes:
+        return 0
+
+    # 5. 计算新的分集ID和索引
+    # 获取目标数据源当前最大的分集索引
+    if reindex_episodes:
+        max_index_stmt = select(func.max(Episode.episodeIndex)).where(Episode.sourceId == target_source.id)
+        max_index_result = await session.execute(max_index_stmt)
+        current_max_index = max_index_result.scalar_one_or_none() or 0
+        new_index = current_max_index + 1
+
+    moved_count = 0
+    for episode in episodes:
+        # 生成新的分集ID
+        new_episode_id_str = f"25{target_anime_id:06d}{target_source.sourceOrder:02d}{(new_index if reindex_episodes else episode.episodeIndex):04d}"
+        new_episode_id = int(new_episode_id_str)
+
+        # 创建新的分集记录（因为ID是主键，需要删除旧的创建新的）
+        new_episode = Episode(
+            id=new_episode_id,
+            sourceId=target_source.id,
+            title=episode.title,
+            episodeIndex=new_index if reindex_episodes else episode.episodeIndex,
+            providerEpisodeId=episode.providerEpisodeId,
+            sourceUrl=episode.sourceUrl,
+            danmakuFilePath=episode.danmakuFilePath,
+            fetchedAt=episode.fetchedAt,
+            commentCount=episode.commentCount
+        )
+
+        # 删除旧分集
+        await session.delete(episode)
+        await session.flush()
+
+        # 添加新分集
+        session.add(new_episode)
+
+        if reindex_episodes:
+            new_index += 1
+        moved_count += 1
+
+    await session.flush()
+    logger.info(f"成功将 {moved_count} 个分集从源 {source_id} 移动到目标媒体 {target_anime_id}")
+
+    return moved_count
+
+
+async def get_source_episode_list(session: AsyncSession, source_id: int) -> List[Dict[str, Any]]:
+    """
+    获取数据源的分集列表（用于拆分选择）。
+
+    Returns:
+        分集列表，包含 episodeId, title, episodeIndex, commentCount
+    """
+    stmt = (
+        select(
+            Episode.id.label("episodeId"),
+            Episode.title,
+            Episode.episodeIndex.label("episodeIndex"),
+            Episode.commentCount.label("commentCount")
+        )
+        .where(Episode.sourceId == source_id)
+        .order_by(Episode.episodeIndex)
+    )
+    result = await session.execute(stmt)
+    return [dict(row) for row in result.mappings()]
+
+

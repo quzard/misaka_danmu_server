@@ -279,9 +279,9 @@ async def get_resource_repo(
     return {"repoUrl": repo_url}
 
 
-async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[str]:
+async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[Dict[str, Optional[str]]]:
     """
-    带重试机制的版本获取函数
+    带重试机制的版本信息获取函数
 
     Args:
         package_url: package.json 的 URL
@@ -290,7 +290,7 @@ async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str,
         proxy: 代理URL（可选）
 
     Returns:
-        版本号字符串，失败返回 None
+        包含 version 和 changelog 的字典，失败返回 None
     """
     timeout_config = httpx.Timeout(30.0, read=30.0)  # 连接30秒，读取30秒
 
@@ -301,8 +301,9 @@ async def _fetch_package_version_with_retry(package_url: str, headers: Dict[str,
                 if response.status_code == 200:
                     package_data = response.json()
                     version = package_data.get("version", "unknown")
+                    changelog = package_data.get("changelog", None)
                     logger.info(f"成功获取版本信息: {version} (尝试 {attempt + 1}/{max_retries})")
-                    return version
+                    return {"version": version, "changelog": changelog}
                 else:
                     logger.warning(f"获取版本失败 HTTP {response.status_code} (尝试 {attempt + 1}/{max_retries})")
         except httpx.TimeoutException:
@@ -337,13 +338,15 @@ async def get_versions(
                 logger.debug(f"使用缓存的版本信息 (缓存时间: {cache_age.total_seconds():.1f}秒)")
                 return _version_cache
 
-        # 获取本地版本
+        # 获取本地版本和changelog
         local_version = "unknown"
+        local_changelog = None
         local_package_file = _get_scrapers_dir() / "package.json"
         if local_package_file.exists():
             try:
                 local_package = json.loads(local_package_file.read_text())
                 local_version = local_package.get("version", "unknown")
+                local_changelog = local_package.get("changelog", None)
             except Exception as e:
                 logger.warning(f"读取本地 package.json 失败: {e}")
 
@@ -355,6 +358,7 @@ async def get_versions(
 
         # 获取远程版本（当前配置的资源仓库）
         remote_version = None
+        remote_changelog = None
         repo_url = await config_manager.get("scraper_resource_repo", "")
 
         if repo_url:
@@ -383,14 +387,17 @@ async def get_versions(
             # 区分日志：用户配置的仓库
             platform_name = "Gitee" if gitee_info else "GitHub"
             logger.info(f"[版本检查] 正在获取用户配置仓库版本 ({platform_name}): {repo_url}")
-            remote_version = await _fetch_package_version_with_retry(package_url, headers, proxy=proxy_to_use)
-            if remote_version:
+            remote_info = await _fetch_package_info_with_retry(package_url, headers, proxy=proxy_to_use)
+            if remote_info:
+                remote_version = remote_info["version"]
+                remote_changelog = remote_info.get("changelog")
                 logger.info(f"[版本检查] 用户配置仓库版本: {remote_version}")
             else:
                 logger.warning(f"[版本检查] 用户配置仓库版本获取失败")
 
         # 固定源仓库（官方仓库）版本
         official_version = None
+        official_changelog = None
         try:
             official_repo_info = parse_github_url("https://github.com/l429609201/Misaka-Scraper-Resources")
 
@@ -404,8 +411,10 @@ async def get_versions(
 
             # 区分日志：官方仓库
             logger.info(f"[版本检查] 正在获取官方仓库版本 (GitHub): https://github.com/l429609201/Misaka-Scraper-Resources")
-            official_version = await _fetch_package_version_with_retry(official_package_url, headers_official, proxy=proxy_to_use)
-            if official_version:
+            official_info = await _fetch_package_info_with_retry(official_package_url, headers_official, proxy=proxy_to_use)
+            if official_info:
+                official_version = official_info["version"]
+                official_changelog = official_info.get("changelog")
                 logger.info(f"[版本检查] 官方仓库版本: {official_version}")
             else:
                 logger.warning(f"[版本检查] 官方仓库版本获取失败")
@@ -417,7 +426,10 @@ async def get_versions(
             "localVersion": local_version,
             "remoteVersion": remote_version,
             "officialVersion": official_version,
-            "hasUpdate": remote_version and local_version != "unknown" and remote_version != local_version
+            "hasUpdate": remote_version and local_version != "unknown" and remote_version != local_version,
+            "localChangelog": local_changelog,
+            "remoteChangelog": remote_changelog,
+            "officialChangelog": official_changelog
         }
 
         # 更新缓存
@@ -1596,17 +1608,28 @@ async def download_progress_stream(
 
             yield f"data: {json.dumps(progress_data, ensure_ascii=False)}\n\n"
 
-            # 检测是否需要重启容器（在任务完成前发送特殊消息）
+            # 检测是否需要发送终止消息（restart_pending 用于通知 SSE 流退出）
             if current_task.restart_pending:
-                # 发送重启通知，让前端知道即将重启
-                yield f"data: {json.dumps({'type': 'restart', 'message': '弹幕源更新完成，容器即将重启...'}, ensure_ascii=False)}\n\n"
-                # 发送 done 消息并退出，让前端正常关闭连接
-                yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': True}, ensure_ascii=False)}\n\n"
+                if current_task.need_restart:
+                    # 需要重启容器的情况
+                    logger.info(f"[SSE] 任务 {task_id} 需要重启容器，发送 restart 和 done 消息")
+                    yield f"data: {json.dumps({'type': 'restart', 'message': '弹幕源更新完成，容器即将重启...'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': True}, ensure_ascii=False)}\n\n"
+                else:
+                    # 热加载完成，不需要重启容器
+                    logger.info(f"[SSE] 任务 {task_id} 热加载完成，发送 done 消息 (need_restart=False)")
+                    yield f"data: {json.dumps({'type': 'done', 'status': 'completed', 'need_restart': False}, ensure_ascii=False)}\n\n"
+                logger.info(f"[SSE] 任务 {task_id} done 消息已发送，退出 SSE 流")
                 break
 
-            # 任务完成则退出
+            # 任务完成则退出（备用逻辑，正常情况下应该通过 restart_pending 退出）
             if current_task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
+                logger.info(f"[SSE] 任务 {task_id} 状态为 {current_task.status.value}，准备发送 done 消息")
+                # 等待一小段时间，确保前端有时间处理最后的 progress 消息
+                await asyncio.sleep(0.1)
+                logger.info(f"[SSE] 任务 {task_id} 发送 done 消息")
                 yield f"data: {json.dumps({'type': 'done', 'status': current_task.status.value, 'need_restart': current_task.need_restart}, ensure_ascii=False)}\n\n"
+                logger.info(f"[SSE] 任务 {task_id} done 消息已发送，退出 SSE 流")
                 break
 
             await asyncio.sleep(0.5)  # 每 0.5 秒更新一次

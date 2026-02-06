@@ -36,17 +36,34 @@ def _normalize_p_attr_to_internal_format(p_attr: str, source_tag: str = "[xml]")
 
     # 根据核心参数数量判断格式并标准化
     if len(core_parts) >= 4:
-        # Bilibili 格式 (8参数) 或已标准化格式 (4参数)
-        # 格式: 时间,模式,字号,颜色,...
-        # 只保留前4个核心参数
         time_val = core_parts[0]
         mode_val = core_parts[1]
-        fontsize_val = core_parts[2]
-        color_val = core_parts[3]
+        fontsize_candidate = core_parts[2].strip()
+        color_or_userid = core_parts[3].strip()
 
-        # 验证字号是否为有效数字，如果不是则使用默认值
-        if not fontsize_val.strip().isdigit():
+        # 区分两种4参数格式：
+        #   - 标准/Bilibili格式: 时间,模式,字号,颜色 (第3个是字号，通常 < 100)
+        #   - Dandanplay API格式: 时间,模式,颜色,用户ID (第3个是颜色，通常 > 1000；第4个是用户ID哈希)
+        is_dandanplay_format = False
+
+        if fontsize_candidate.isdigit() and int(fontsize_candidate) > 1000:
+            # 第3个参数 > 1000，不可能是字号，实际是颜色值 → dandanplay格式
+            is_dandanplay_format = True
+        elif not color_or_userid.isdigit():
+            # 第4个参数包含非数字字符（如十六进制哈希 0d3ed9dd）→ 不是颜色值 → dandanplay格式
+            is_dandanplay_format = True
+        elif color_or_userid.isdigit() and int(color_or_userid) > 16777215:
+            # 第4个参数超过RGB最大值(16777215)，不可能是颜色 → dandanplay格式
+            is_dandanplay_format = True
+
+        if is_dandanplay_format:
+            # Dandanplay格式: 时间,模式,颜色,用户ID → 丢弃用户ID，插入默认字号
             fontsize_val = '25'
+            color_val = fontsize_candidate  # 第3个参数实际是颜色
+        else:
+            # 标准格式: 时间,模式,字号,颜色
+            fontsize_val = fontsize_candidate if fontsize_candidate.isdigit() else '25'
+            color_val = color_or_userid
 
         final_source = existing_source_tag if existing_source_tag else source_tag
         return f"{time_val},{mode_val},{fontsize_val},{color_val},{final_source}"
