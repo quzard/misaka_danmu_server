@@ -1685,7 +1685,7 @@ export const SearchResult = () => {
             </DndContext>
           </Card>
           {editEpisodeList.length > episodePageSize && (
-            <div className="flex flex-col items-center mt-3 gap-2 shrink-0">
+            <div className="flex justify-center items-center mt-3 shrink-0 gap-3">
               <Pagination
                 current={episodePage}
                 pageSize={episodePageSize}
@@ -1711,7 +1711,7 @@ export const SearchResult = () => {
                 }}
                 trigger={['click']}
               >
-                <Button size="small">
+                <Button size="small" className="shrink-0">
                   {episodePageSize} 条/页 <DownOutlined />
                 </Button>
               </Dropdown>
