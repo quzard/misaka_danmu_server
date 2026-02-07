@@ -13,6 +13,7 @@ import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/ico
 import { Tooltip } from 'antd'
 import SessionManager from '@/components/SessionManager'
 import VersionModal from '@/components/VersionModal'
+import ThemeColorPicker from '@/components/ThemeColorPicker'
 
 // GitHub 图标 (Simple Icons 标准)
 const GithubIcon = () => (
@@ -260,6 +261,7 @@ const MobileHeader = ({ activeKey }) => {
   const navigate = useNavigate()
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
+  const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
   const [passwordForm] = Form.useForm()
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
@@ -338,6 +340,8 @@ const MobileHeader = ({ activeKey }) => {
       setIsPasswordModalOpen(true)
     } else if (item.key === 'session-manager') {
       setIsSessionModalOpen(true)
+    } else if (item.key === 'theme-color') {
+      setIsThemeColorOpen(true)
     } else if (item.key === 'restart-service') {
       // 重启由 Popconfirm 处理，这里不做任何事
     } else {
@@ -395,6 +399,11 @@ const MobileHeader = ({ activeKey }) => {
                       label: o.label,
                       icon: o.icon,
                     })),
+                    {
+                      key: 'theme-color',
+                      label: '主题色',
+                      icon: 'setting',
+                    },
                     {
                       key: 'session-manager',
                       label: '会话管理',
@@ -539,6 +548,12 @@ const MobileHeader = ({ activeKey }) => {
         open={isSessionModalOpen}
         onClose={() => setIsSessionModalOpen(false)}
       />
+
+      {/* 主题色切换弹窗 */}
+      <ThemeColorPicker
+        open={isThemeColorOpen}
+        onClose={() => setIsThemeColorOpen(false)}
+      />
     </>
   )
 }
@@ -549,6 +564,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick 
   const messageApi = useMessage()
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
+  const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
   const [form] = Form.useForm()
   const [showPassword1, setShowPassword1] = useState(false)
   const [showPassword2, setShowPassword2] = useState(false)
@@ -686,6 +702,14 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick 
             <Dropdown
               menu={{
                 items: [
+                  {
+                    key: 'themeColor',
+                    label: (
+                      <div onClick={() => setIsThemeColorOpen(true)} className="text-base">
+                        主题色
+                      </div>
+                    ),
+                  },
                   {
                     key: 'sessionManager',
                     label: (
@@ -841,6 +865,12 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick 
       <SessionManager
         open={isSessionModalOpen}
         onClose={() => setIsSessionModalOpen(false)}
+      />
+
+      {/* 主题色切换弹窗 */}
+      <ThemeColorPicker
+        open={isThemeColorOpen}
+        onClose={() => setIsThemeColorOpen(false)}
       />
     </>
   )

@@ -1,14 +1,132 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { ConfigProvider } from 'antd'
 import { theme } from 'antd'
 
 import zhCN from 'antd/locale/zh_CN'
+
+// ========== 颜色工具函数 ==========
+
+// hex 转 RGB
+function hexToRgb(hex) {
+  const h = hex.replace('#', '')
+  return {
+    r: parseInt(h.substring(0, 2), 16),
+    g: parseInt(h.substring(2, 4), 16),
+    b: parseInt(h.substring(4, 6), 16),
+  }
+}
+
+// RGB 转 hex
+function rgbToHex(r, g, b) {
+  return '#' + [r, g, b].map(x => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, '0')).join('')
+}
+
+// 混合两个颜色（ratio: 0=全是color2, 1=全是color1）
+function mixColors(color1, color2, ratio) {
+  const c1 = hexToRgb(color1)
+  const c2 = hexToRgb(color2)
+  return rgbToHex(
+    c1.r * ratio + c2.r * (1 - ratio),
+    c1.g * ratio + c2.g * (1 - ratio),
+    c1.b * ratio + c2.b * (1 - ratio),
+  )
+}
+
+// 加深颜色
+function darkenColor(hex, amount) {
+  const { r, g, b } = hexToRgb(hex)
+  return rgbToHex(r * (1 - amount), g * (1 - amount), b * (1 - amount))
+}
+
+// hex 转 rgba 字符串
+function hexToRgba(hex, alpha) {
+  const { r, g, b } = hexToRgb(hex)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+// 根据主色生成完整的派生色方案
+function generateThemeColors(primaryColor) {
+  const hoverColor = darkenColor(primaryColor, 0.1)
+  const activeColor = darkenColor(primaryColor, 0.2)
+  // 亮色模式下的派生色（与白色混合）
+  const lightBorder = mixColors(primaryColor, '#FFFFFF', 0.15)
+  const lightBorderSecondary = mixColors(primaryColor, '#FFFFFF', 0.1)
+  const lightHoverBg = mixColors(primaryColor, '#FFFFFF', 0.06)
+  const lightBgBase = mixColors(primaryColor, '#FFFFFF', 0.03)
+  const lightHeaderBg = mixColors(primaryColor, '#FFFFFF', 0.08)
+  const lightScrollbarThumb = mixColors(primaryColor, '#FFFFFF', 0.3)
+  return {
+    primary: primaryColor,
+    hover: hoverColor,
+    active: activeColor,
+    light: {
+      border: lightBorder,
+      borderSecondary: lightBorderSecondary,
+      hoverBg: lightHoverBg,
+      bgBase: lightBgBase,
+      headerBg: lightHeaderBg,
+      scrollbarThumb: lightScrollbarThumb,
+    },
+    shadow: hexToRgba(primaryColor, 0.12),
+    shadowLight: hexToRgba(primaryColor, 0.1),
+  }
+}
+
+// 预设主题色
+export const PRESET_THEME_COLORS = [
+  { name: '樱花粉', color: '#FF6B9B' },
+  { name: '天空蓝', color: '#4096FF' },
+  { name: '深海蓝', color: '#1677FF' },
+  { name: '薄荷绿', color: '#52C41A' },
+  { name: '葡萄紫', color: '#722ED1' },
+  { name: '薰衣草', color: '#9254DE' },
+  { name: '落日橙', color: '#FA8C16' },
+  { name: '中国红', color: '#F5222D' },
+]
+
+const DEFAULT_PRIMARY = '#FF6B9B'
 
 // 创建上下文
 const ThemeContext = createContext()
 
 export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(false)
+  const [themeColor, setThemeColorState] = useState(() => {
+    return localStorage.getItem('themeColor') || DEFAULT_PRIMARY
+  })
+
+  // 根据主色生成派生色
+  const colors = useMemo(() => generateThemeColors(themeColor), [themeColor])
+
+  // 动态更新 CSS 变量
+  const applyCssVariables = (isDarkMode, colorScheme) => {
+    const root = document.documentElement
+    // 主色始终更新
+    root.style.setProperty('--color-primary', colorScheme.primary)
+    root.style.setProperty('--color-primary-dark', colorScheme.hover)
+
+    if (!isDarkMode) {
+      // 亮色模式：背景、边框、hover 都跟随主色
+      root.style.setProperty('--color-bg', colorScheme.light.bgBase)
+      root.style.setProperty('--color-hover', colorScheme.light.hoverBg)
+      root.style.setProperty('--color-border', colorScheme.light.border)
+      root.style.setProperty('--scrollbar-thumb', colorScheme.light.scrollbarThumb)
+      root.style.setProperty('--scrollbar-thumb-hover', colorScheme.primary)
+    } else {
+      // 暗色模式：背景/边框保持 slate 色调，只更新主色
+      root.style.setProperty('--color-bg', '#0f172a')
+      root.style.setProperty('--color-hover', '#273449')
+      root.style.setProperty('--color-border', '#334155')
+      root.style.setProperty('--scrollbar-thumb', '#475569')
+      root.style.setProperty('--scrollbar-thumb-hover', '#64748b')
+    }
+  }
+
+  // 设置主题色并持久化
+  const setThemeColor = (color) => {
+    setThemeColorState(color)
+    localStorage.setItem('themeColor', color)
+  }
 
   // 初始化：检查系统偏好或本地存储
   useEffect(() => {
@@ -19,10 +137,13 @@ export function ThemeProvider({ children }) {
 
     setIsDark(prefersDark)
     document.documentElement.classList.toggle('dark', prefersDark)
-
-    // 初始化时也更新meta标签主题色
     updateMetaThemeColor(prefersDark)
   }, [])
+
+  // 当 isDark 或 themeColor 变化时，更新 CSS 变量
+  useEffect(() => {
+    applyCssVariables(isDark, colors)
+  }, [isDark, colors])
 
   // 切换暗黑模式
   const toggleDarkMode = () => {
@@ -30,148 +151,111 @@ export function ThemeProvider({ children }) {
     setIsDark(newDarkState)
     document.documentElement.classList.toggle('dark', newDarkState)
     localStorage.theme = newDarkState ? 'dark' : 'light'
-
-    // 动态更新meta标签的主题色
     updateMetaThemeColor(newDarkState)
   }
 
   // 更新meta标签主题色的函数
   const updateMetaThemeColor = isDarkMode => {
-    const themeColor = isDarkMode ? '#0f172a' : '#fff9fb'
-    const statusBarStyle = isDarkMode ? '#0f172a' : '#fff9fb'
-
-    // 更新theme-color meta标签
+    const metaColor = isDarkMode ? '#0f172a' : colors.light.bgBase
     const themeColorMeta = document.querySelector('meta[name="theme-color"]')
     if (themeColorMeta) {
-      themeColorMeta.setAttribute('content', themeColor)
+      themeColorMeta.setAttribute('content', metaColor)
     }
-
-    // 更新apple-mobile-web-app-status-bar-style meta标签
     const statusBarMeta = document.querySelector(
       'meta[name="apple-mobile-web-app-status-bar-style"]'
     )
     if (statusBarMeta) {
-      statusBarMeta.setAttribute('content', statusBarStyle)
+      statusBarMeta.setAttribute('content', metaColor)
     }
   }
 
-  // AntD 5 主题配置（核心）
+  // AntD 5 主题配置（核心）- 动态生成
   const { defaultAlgorithm, darkAlgorithm } = theme
-  const lightTheme = {
+
+  const lightTheme = useMemo(() => ({
     algorithm: defaultAlgorithm,
     token: {
-      // 主色调：柔和的粉色，符合二次元风格
-      colorPrimary: '#FF6B9B',
-      colorPrimaryHover: '#FF528A',
-      colorPrimaryActive: '#FF3879',
-
-      // 辅助色
+      colorPrimary: colors.primary,
+      colorPrimaryHover: colors.hover,
+      colorPrimaryActive: colors.active,
       colorSuccess: '#389e0d',
       colorWarning: '#FFD166',
       colorError: '#FF5252',
       colorInfo: '#64B5F6',
-
-      // 背景色
-      colorBgBase: '#FFF9FB',
+      colorBgBase: colors.light.bgBase,
       colorBgContainer: '#FFFFFF',
-      colorBgElevated: '#FFF0F5',
-
-      // 文本色
+      colorBgElevated: colors.light.hoverBg,
       colorTextBase: '#333333',
       colorTextSecondary: '#666666',
       colorTextTertiary: '#999999',
-
-      // 边框色
-      colorBorder: '#FFD9E5',
-      colorBorderSecondary: '#FFE6EF',
-
-      // 字体设置，选用更圆润的字体
+      colorBorder: colors.light.border,
+      colorBorderSecondary: colors.light.borderSecondary,
       fontFamily: "'MyNunito', 'Nunito', 'Comic Sans MS', sans-serif",
     },
     components: {
-      Button: {
-        borderRadius: 20,
-        fontSize: 14,
-        height: 40,
-      },
+      Button: { borderRadius: 20, fontSize: 14, height: 40 },
       Card: {
         borderRadius: 12,
-        boxShadow: '0 4px 16px rgba(255, 107, 155, 0.1)',
-        colorBorder: '#FFD9E5',
+        boxShadow: `0 4px 16px ${colors.shadowLight}`,
+        colorBorder: colors.light.border,
       },
       Tabs: {
-        colorPrimary: '#FF6B9B',
+        colorPrimary: colors.primary,
         borderRadius: 8,
-        itemActiveColor: '#FF6B9B',
+        itemActiveColor: colors.primary,
       },
       Table: {
-        colorBorder: '#FFD9E5',
+        colorBorder: colors.light.border,
         borderRadius: 8,
-        headerBg: '#FFF0F5',
+        headerBg: colors.light.hoverBg,
       },
       List: {
-        colorBorder: '#FFD9E5',
-        itemHoverBg: '#FFF0F5',
+        colorBorder: colors.light.border,
+        itemHoverBg: colors.light.hoverBg,
       },
       Form: {
-        colorBorder: '#FFD9E5',
+        colorBorder: colors.light.border,
         itemMarginBottom: 16,
       },
       Input: {
         borderRadius: 8,
-        borderColor: '#FFD9E5',
-        hoverBorderColor: '#FF6B9B',
+        borderColor: colors.light.border,
+        hoverBorderColor: colors.primary,
       },
     },
-  }
+  }), [colors])
 
-  // 二次元风格暗色主题配置
-  const darkTheme = {
+  const darkTheme = useMemo(() => ({
     algorithm: darkAlgorithm,
     token: {
-      // 主色调：在暗色背景上更突出的亮粉色
-      colorPrimary: '#FF6B9B',
-      colorPrimaryHover: '#FF528A',
-      colorPrimaryActive: '#FF3879',
-
-      // 辅助色（在暗色背景上更明亮）
+      colorPrimary: colors.primary,
+      colorPrimaryHover: colors.hover,
+      colorPrimaryActive: colors.active,
       colorSuccess: '#6abe39',
       colorWarning: '#FFC850',
       colorError: '#FF5252',
       colorInfo: '#7DCFFF',
-
-      // 背景色（更新为蓝紫色调）
-      colorBgBase: '#0F172A', // 深蓝灰色作为整体背景
-      colorBgContainer: '#1E293B', // 稍浅的蓝色作为容器背景
-      colorBgElevated: '#273449', // 更高层级的元素背景
-
-      // 文本色
+      colorBgBase: '#0F172A',
+      colorBgContainer: '#1E293B',
+      colorBgElevated: '#273449',
       colorTextBase: '#F8FAFC',
       colorTextSecondary: '#E2E8F0',
       colorTextTertiary: '#94A3B8',
-
-      // 边框色（配合蓝紫色调）
       colorBorder: '#334155',
       colorBorderSecondary: '#2A3A51',
-
-      // 字体设置
       fontFamily: "'MyNunito', 'Nunito', 'Comic Sans MS', sans-serif",
     },
     components: {
-      Button: {
-        borderRadius: 20,
-        fontSize: 14,
-        height: 40,
-      },
+      Button: { borderRadius: 20, fontSize: 14, height: 40 },
       Card: {
         borderRadius: 12,
-        boxShadow: '0 4px 16px rgba(255, 107, 155, 0.12)',
+        boxShadow: `0 4px 16px ${colors.shadow}`,
         colorBorder: '#334155',
       },
       Tabs: {
-        colorPrimary: '#FF6B9B',
+        colorPrimary: colors.primary,
         borderRadius: 8,
-        itemActiveColor: '#FF6B9B',
+        itemActiveColor: colors.primary,
       },
       Table: {
         colorBorder: '#334155',
@@ -193,26 +277,17 @@ export function ThemeProvider({ children }) {
       Input: {
         borderRadius: 8,
         borderColor: '#334155',
-        hoverBorderColor: '#FF6B9B',
+        hoverBorderColor: colors.primary,
         colorBgContainer: '#273449',
       },
-      InputNumber: {
-        colorBgContainer: '#273449',
-      },
-      Select: {
-        colorBgContainer: '#273449',
-        colorBgElevated: '#334155',
-      },
-      Modal: {
-        contentBg: '#1E293B',
-        headerBg: '#1E293B',
-        footerBg: '#1E293B',
-      },
+      InputNumber: { colorBgContainer: '#273449' },
+      Select: { colorBgContainer: '#273449', colorBgElevated: '#334155' },
+      Modal: { contentBg: '#1E293B', headerBg: '#1E293B', footerBg: '#1E293B' },
     },
-  }
+  }), [colors])
 
   return (
-    <ThemeContext.Provider value={{ isDark, toggleDarkMode }}>
+    <ThemeContext.Provider value={{ isDark, toggleDarkMode, themeColor, setThemeColor }}>
       <ConfigProvider locale={zhCN} theme={isDark ? darkTheme : lightTheme}>
         {children}
       </ConfigProvider>
