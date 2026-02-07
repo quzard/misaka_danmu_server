@@ -317,7 +317,7 @@ async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> O
 async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
     """删除一个分集及其弹幕文件，并清理空目录。"""
     from .danmaku import _get_fs_path_from_web_path
-    from src.tasks.delete import _cleanup_empty_parent_directories, DANMAKU_BASE_DIR
+    from src.tasks.delete import _cleanup_empty_parent_directories, _determine_cleanup_stop_dir
 
     episode = await session.get(Episode, episode_id)
     if episode:
@@ -326,7 +326,7 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
             if fs_path and fs_path.is_file():
                 fs_path.unlink(missing_ok=True)
                 # 清理空的父目录
-                _cleanup_empty_parent_directories(fs_path, DANMAKU_BASE_DIR)
+                _cleanup_empty_parent_directories(fs_path, _determine_cleanup_stop_dir(fs_path))
         await session.delete(episode)
         await session.commit()
         return True
@@ -430,7 +430,7 @@ async def update_episode_danmaku_info(session: AsyncSession, episode_id: int, fi
 async def clear_episode_comments(session: AsyncSession, episode_id: int):
     """Deletes the danmaku file for an episode and resets its count, cleaning up empty directories."""
     from .danmaku import _get_fs_path_from_web_path
-    from src.tasks.delete import _cleanup_empty_parent_directories, DANMAKU_BASE_DIR
+    from src.tasks.delete import _cleanup_empty_parent_directories, _determine_cleanup_stop_dir
 
     episode = await session.get(Episode, episode_id)
     if not episode:
@@ -442,7 +442,7 @@ async def clear_episode_comments(session: AsyncSession, episode_id: int):
             try:
                 fs_path.unlink()
                 # 清理空的父目录
-                _cleanup_empty_parent_directories(fs_path, DANMAKU_BASE_DIR)
+                _cleanup_empty_parent_directories(fs_path, _determine_cleanup_stop_dir(fs_path))
             except OSError as e:
                 logger.error(f"删除弹幕文件失败: {fs_path}。错误: {e}")
 
