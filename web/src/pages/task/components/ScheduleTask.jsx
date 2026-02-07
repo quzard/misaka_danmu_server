@@ -42,6 +42,7 @@ export const ScheduleTask = () => {
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('taskId', form)
+  const watchedJobType = Form.useWatch('jobType', form)
   const modalApi = useModal()
   const messageApi = useMessage()
   const isMobile = useAtomValue(isMobileAtom)
@@ -359,6 +360,17 @@ export const ScheduleTask = () => {
                       )}
                     </div>
 
+                    {task.jobType === 'tmdbAutoScrape' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-gray-600">强制刮削：</span>
+                        {task.forceScrape ? (
+                          <Tag color="orange">开启</Tag>
+                        ) : (
+                          <Tag>关闭</Tag>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-2 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-600">上次运行：</span>
@@ -407,6 +419,7 @@ export const ScheduleTask = () => {
           initialValues={{
             jobType: availableJobTypes.filter(job => !job.isSystemTask)[0]?.jobType || '',
             isEnabled: true,
+            forceScrape: false,
             cronExpression: '0 2 * * *',
           }}
         >
@@ -579,6 +592,17 @@ export const ScheduleTask = () => {
           >
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />
           </Form.Item>
+          {watchedJobType === 'tmdbAutoScrape' && (
+            <Form.Item
+              name="forceScrape"
+              label="强制刮削"
+              valuePropName="checked"
+              className="mb-4"
+              tooltip="关闭时，已有剧集组映射的条目将被跳过；开启时，强制覆盖所有条目的刮削数据"
+            >
+              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+            </Form.Item>
+          )}
           <Form.Item name="taskId" label="taskId" hidden>
             <Input disabled />
           </Form.Item>

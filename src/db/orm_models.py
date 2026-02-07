@@ -252,6 +252,7 @@ class ScheduledTask(Base):
     jobType: Mapped[str] = mapped_column("job_type", String(500))
     cronExpression: Mapped[str] = mapped_column("cron_expression", String(500))
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    forceScrape: Mapped[bool] = mapped_column("force_scrape", Boolean, default=False, server_default="0")
     lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", NaiveDateTime)
     nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", NaiveDateTime)
 

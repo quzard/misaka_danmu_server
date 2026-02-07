@@ -31,15 +31,18 @@ class TmdbAutoMapJob(BaseJob):
         self.logger = logging.getLogger(self.__class__.__name__)
 
 
-    async def run(self, session: AsyncSession, progress_callback: Callable):
+    async def run(self, session: AsyncSession, progress_callback: Callable, force_scrape: bool = False):
         """
         定时任务的核心逻辑。
         1. 获取所有TV系列作品
         2. 对于没有TMDB ID的作品，通过标题搜索TMDB获取ID
         3. 刮削别名信息
         4. 获取并映射剧集组信息
+
+        Args:
+            force_scrape: 强制刮削模式。为False时，已有剧集组映射的条目将被跳过。
         """
-        self.logger.info(f"开始执行 [{self.job_name}] 定时任务...")
+        self.logger.info(f"开始执行 [{self.job_name}] 定时任务... (强制刮削: {'开启' if force_scrape else '关闭'})")
         await progress_callback(0, "正在初始化...")
 
         # 为元数据管理器调用创建一个虚拟用户对象
@@ -97,6 +100,7 @@ class TmdbAutoMapJob(BaseJob):
         processed_count = 0
         scraped_count = 0
         mapped_count = 0
+        skipped_count = 0
 
         for i, show in enumerate(shows_to_update):
             current_progress = 5 + int((i / total_shows) * 95) if total_shows > 0 else 95
@@ -109,6 +113,14 @@ class TmdbAutoMapJob(BaseJob):
             self.logger.info(f"正在处理: '{title}' (Anime ID: {anime_id}, TMDB ID: {tmdb_id or '无'})")
 
             try:
+                # 非强制刮削模式下，跳过已有完整数据的条目
+                existing_group_id = show.get('tmdbEpisodeGroupId')
+                if not force_scrape and tmdb_id and existing_group_id:
+                    self.logger.info(f"跳过 '{title}': 已有TMDB ID({tmdb_id})和剧集组({existing_group_id})，非强制刮削模式。")
+                    skipped_count += 1
+                    processed_count += 1
+                    continue
+
                 # 初始化变量
                 use_episode_group = False
                 recognized_season = None
@@ -491,6 +503,7 @@ class TmdbAutoMapJob(BaseJob):
                 await asyncio.sleep(1) # 简单的速率限制，防止对TMDB API造成过大压力
 
         self.logger.info(f"定时任务 [{self.job_name}] 执行完毕。")
-        self.logger.info(f"统计: 共处理 {processed_count}/{total_shows} 个作品, 刮削 {scraped_count} 个TMDB ID, 映射 {mapped_count} 个剧集组。")
+        skip_info = f", 跳过 {skipped_count} 个已有数据" if skipped_count > 0 else ""
+        self.logger.info(f"统计: 共处理 {processed_count}/{total_shows} 个作品, 刮削 {scraped_count} 个TMDB ID, 映射 {mapped_count} 个剧集组{skip_info}。")
         # 修正：抛出 TaskSuccess 异常，以便 TaskManager 可以用一个有意义的消息来结束任务
-        raise TaskSuccess(f"任务执行完毕，共处理 {processed_count}/{total_shows} 个作品, 刮削 {scraped_count} 个TMDB ID, 映射 {mapped_count} 个剧集组。")
+        raise TaskSuccess(f"任务执行完毕，共处理 {processed_count}/{total_shows} 个作品, 刮削 {scraped_count} 个TMDB ID, 映射 {mapped_count} 个剧集组{skip_info}。")

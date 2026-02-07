@@ -34,6 +34,7 @@ async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
         ScheduledTask.jobType.label("jobType"),
         ScheduledTask.cronExpression.label("cronExpression"),
         ScheduledTask.isEnabled.label("isEnabled"),
+        ScheduledTask.forceScrape.label("forceScrape"),
         ScheduledTask.lastRunAt.label("lastRunAt"),
         ScheduledTask.nextRunAt.label("nextRunAt")
     ).order_by(ScheduledTask.name)
@@ -49,6 +50,7 @@ async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Di
         ScheduledTask.jobType.label("jobType"),
         ScheduledTask.cronExpression.label("cronExpression"),
         ScheduledTask.isEnabled.label("isEnabled"),
+        ScheduledTask.forceScrape.label("forceScrape"),
         ScheduledTask.lastRunAt.label("lastRunAt"),
         ScheduledTask.nextRunAt.label("nextRunAt")
     ).where(ScheduledTask.taskId == task_id)
@@ -77,7 +79,8 @@ async def create_scheduled_task(
     name: str,
     job_type: str,
     cron: str,
-    is_enabled: bool
+    is_enabled: bool,
+    force_scrape: bool = False
 ):
     """创建定时任务"""
     new_task = ScheduledTask(
@@ -85,7 +88,8 @@ async def create_scheduled_task(
         name=name,
         jobType=job_type,
         cronExpression=cron,
-        isEnabled=is_enabled
+        isEnabled=is_enabled,
+        forceScrape=force_scrape
     )
     session.add(new_task)
     await session.commit()
@@ -96,7 +100,8 @@ async def update_scheduled_task(
     task_id: str,
     name: str,
     cron: str,
-    is_enabled: bool
+    is_enabled: bool,
+    force_scrape: bool = False
 ) -> bool:
     """更新定时任务,但不允许修改系统内置任务的关键属性"""
     task = await session.get(ScheduledTask, task_id)
@@ -110,6 +115,7 @@ async def update_scheduled_task(
         task.name = name
         task.cronExpression = cron
         task.isEnabled = is_enabled
+        task.forceScrape = force_scrape
 
     await session.commit()
     return True

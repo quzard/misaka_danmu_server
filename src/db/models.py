@@ -491,11 +491,13 @@ class ScheduledTaskCreate(BaseModel):
     jobType: str
     cronExpression: str
     isEnabled: bool = True
+    forceScrape: bool = False
 
 class ScheduledTaskUpdate(BaseModel):
     name: str
     cronExpression: str
     isEnabled: bool
+    forceScrape: bool = False
 
 class ScheduledTaskInfo(ScheduledTaskCreate):
     taskId: str
