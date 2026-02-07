@@ -1,13 +1,16 @@
 import {
   Button,
   Card,
+  Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Space,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -32,6 +35,40 @@ import cronstrue from 'cronstrue/i18n'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store'
 
+// Cron 组件中文本地化配置
+const cronLocale = {
+  everyText: '每',
+  emptyMonths: '每月',
+  emptyMonthDays: '每天',
+  emptyMonthDaysShort: '天',
+  emptyWeekDays: '每周',
+  emptyWeekDaysShort: '周',
+  emptyHours: '每小时',
+  emptyMinutes: '每分钟',
+  emptyMinutesForHourPeriod: '每分钟',
+  yearOption: '年',
+  monthOption: '月',
+  weekOption: '周',
+  dayOption: '天',
+  hourOption: '小时',
+  minuteOption: '分钟',
+  rebootOption: '重启时',
+  prefixPeriod: '每',
+  prefixMonths: '在',
+  prefixMonthDays: '在',
+  prefixWeekDays: '在',
+  prefixWeekDaysForMonthAndYearPeriod: '和',
+  prefixHours: '在',
+  prefixMinutes: '在',
+  prefixMinutesForHourPeriod: '在',
+  suffixMinutesForHourPeriod: '分',
+  errorInvalidCron: '无效的Cron表达式',
+  weekDays: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+  months: ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'],
+  altWeekDays: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'],
+  altMonths: ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+}
+
 export const ScheduleTask = () => {
   const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
@@ -42,7 +79,6 @@ export const ScheduleTask = () => {
 
   const [form] = Form.useForm()
   const editid = Form.useWatch('taskId', form)
-  const watchedJobType = Form.useWatch('jobType', form)
   const modalApi = useModal()
   const messageApi = useMessage()
   const isMobile = useAtomValue(isMobileAtom)
@@ -64,6 +100,103 @@ export const ScheduleTask = () => {
       return true
     } catch (error) {
       return false
+    }
+  }
+
+  // 根据 configSchema 中的配置项定义，渲染对应的表单控件
+  const renderConfigFormItem = (item) => {
+    const { key, label, type, description, placeholder, min, max, suffix, rows, options } = item
+
+    switch (type) {
+      case 'boolean':
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            valuePropName="checked"
+            className="mb-4"
+            tooltip={description}
+          >
+            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+          </Form.Item>
+        )
+
+      case 'password':
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            className="mb-4"
+            tooltip={description}
+          >
+            <Input.Password placeholder={placeholder} />
+          </Form.Item>
+        )
+
+      case 'number':
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            className="mb-4"
+            tooltip={description}
+          >
+            <InputNumber
+              min={min}
+              max={max}
+              addonAfter={suffix}
+              placeholder={placeholder}
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
+        )
+
+      case 'textarea':
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            className="mb-4"
+            tooltip={description}
+          >
+            <Input.TextArea rows={rows || 3} placeholder={placeholder} />
+          </Form.Item>
+        )
+
+      case 'select':
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            className="mb-4"
+            tooltip={description}
+          >
+            <Select
+              placeholder={placeholder}
+              options={options?.map(opt =>
+                typeof opt === 'string' ? { value: opt, label: opt } : opt
+              )}
+            />
+          </Form.Item>
+        )
+
+      default: // string
+        return (
+          <Form.Item
+            key={key}
+            name={['taskConfig', key]}
+            label={label}
+            className="mb-4"
+            tooltip={description}
+          >
+            <Input placeholder={placeholder} />
+          </Form.Item>
+        )
     }
   }
 
@@ -184,6 +317,7 @@ export const ScheduleTask = () => {
               onClick={() => {
                 form.setFieldsValue({
                   ...record,
+                  taskConfig: record.taskConfig || {},
                 })
                 setAddOpen(true)
               }}
@@ -321,6 +455,7 @@ export const ScheduleTask = () => {
                             onClick={() => {
                               form.setFieldsValue({
                                 ...task,
+                                taskConfig: task.taskConfig || {},
                               })
                               setAddOpen(true)
                             }}
@@ -363,7 +498,7 @@ export const ScheduleTask = () => {
                     {task.jobType === 'tmdbAutoScrape' && (
                       <div className="flex items-center gap-2">
                         <span className="text-gray-600">强制刮削：</span>
-                        {task.forceScrape ? (
+                        {task.taskConfig?.forceScrape ? (
                           <Tag color="orange">开启</Tag>
                         ) : (
                           <Tag>关闭</Tag>
@@ -419,193 +554,148 @@ export const ScheduleTask = () => {
           initialValues={{
             jobType: availableJobTypes.filter(job => !job.isSystemTask)[0]?.jobType || '',
             isEnabled: true,
-            forceScrape: false,
+            taskConfig: {},
             cronExpression: '0 2 * * *',
           }}
         >
-          <Form.Item
-            name="name"
-            label="任务名称"
-            rules={[{ required: true, message: '请输入任务名称' }]}
-            className="mb-4"
-          >
-            <Input placeholder="例如：我的每日TMDB更新" />
-          </Form.Item>
-          <Form.Item
-            name="jobType"
-            label="任务类型"
-            rules={[{ required: true, message: '请选择任务类型' }]}
-            className="mb-4"
-          >
-            <Select>
-              {availableJobTypes
-                .filter(job => !job.isSystemTask) // 过滤掉系统任务
-                .map(job => (
-                  <Select.Option key={job.jobType} value={job.jobType}>
-                    <Tooltip title={job.description} placement="right">
-                      <span>{job.name}</span>
-                    </Tooltip>
-                  </Select.Option>
-                ))}
-            </Select>
-          </Form.Item>
-          <Form.Item
-            name="cronExpression"
-            label={
-              <div className="flex items-center justify-between w-full">
-                <span>Cron表达式</span>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => setAdvancedMode(!advancedMode)}
-                  className="p-0"
-                >
-                  {advancedMode ? '可视化模式' : '高级模式'}
-                </Button>
-              </div>
-            }
-            rules={[{ required: true, message: '请输入Cron表达式' }]}
-            className="mb-4"
-          >
-            {advancedMode ? (
-              <Input
-                placeholder="例如：0 2 * * *（每天凌晨2点）"
-                suffix={
-                  form.getFieldValue('cronExpression') ? (
-                    validateCron(form.getFieldValue('cronExpression')) ? (
-                      <CheckCircleOutlined
-                        style={{ color: '#52c41a', fontSize: 16 }}
-                      />
-                    ) : (
-                      <CloseCircleOutlined
-                        style={{ color: '#ff4d4f', fontSize: 16 }}
-                      />
-                    )
-                  ) : null
-                }
-              />
-            ) : (
-              <Cron
-                value={form.getFieldValue('cronExpression') || '0 2 * * *'}
-                setValue={(newValue) => {
-                  form.setFieldsValue({ cronExpression: newValue })
-                }}
-                clearButton={false}
-                locale={{
-                  everyText: '每',
-                  emptyMonths: '每月',
-                  emptyMonthDays: '每天',
-                  emptyMonthDaysShort: '天',
-                  emptyWeekDays: '每周',
-                  emptyWeekDaysShort: '周',
-                  emptyHours: '每小时',
-                  emptyMinutes: '每分钟',
-                  emptyMinutesForHourPeriod: '每分钟',
-                  yearOption: '年',
-                  monthOption: '月',
-                  weekOption: '周',
-                  dayOption: '天',
-                  hourOption: '小时',
-                  minuteOption: '分钟',
-                  rebootOption: '重启时',
-                  prefixPeriod: '每',
-                  prefixMonths: '在',
-                  prefixMonthDays: '在',
-                  prefixWeekDays: '在',
-                  prefixWeekDaysForMonthAndYearPeriod: '和',
-                  prefixHours: '在',
-                  prefixMinutes: '在',
-                  prefixMinutesForHourPeriod: '在',
-                  suffixMinutesForHourPeriod: '分',
-                  errorInvalidCron: '无效的Cron表达式',
-                  weekDays: [
-                    '星期日',
-                    '星期一',
-                    '星期二',
-                    '星期三',
-                    '星期四',
-                    '星期五',
-                    '星期六',
-                  ],
-                  months: [
-                    '一月',
-                    '二月',
-                    '三月',
-                    '四月',
-                    '五月',
-                    '六月',
-                    '七月',
-                    '八月',
-                    '九月',
-                    '十月',
-                    '十一月',
-                    '十二月',
-                  ],
-                  altWeekDays: [
-                    '周日',
-                    '周一',
-                    '周二',
-                    '周三',
-                    '周四',
-                    '周五',
-                    '周六',
-                  ],
-                  altMonths: [
-                    '1月',
-                    '2月',
-                    '3月',
-                    '4月',
-                    '5月',
-                    '6月',
-                    '7月',
-                    '8月',
-                    '9月',
-                    '10月',
-                    '11月',
-                    '12月',
-                  ],
-                }}
-              />
-            )}
-          </Form.Item>
-          <Form.Item noStyle shouldUpdate>
-            {() => {
-              const currentCron = form.getFieldValue('cronExpression')
-              if (currentCron && !advancedMode) {
-                return (
-                  <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
-                    <div className="text-sm text-gray-600">
-                      <span className="font-medium">执行时间：</span>
-                      {getCronDescription(currentCron)}
-                    </div>
-                  </div>
-                )
-              }
-              return null
-            }}
-          </Form.Item>
-          <Form.Item
-            name="isEnabled"
-            label="是否启用"
-            valuePropName="checked"
-            className="mb-4"
-          >
-            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
-          </Form.Item>
-          {watchedJobType === 'tmdbAutoScrape' && (
-            <Form.Item
-              name="forceScrape"
-              label="强制刮削"
-              valuePropName="checked"
-              className="mb-4"
-              tooltip="关闭时，已有剧集组映射的条目将被跳过；开启时，强制覆盖所有条目的刮削数据"
-            >
-              <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-            </Form.Item>
-          )}
           <Form.Item name="taskId" label="taskId" hidden>
             <Input disabled />
           </Form.Item>
+          <Tabs
+            defaultActiveKey="general"
+            items={[
+              {
+                key: 'general',
+                label: '通用',
+                forceRender: true,
+                children: (
+                  <>
+                    <Form.Item
+                      name="name"
+                      label="任务名称"
+                      rules={[{ required: true, message: '请输入任务名称' }]}
+                      className="mb-4"
+                    >
+                      <Input placeholder="例如：我的每日TMDB更新" />
+                    </Form.Item>
+                    <Form.Item
+                      name="jobType"
+                      label="任务类型"
+                      rules={[{ required: true, message: '请选择任务类型' }]}
+                      className="mb-4"
+                    >
+                      <Select disabled={!!editid}>
+                        {availableJobTypes
+                          .filter(job => !job.isSystemTask)
+                          .map(job => (
+                            <Select.Option key={job.jobType} value={job.jobType}>
+                              <Tooltip title={job.description} placement="right">
+                                <span>{job.name}</span>
+                              </Tooltip>
+                            </Select.Option>
+                          ))}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item
+                      name="cronExpression"
+                      label={
+                        <div className="flex items-center justify-between w-full">
+                          <span>Cron表达式</span>
+                          <Button
+                            type="link"
+                            size="small"
+                            onClick={() => setAdvancedMode(!advancedMode)}
+                            className="p-0"
+                          >
+                            {advancedMode ? '可视化模式' : '高级模式'}
+                          </Button>
+                        </div>
+                      }
+                      rules={[{ required: true, message: '请输入Cron表达式' }]}
+                      className="mb-4"
+                    >
+                      {advancedMode ? (
+                        <Input
+                          placeholder="例如：0 2 * * *（每天凌晨2点）"
+                          suffix={
+                            form.getFieldValue('cronExpression') ? (
+                              validateCron(form.getFieldValue('cronExpression')) ? (
+                                <CheckCircleOutlined
+                                  style={{ color: '#52c41a', fontSize: 16 }}
+                                />
+                              ) : (
+                                <CloseCircleOutlined
+                                  style={{ color: '#ff4d4f', fontSize: 16 }}
+                                />
+                              )
+                            ) : null
+                          }
+                        />
+                      ) : (
+                        <Cron
+                          value={form.getFieldValue('cronExpression') || '0 2 * * *'}
+                          setValue={(newValue) => {
+                            form.setFieldsValue({ cronExpression: newValue })
+                          }}
+                          clearButton={false}
+                          locale={cronLocale}
+                        />
+                      )}
+                    </Form.Item>
+                    <Form.Item noStyle shouldUpdate>
+                      {() => {
+                        const currentCron = form.getFieldValue('cronExpression')
+                        if (currentCron && !advancedMode) {
+                          return (
+                            <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
+                              <div className="text-sm text-gray-600">
+                                <span className="font-medium">执行时间：</span>
+                                {getCronDescription(currentCron)}
+                              </div>
+                            </div>
+                          )
+                        }
+                        return null
+                      }}
+                    </Form.Item>
+                    <Form.Item
+                      name="isEnabled"
+                      label="是否启用"
+                      valuePropName="checked"
+                      className="mb-4"
+                    >
+                      <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+                    </Form.Item>
+                  </>
+                ),
+              },
+              {
+                key: 'config',
+                label: '配置',
+                forceRender: true,
+                children: (
+                  <Form.Item noStyle shouldUpdate={(prev, cur) => prev.jobType !== cur.jobType}>
+                    {() => {
+                      const currentJobType = form.getFieldValue('jobType')
+                      const jobInfo = availableJobTypes.find(j => j.jobType === currentJobType)
+                      const schema = jobInfo?.configSchema || []
+
+                      if (schema.length === 0) {
+                        return (
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="当前任务类型暂无可配置项"
+                          />
+                        )
+                      }
+
+                      return schema.map(item => renderConfigFormItem(item))
+                    }}
+                  </Form.Item>
+                ),
+              },
+            ]}
+          />
         </Form>
       </Modal>
     </div>

@@ -491,13 +491,13 @@ class ScheduledTaskCreate(BaseModel):
     jobType: str
     cronExpression: str
     isEnabled: bool = True
-    forceScrape: bool = False
+    taskConfig: dict = {}
 
 class ScheduledTaskUpdate(BaseModel):
     name: str
     cronExpression: str
     isEnabled: bool
-    forceScrape: bool = False
+    taskConfig: dict = {}
 
 class ScheduledTaskInfo(ScheduledTaskCreate):
     taskId: str
@@ -510,6 +510,7 @@ class AvailableJobInfo(BaseModel):
     name: str
     description: str = ""
     isSystemTask: bool = False
+    configSchema: list = []
 
 class ProxySettingsUpdate(BaseModel):
     proxyMode: str = "none"  # none, http_socks, accelerate

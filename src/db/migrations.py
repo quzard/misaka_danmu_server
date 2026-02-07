@@ -622,6 +622,32 @@ async def _migrate_docker_image_name_v1(conn: AsyncConnection):
         logger.info(f"dockerImageName 当前值为 '{current_value}'，无需修正")
 
 
+async def _migrate_force_scrape_to_task_config_v1(conn: AsyncConnection):
+    """
+    将 scheduled_tasks 表中旧的 force_scrape 布尔列数据迁移到新的 task_config JSON 列。
+
+    对于 force_scrape=1 的记录，将 task_config 设置为 '{"forceScrape": true}'。
+    此迁移在 db_maintainer 自动添加 task_config 列之后运行。
+    """
+    # 先检查 force_scrape 列是否还存在（可能已被手动删除）
+    try:
+        check_result = await conn.execute(text("SELECT force_scrape FROM scheduled_tasks LIMIT 1"))
+        # 列存在，继续迁移
+    except Exception:
+        logger.info("force_scrape 列不存在，跳过数据迁移")
+        return
+
+    # 将 force_scrape=1 的记录迁移到 task_config
+    update_sql = text(
+        "UPDATE scheduled_tasks SET task_config = :config WHERE force_scrape = 1 AND (task_config IS NULL OR task_config = '{}' OR task_config = '')"
+    )
+    result = await conn.execute(update_sql, {"config": '{"forceScrape": true}'})
+    if result.rowcount > 0:
+        logger.info(f"已将 {result.rowcount} 条 force_scrape=true 的记录迁移到 task_config")
+    else:
+        logger.info("没有需要迁移的 force_scrape 记录")
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -640,6 +666,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("rename_duplicate_idx_created_at_v1", _rename_duplicate_idx_created_at, (db_type,)),  # 修复重复索引名
         ("fix_title_recognition_id_autoincrement_v1", _fix_title_recognition_id_autoincrement, ()),  # 修复 title_recognition.id 自增
         ("migrate_docker_image_name_v1", _migrate_docker_image_name_v1, ()),  # 修正 dockerImageName 默认值
+        ("migrate_force_scrape_to_task_config_v1", _migrate_force_scrape_to_task_config_v1, ()),  # forceScrape → taskConfig
     ]
 
     for migration_id, migration_func, args in migrations:

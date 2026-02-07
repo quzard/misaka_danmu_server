@@ -107,7 +107,8 @@ class SchedulerManager:
                 "jobType": job.job_type,
                 "name": job.job_name,
                 "description": getattr(job, 'description', ''),
-                "isSystemTask": getattr(job, 'is_system_task', False)
+                "isSystemTask": getattr(job, 'is_system_task', False),
+                "configSchema": getattr(job, 'config_schema', [])
             }
             for job in self._job_classes.values()
         ]
@@ -117,12 +118,12 @@ class SchedulerManager:
         job_class = self._job_classes[job_type]
 
         async def runner():
-            # 从数据库读取任务配置（如 forceScrape）
-            task_kwargs = {}
+            # 从数据库读取任务实例级配置（taskConfig JSON）
+            task_config = {}
             async with self._session_factory() as session:
                 task_info = await crud.get_scheduled_task(session, scheduled_task_id)
                 if task_info:
-                    task_kwargs['force_scrape'] = task_info.get('forceScrape', False)
+                    task_config = task_info.get('taskConfig', {})
 
             # 修正：智能地将依赖项传递给任务的构造函数
             # 这使得像 TmdbAutoMapJob 这样的任务可以选择不接收 rate_limiter
@@ -142,15 +143,15 @@ class SchedulerManager:
             args_to_pass = {name: dep for name, dep in dependencies.items() if name in init_params}
             job_instance = job_class(**args_to_pass)
 
-            # 检查 run 方法是否接受 force_scrape 参数
+            # 检查 run 方法是否接受 task_config 参数
             run_params = inspect.signature(job_instance.run).parameters
-            def make_task_coro(kw):
-                if 'force_scrape' in run_params:
-                    return lambda session, callback: job_instance.run(session, callback, **kw)
+            def make_task_coro(cfg):
+                if 'task_config' in run_params:
+                    return lambda session, callback: job_instance.run(session, callback, task_config=cfg)
                 else:
                     return lambda session, callback: job_instance.run(session, callback)
 
-            task_coro_factory = make_task_coro(task_kwargs)
+            task_coro_factory = make_task_coro(task_config)
             task_id, done_event = await self.task_manager.submit_task(
                 task_coro_factory,
                 job_instance.job_name,
@@ -229,7 +230,7 @@ class SchedulerManager:
                 task['isSystemTask'] = self._is_system_task(task['jobType'])
             return tasks
 
-    async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool, force_scrape: bool = False) -> Dict[str, Any]:
+    async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool, task_config: dict = None) -> Dict[str, Any]:
         # 新增：禁止前端创建系统内置任务
         if job_type == "tokenReset":
             raise ValueError("系统内置任务 'tokenReset' 不允许手动创建。")
@@ -265,7 +266,7 @@ class SchedulerManager:
                     raise ValueError("Webhook 延时任务处理器已存在，无法重复创建。")
 
             task_id = str(uuid4())
-            await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled, force_scrape)
+            await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled, task_config)
             runner = self._create_job_runner(job_type, task_id)
             job = self.scheduler.add_job(runner, CronTrigger.from_crontab(cron), id=task_id, name=name)
             if not is_enabled: job.pause()
@@ -273,7 +274,7 @@ class SchedulerManager:
             await crud.update_scheduled_task_run_times(session, task_id, None, next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
-    async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool, force_scrape: bool = False) -> Optional[Dict[str, Any]]:
+    async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool, task_config: dict = None) -> Optional[Dict[str, Any]]:
         async with self._session_factory() as session:
             task_info = await crud.get_scheduled_task(session, task_id)
             if not task_info: return None
@@ -299,7 +300,7 @@ class SchedulerManager:
             else:
                 next_run_time = None
 
-            await crud.update_scheduled_task(session, task_id, name, cron, is_enabled, force_scrape)
+            await crud.update_scheduled_task(session, task_id, name, cron, is_enabled, task_config)
             await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 

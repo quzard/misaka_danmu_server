@@ -34,12 +34,31 @@ async def get_scheduled_tasks(session: AsyncSession) -> List[Dict[str, Any]]:
         ScheduledTask.jobType.label("jobType"),
         ScheduledTask.cronExpression.label("cronExpression"),
         ScheduledTask.isEnabled.label("isEnabled"),
-        ScheduledTask.forceScrape.label("forceScrape"),
+        ScheduledTask.taskConfig.label("taskConfig"),
         ScheduledTask.lastRunAt.label("lastRunAt"),
         ScheduledTask.nextRunAt.label("nextRunAt")
     ).order_by(ScheduledTask.name)
     result = await session.execute(stmt)
-    return [dict(row) for row in result.mappings()]
+    rows = []
+    for row in result.mappings():
+        d = dict(row)
+        d['taskConfig'] = _parse_task_config(d.get('taskConfig'))
+        rows.append(d)
+    return rows
+
+
+def _parse_task_config(raw) -> dict:
+    """将数据库中的 taskConfig TEXT 字段解析为 dict"""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return {}
 
 
 async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Dict[str, Any]]:
@@ -50,13 +69,17 @@ async def get_scheduled_task(session: AsyncSession, task_id: str) -> Optional[Di
         ScheduledTask.jobType.label("jobType"),
         ScheduledTask.cronExpression.label("cronExpression"),
         ScheduledTask.isEnabled.label("isEnabled"),
-        ScheduledTask.forceScrape.label("forceScrape"),
+        ScheduledTask.taskConfig.label("taskConfig"),
         ScheduledTask.lastRunAt.label("lastRunAt"),
         ScheduledTask.nextRunAt.label("nextRunAt")
     ).where(ScheduledTask.taskId == task_id)
     result = await session.execute(stmt)
     row = result.mappings().first()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d['taskConfig'] = _parse_task_config(d.get('taskConfig'))
+    return d
 
 
 async def check_scheduled_task_exists_by_type(session: AsyncSession, job_type: str) -> bool:
@@ -80,7 +103,7 @@ async def create_scheduled_task(
     job_type: str,
     cron: str,
     is_enabled: bool,
-    force_scrape: bool = False
+    task_config: dict = None
 ):
     """创建定时任务"""
     new_task = ScheduledTask(
@@ -89,7 +112,7 @@ async def create_scheduled_task(
         jobType=job_type,
         cronExpression=cron,
         isEnabled=is_enabled,
-        forceScrape=force_scrape
+        taskConfig=json.dumps(task_config or {}, ensure_ascii=False)
     )
     session.add(new_task)
     await session.commit()
@@ -101,7 +124,7 @@ async def update_scheduled_task(
     name: str,
     cron: str,
     is_enabled: bool,
-    force_scrape: bool = False
+    task_config: dict = None
 ) -> bool:
     """更新定时任务,但不允许修改系统内置任务的关键属性"""
     task = await session.get(ScheduledTask, task_id)
@@ -115,7 +138,7 @@ async def update_scheduled_task(
         task.name = name
         task.cronExpression = cron
         task.isEnabled = is_enabled
-        task.forceScrape = force_scrape
+        task.taskConfig = json.dumps(task_config or {}, ensure_ascii=False)
 
     await session.commit()
     return True

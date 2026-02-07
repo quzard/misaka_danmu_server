@@ -18,6 +18,22 @@ class TmdbAutoMapJob(BaseJob):
     job_type = "tmdbAutoScrape"
     job_name = "TMDB自动刮削与剧集组映射"
     description = "自动从TMDB刮削已导入作品的别名、剧集组信息，更新分集映射关系。帮助解决分集顺序不一致的问题。"
+    config_schema = [
+        {
+            "key": "forceScrape",
+            "label": "强制刮削",
+            "type": "boolean",
+            "description": "关闭时，已有剧集组映射的条目将被跳过；开启时，强制覆盖所有条目的刮削数据",
+            "default": False,
+        },
+        {
+            "key": "enableEpisodeGroup",
+            "label": "剧集组刮削",
+            "type": "boolean",
+            "description": "开启后将从TMDB获取剧集组信息并更新分集映射关系；关闭时仅刮削别名信息",
+            "default": False,
+        },
+    ]
 
     # 修正：此任务不涉及弹幕下载，因此移除不必要的 rate_limiter 依赖
     # 修正：接收正确的依赖项
@@ -31,7 +47,7 @@ class TmdbAutoMapJob(BaseJob):
         self.logger = logging.getLogger(self.__class__.__name__)
 
 
-    async def run(self, session: AsyncSession, progress_callback: Callable, force_scrape: bool = False):
+    async def run(self, session: AsyncSession, progress_callback: Callable, task_config: dict = None):
         """
         定时任务的核心逻辑。
         1. 获取所有TV系列作品
@@ -40,9 +56,13 @@ class TmdbAutoMapJob(BaseJob):
         4. 获取并映射剧集组信息
 
         Args:
-            force_scrape: 强制刮削模式。为False时，已有剧集组映射的条目将被跳过。
+            task_config: 任务实例级配置字典，包含 forceScrape 等选项。
         """
-        self.logger.info(f"开始执行 [{self.job_name}] 定时任务... (强制刮削: {'开启' if force_scrape else '关闭'})")
+        if task_config is None:
+            task_config = {}
+        force_scrape = task_config.get("forceScrape", False)
+        enable_episode_group = task_config.get("enableEpisodeGroup", False)
+        self.logger.info(f"开始执行 [{self.job_name}] 定时任务... (强制刮削: {'开启' if force_scrape else '关闭'}, 剧集组刮削: {'开启' if enable_episode_group else '关闭'})")
         await progress_callback(0, "正在初始化...")
 
         # 为元数据管理器调用创建一个虚拟用户对象
@@ -318,9 +338,10 @@ class TmdbAutoMapJob(BaseJob):
                 # 第一级: 使用seasons信息进行匹配(方案A)
                 # 第二级: 使用"Seasons"剧集组进行匹配(方案C)
 
-                # 电影类型跳过剧集组处理，直接更新别名
-                if show.get('type') == 'movie':
-                    self.logger.info(f"'{title}' 是电影类型,跳过剧集组处理。")
+                # 电影类型或未开启剧集组刮削时，跳过剧集组处理，直接更新别名
+                if show.get('type') == 'movie' or not enable_episode_group:
+                    skip_reason = "电影类型" if show.get('type') == 'movie' else "未开启剧集组刮削"
+                    self.logger.info(f"'{title}' {skip_reason},跳过剧集组处理。")
                     # 更新别名到数据库
                     if aliases_to_update and any(aliases_to_update.values()):
                         updated_fields = await crud.update_anime_aliases_if_empty(session, anime_id, aliases_to_update, force_update=force_update)
