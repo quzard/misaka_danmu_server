@@ -13,13 +13,12 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .. import crud, models, orm_models, security
-from ..config import settings
-from ..config_manager import ConfigManager
-from ..database import get_db_session
-from ..utils import parse_search_keyword
-from ..timezone import get_app_timezone, get_now
-from ..scraper_manager import ScraperManager
+from src.db import crud, models, orm_models, get_db_session, ConfigManager, CacheManager
+from src.core import get_app_timezone, get_now
+from src.security import get_current_user
+from src.core import settings
+from src.utils import parse_search_keyword
+from src.services import ScraperManager
 from .base import BaseMetadataSource
 
 logger = logging.getLogger(__name__)
@@ -119,16 +118,23 @@ async def _get_bangumi_auth(session: AsyncSession, user_id: int) -> Dict[str, An
     auth = await session.get(orm_models.BangumiAuth, user_id)
     if not auth:
         return {"isAuthenticated": False}
-    
+
     # 修正：由于所有时间都以 naive UTC-like 形式存储，直接与当前的 naive UTC-like 时间比较
-    if auth.expiresAt and auth.expiresAt < get_now():
+    now = get_now()
+    if auth.expiresAt and auth.expiresAt < now:
         return {"isAuthenticated": False, "isExpired": True}
+
+    # 计算剩余天数
+    days_left = 0
+    if auth.expiresAt:
+        time_diff = auth.expiresAt - now
+        days_left = time_diff.days
 
     return {
         "isAuthenticated": True, "bangumiUserId": auth.bangumiUserId,
         "nickname": auth.nickname, "avatarUrl": auth.avatarUrl,
         "authorizedAt": auth.authorizedAt, "expiresAt": auth.expiresAt,
-        "accessToken": auth.accessToken
+        "accessToken": auth.accessToken, "daysLeft": days_left
     }
 
 async def _save_bangumi_auth(session: AsyncSession, user_id: int, auth_data: Dict[str, Any]):
@@ -148,6 +154,55 @@ async def _delete_bangumi_auth(session: AsyncSession, user_id: int):
     """删除用户的Bangumi授权信息。"""
     stmt = delete(orm_models.BangumiAuth).where(orm_models.BangumiAuth.userId == user_id)
     await session.execute(stmt)
+
+async def _refresh_bangumi_token(session: AsyncSession, user_id: int, config: Dict[str, Any]) -> bool:
+    """刷新Bangumi access token。
+
+    参考ani-rss实现:
+    - 当剩余天数 <= 3天时自动刷新
+    - 使用refresh_token换取新的access_token
+
+    Returns:
+        bool: 刷新成功返回True,失败返回False
+    """
+    auth = await session.get(orm_models.BangumiAuth, user_id)
+    if not auth or not auth.refreshToken:
+        return False
+
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+    redirect_uri = config.get("redirect_uri")
+
+    if not all([client_id, client_secret, redirect_uri]):
+        logger.warning("Bangumi OAuth配置不完整,无法刷新token")
+        return False
+
+    try:
+        payload = {
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": auth.refreshToken,
+            "redirect_uri": redirect_uri
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post("https://bgm.tv/oauth/access_token", json=payload)
+            response.raise_for_status()
+            token_data = response.json()
+
+            # 更新token信息
+            auth.accessToken = token_data["access_token"]
+            auth.refreshToken = token_data.get("refresh_token", auth.refreshToken)
+            auth.expiresAt = get_now() + timedelta(seconds=token_data.get("expires_in", 604800))
+            await session.flush()
+
+            logger.info(f"Bangumi token已自动刷新 (用户ID: {user_id})")
+            return True
+
+    except Exception as e:
+        logger.error(f"刷新Bangumi token失败: {e}")
+        return False
 
 # ====================================================================
 # NEW: API Router for Bangumi specific web endpoints
@@ -196,10 +251,63 @@ async def bangumi_auth_callback(request: Request, code: str = Query(...), state:
         await _save_bangumi_auth(session, user_id, auth_to_save)
         await session.commit()
         return HTMLResponse("""
-            <html><head><title>授权处理中...</title></head><body><script type="text/javascript">
-              try { window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*'); } catch(e) { console.error(e); }
-              window.close();
-            </script><p>授权成功，请关闭此窗口。</p></body></html>
+            <html>
+            <head>
+                <title>授权成功</title>
+                <style>
+                    body {
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    }
+                    .container {
+                        text-align: center;
+                        background: white;
+                        padding: 40px;
+                        border-radius: 10px;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+                    }
+                    .success-icon {
+                        font-size: 64px;
+                        margin-bottom: 20px;
+                    }
+                    h1 {
+                        color: #333;
+                        margin-bottom: 10px;
+                    }
+                    p {
+                        color: #666;
+                        margin-bottom: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="success-icon">✅</div>
+                    <h1>授权成功</h1>
+                    <p>Bangumi 授权已完成，窗口将自动关闭...</p>
+                </div>
+                <script type="text/javascript">
+                    try {
+                        // 通知父窗口
+                        if (window.opener) {
+                            window.opener.postMessage('BANGUMI-OAUTH-COMPLETE', '*');
+                            setTimeout(() => window.close(), 1000);
+                        } else {
+                            // 如果没有 opener,显示提示
+                            document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
+                        }
+                    } catch(e) {
+                        console.error('Failed to notify parent:', e);
+                        document.querySelector('p').textContent = '授权已完成，请手动关闭此窗口。';
+                    }
+                </script>
+            </body>
+            </html>
             """)
     except httpx.HTTPStatusError as e:
         logger.error(f"Bangumi token exchange failed: {e.response.text}", exc_info=True)
@@ -212,9 +320,9 @@ class BangumiMetadataSource(BaseMetadataSource):
     provider_name = "bangumi"
     api_router = auth_router
     test_url = "https://bgm.tv"
-    
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager):
-        super().__init__(session_factory, config_manager, scraper_manager)
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
+        super().__init__(session_factory, config_manager, scraper_manager, cache_manager)
         self.api_base_url = "https://api.bgm.tv"
         self._token: Optional[str] = None
         self._config_loaded = False
@@ -253,6 +361,27 @@ class BangumiMetadataSource(BaseMetadataSource):
         else:
             async with self._session_factory() as session:
                 auth_info = await _get_bangumi_auth(session, user.id)
+
+                # 自动刷新token (参考ani-rss: 剩余天数<=3天时刷新)
+                if auth_info.get("isAuthenticated") and auth_info.get("daysLeft", 999) <= 3:
+                    # 构造回调URL
+                    base_url = await self.config_manager.get("webhookCustomDomain", "")
+                    if not base_url:
+                        base_url = "http://localhost:7768"  # 默认值
+                    redirect_uri = f"{base_url}/api/metadata/bangumi/auth/callback"
+
+                    config = {
+                        "client_id": await self.config_manager.get("bangumiClientId", ""),
+                        "client_secret": await self.config_manager.get("bangumiClientSecret", ""),
+                        "redirect_uri": redirect_uri
+                    }
+                    refreshed = await _refresh_bangumi_token(session, user.id, config)
+                    if refreshed:
+                        await session.commit()
+                        # 重新获取授权信息
+                        auth_info = await _get_bangumi_auth(session, user.id)
+                        self.logger.info(f"Bangumi token已自动刷新 (用户ID: {user.id})")
+
             if auth_info and auth_info.get("isAuthenticated") and auth_info.get("accessToken"):
                 self.logger.debug("Bangumi: 正在使用 OAuth Access Token 进行认证。")
                 headers["Authorization"] = f"Bearer {auth_info['accessToken']}"
@@ -281,19 +410,65 @@ class BangumiMetadataSource(BaseMetadataSource):
         return all_results
 
     async def _perform_network_search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
-        """Performs the actual network search for Bangumi."""
+        """Performs the actual network search for Bangumi.
+
+        智能过滤逻辑：
+        1. 获取第一个结果的 name 和 name_cn 作为基准
+        2. 后续结果只有当其 name 包含基准 name，或 name_cn 包含基准 name_cn 时才认为是相关系列
+        3. 直接从搜索结果中提取 name 和 name_cn 作为别名，不需要调用 get_details
+        """
         async with await self._create_client(user) as client:
+            # 只搜索动画类型 (type=2)
             search_payload = {"keyword": keyword, "filter": {"type": [2]}}
             search_response = await client.post("/v0/search/subjects", json=search_payload)
             if search_response.status_code == 404: return []
             search_response.raise_for_status()
-            
+
             search_result = BangumiSearchResponse.model_validate(search_response.json())
             if not search_result.data: return []
 
-            tasks = [self.get_details(str(subject.id), user) for subject in search_result.data]
-            detailed_results = await asyncio.gather(*tasks, return_exceptions=True)
-            return [res for res in detailed_results if isinstance(res, models.MetadataDetailsResponse)]
+            # 获取第一个结果作为基准
+            first_result = search_result.data[0]
+            base_name = first_result.name or ""
+            base_name_cn = first_result.name_cn or ""
+
+            # 过滤出相关的系列作品
+            related_subjects = [first_result]  # 第一个结果一定是相关的
+
+            for subject in search_result.data[1:]:
+                subject_name = subject.name or ""
+                subject_name_cn = subject.name_cn or ""
+
+                # 检查是否是相关系列：name 包含基准 name，或 name_cn 包含基准 name_cn
+                is_related = False
+                if base_name and subject_name and base_name in subject_name:
+                    is_related = True
+                if base_name_cn and subject_name_cn and base_name_cn in subject_name_cn:
+                    is_related = True
+
+                if is_related:
+                    related_subjects.append(subject)
+
+            self.logger.info(f"Bangumi: 搜索返回 {len(search_result.data)} 个结果，过滤后保留 {len(related_subjects)} 个相关系列")
+
+            # 直接从搜索结果中提取别名，不需要调用 get_details
+            # 每个结果有 name（日文名）和 name_cn（中文名），直接构建返回结果
+            results = []
+            for subject in related_subjects:
+                # 收集别名：name_cn 作为 aliasesCn
+                aliases_cn = [subject.name_cn] if subject.name_cn else []
+
+                results.append(models.MetadataDetailsResponse(
+                    id=str(subject.id),
+                    bangumiId=str(subject.id),
+                    title=subject.name_cn or subject.name,
+                    type="tv_series",
+                    nameJp=subject.name,
+                    imageUrl=subject.image_url,
+                    aliasesCn=aliases_cn
+                ))
+
+            return results
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
         async with await self._create_client(user) as client:
@@ -324,11 +499,16 @@ class BangumiMetadataSource(BaseMetadataSource):
                 except (ValueError, TypeError):
                     pass
 
+            # 确保 name_cn 也被加入到 aliasesCn 中
+            aliases_cn = aliases.get("aliases_cn", [])
+            if subject.name_cn and subject.name_cn not in aliases_cn:
+                aliases_cn = [subject.name_cn] + aliases_cn
+
             return models.MetadataDetailsResponse(
                 id=str(subject.id), bangumiId=str(subject.id), title=subject.display_name,
                 type=media_type, nameJp=subject.name, imageUrl=subject.image_url, details=subject.details_string,
                 nameEn=aliases.get("name_en"), nameRomaji=aliases.get("name_romaji"),
-                aliasesCn=aliases.get("aliases_cn", []), year=year
+                aliasesCn=aliases_cn, year=year
             )
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
@@ -400,16 +580,31 @@ class BangumiMetadataSource(BaseMetadataSource):
         if action_name == "get_auth_state":
             async with self._session_factory() as session:
                 auth_info = await _get_bangumi_auth(session, user.id)
+
+                # 自动刷新token (参考ani-rss: 剩余天数<=3天时刷新)
+                if auth_info.get("isAuthenticated") and auth_info.get("daysLeft", 999) <= 3:
+                    config = {
+                        "client_id": await self.config_manager.get("bangumiClientId", ""),
+                        "client_secret": await self.config_manager.get("bangumiClientSecret", ""),
+                        "redirect_uri": str(request.url_for('bangumi_auth_callback'))
+                    }
+                    refreshed = await _refresh_bangumi_token(session, user.id, config)
+                    if refreshed:
+                        await session.commit()
+                        # 重新获取授权信息
+                        auth_info = await _get_bangumi_auth(session, user.id)
+                        auth_info["refreshed"] = True
+
                 return auth_info
         elif action_name == "get_auth_url":
             async with self._session_factory() as session:
                 client_id = await self.config_manager.get("bangumiClientId", "")
                 if not client_id:
                     raise ValueError("Bangumi App ID 未在设置中配置。")
-                
+
                 # 修正：使用 FastAPI 的 url_for 来生成回调URL，以确保其在反向代理后也能正确工作。
                 redirect_uri = str(request.url_for('bangumi_auth_callback'))
-                
+
                 state = await crud.create_oauth_state(session, user.id)
                 params = {"client_id": client_id, "response_type": "code", "redirect_uri": redirect_uri, "state": state}
                 auth_url = f"https://bgm.tv/oauth/authorize?{urlencode(params)}"

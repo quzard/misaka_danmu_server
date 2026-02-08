@@ -1,6 +1,6 @@
 {
-  "name": "御阪网络弹幕服务",
-  "short_name": "御阪弹幕",
+  "name": "御坂网络弹幕服务",
+  "short_name": "御坂弹幕",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fff",
@@ -9,12 +9,12 @@
   "description": "一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 dandanplay API 规范。",
   "icons": [
     {
-      "src": "images/pwa-192x192.png",
+      "src": "/images/pwa-192x192.png",
       "type": "image/png",
       "sizes": "192x192"
     },
     {
-      "src": "images/pwa-512x512.png",
+      "src": "/images/pwa-512x512.png",
       "type": "image/png",
       "sizes": "512x512"
     }

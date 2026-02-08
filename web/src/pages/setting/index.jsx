@@ -1,69 +1,69 @@
 import { Tabs } from 'antd'
-import { Security } from './components/Security'
 import { Webhook } from './components/Webhook'
-import { Bangumi } from './components/Bangumi'
-import { TMDB } from './components/TMDB'
-import { Douban } from './components/Douban'
-import { TVDB } from './components/TVDB'
 import { Proxy } from './components/Proxy'
+import { Parameters } from './components/Parameters'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Recognition } from './components/Recognition'
+import AutoMatchSetting from './components/AutoMatchSetting'
+import { MobileTabs } from '@/components/MobileTabs'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../store'
 
 export const Setting = () => {
   const [searchParams] = useSearchParams()
-  const key = searchParams.get('key') || 'security'
+  const key = searchParams.get('key') || 'parameters'
   const navigate = useNavigate()
+  const isMobile = useAtomValue(isMobileAtom)
+
+  const tabItems = [
+    {
+      label: '参数配置',
+      key: 'parameters',
+      children: <Parameters />,
+    },
+    {
+      label: '代理设置',
+      key: 'proxy',
+      children: <Proxy />,
+    },
+    {
+      label: 'Webhook',
+      key: 'webhook',
+      children: <Webhook />,
+    },
+    {
+      label: '识别词配置',
+      key: 'recognition',
+      children: <Recognition />,
+    },
+    {
+      label: 'AI辅助增强',
+      key: 'automatch',
+      children: <AutoMatchSetting />,
+    },
+  ]
+
+  const handleTabChange = (newKey) => {
+    navigate(`/setting?key=${newKey}`, {
+      replace: true,
+    })
+  }
 
   return (
-    <Tabs
-      defaultActiveKey={key}
-      items={[
-        {
-          label: '账户安全',
-          key: 'security',
-          children: <Security />,
-        },
-        {
-          label: '代理设置',
-          key: 'proxy',
-          children: <Proxy />,
-        },
-        {
-          label: 'Webhook',
-          key: 'webhook',
-          children: <Webhook />,
-        },
-        {
-          label: 'Bangumi配置',
-          key: 'bangumi',
-          children: <Bangumi />,
-        },
-        {
-          label: 'TMDB配置',
-          key: 'tmdb',
-          children: <TMDB />,
-        },
-        {
-          label: '豆瓣配置',
-          key: 'douban',
-          children: <Douban />,
-        },
-        {
-          label: 'TVDB配置',
-          key: 'tvdb',
-          children: <TVDB />,
-        },
-        {
-          label: '识别词配置',
-          key: 'recognition',
-          children: <Recognition />,
-        },
-      ]}
-      onChange={key => {
-        navigate(`/setting?key=${key}`, {
-          replace: true,
-        })
-      }}
-    />
+    <div className="my-6">
+      {isMobile ? (
+        <MobileTabs
+          items={tabItems}
+          defaultActiveKey={key}
+          onChange={handleTabChange}
+        />
+      ) : (
+        <Tabs
+          activeKey={key}
+          items={tabItems}
+          onChange={handleTabChange}
+        />
+      )}
+    </div>
   )
 }

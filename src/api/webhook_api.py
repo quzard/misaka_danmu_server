@@ -1,15 +1,17 @@
 import logging
 import secrets
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from .. import crud
-from ..config_manager import ConfigManager
-from ..database import get_db_session
-from ..webhook_manager import WebhookManager
+from src.db import crud, get_db_session
+
+# 使用 TYPE_CHECKING 避免运行时循环导入，仅用于类型提示
+if TYPE_CHECKING:
+    from src.db import ConfigManager
+    from src.services import WebhookManager
 
 # 新增：获取专用的 webhook_raw 日志记录器
 webhook_raw_logger = logging.getLogger("webhook_raw")
@@ -18,11 +20,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def get_webhook_manager(request: Request) -> WebhookManager:
+async def get_webhook_manager(request: Request) -> "WebhookManager":
     """依赖项：从应用状态获取 Webhook 管理器"""
     return request.app.state.webhook_manager
 
-async def get_config_manager(request: Request) -> ConfigManager:
+async def get_config_manager(request: Request) -> "ConfigManager":
     """依赖项：从应用状态获取配置管理器"""
     return request.app.state.config_manager
 
@@ -33,8 +35,8 @@ async def handle_webhook(
     request: Request,
     api_key: str = Query(..., description="Webhook安全密钥"),
     session: AsyncSession = Depends(get_db_session),
-    config_manager: ConfigManager = Depends(get_config_manager),
-    webhook_manager: WebhookManager = Depends(get_webhook_manager),
+    config_manager: "ConfigManager" = Depends(get_config_manager),
+    webhook_manager: "WebhookManager" = Depends(get_webhook_manager),
 ):
     """统一的Webhook入口，用于接收来自Sonarr, Radarr等服务的通知。"""
     # 修正：数据库中存储的键名是驼峰命名法的 "webhookApiKey"

@@ -5,15 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession # type: ignore
 from sqlalchemy import select, func
 
 from fastapi import HTTPException, status
-from .. import crud, orm_models
+from src.db import crud, orm_models
 from .base import BaseJob
-from ..task_manager import TaskSuccess
-from ..tasks import generic_import_task
+from src.services import TaskSuccess
+from src.tasks import generic_import_task
 
 
 class IncrementalRefreshJob(BaseJob):
     job_type = "incrementalRefresh"
     job_name = "定时增量追更"
+    description = "自动检测已启用追更的作品，并尝试获取下一集的弹幕数据。适用于正在连载的动画/电视剧。"
 
     async def run(self, session: AsyncSession, progress_callback: Callable):
         """定时任务的核心逻辑: 按最新分集ID+1 抓取新集"""
@@ -50,7 +51,7 @@ class IncrementalRefreshJob(BaseJob):
                 unique_key = f"incremental-refresh:{source_info['providerName']}:{source_info['mediaId']}:{source_info.get('season', 1)}:{next_episode_index}"
 
                 # 使用闭包捕获当前循环的变量
-                def create_task_coro_factory(info, next_ep):
+                def create_task_coro_factory(info, next_ep, src_id):
                     return lambda s, cb: generic_import_task(
                         provider=info["providerName"], mediaId=info["mediaId"], animeTitle=info["title"],
                         mediaType=info["type"], season=info.get("season", 1), year=info.get("year"),
@@ -59,11 +60,12 @@ class IncrementalRefreshJob(BaseJob):
                         bangumiId=info.get("bangumiId"), metadata_manager=self.metadata_manager,
                         progress_callback=cb, session=s, manager=self.scraper_manager,
                         task_manager=self.task_manager, rate_limiter=self.rate_limiter,
-                        config_manager=self.config_manager, title_recognition_manager=self.title_recognition_manager
+                        config_manager=self.config_manager, title_recognition_manager=self.title_recognition_manager,
+                        is_incremental_refresh=True, incremental_refresh_source_id=src_id
                     )
-                
+
                 try:
-                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index), task_title, unique_key=unique_key)
+                    await self.task_manager.submit_task(create_task_coro_factory(source_info, next_episode_index, source_id), task_title, unique_key=unique_key)
                     submitted_count += 1
                 except HTTPException as e:
                     if e.status_code == status.HTTP_409_CONFLICT:

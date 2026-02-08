@@ -12,13 +12,13 @@ import {
   Table,
   Tag,
   Tooltip,
+  Typography,
 } from 'antd'
 import { useEffect, useState } from 'react'
 import {
   addToken,
   deleteToken,
   editToken,
-  getCustomDomain,
   getTokenList,
   getTokenLog,
   resetTokenCounter,
@@ -30,8 +30,11 @@ import copy from 'copy-to-clipboard'
 import { EyeInvisibleOutlined, EyeTwoTone } from '@ant-design/icons'
 import { useModal } from '../../../ModalContext'
 import { useMessage } from '../../../MessageContext'
+import { ResponsiveTable } from '@/components/ResponsiveTable'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../../../store'
 
-export const Token = () => {
+export const Token = ({ domain }) => {
   const [loading, setLoading] = useState(false)
   const [tokenList, setTokenList] = useState([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -41,19 +44,15 @@ export const Token = () => {
   const [form] = Form.useForm()
   const [tokenLogs, setTokenLogs] = useState([])
   const [logsOpen, setLogsOpen] = useState(false)
-  const [domain, setDomain] = useState('')
   const modalApi = useModal()
   const messageApi = useMessage()
+  const isMobile = useAtomValue(isMobileAtom)
 
   const getTokens = async () => {
     try {
       setLoading(true)
-      const [tokenRes, domainRes] = await Promise.all([
-        getTokenList(),
-        getCustomDomain(),
-      ])
+      const tokenRes = await getTokenList()
       setTokenList(tokenRes.data)
-      setDomain(domainRes.data?.value ?? '')
     } catch (error) {
       console.error(error)
     } finally {
@@ -88,7 +87,7 @@ export const Token = () => {
     modalApi.confirm({
       title: '删除',
       zIndex: 1002,
-      content: <div>您确定要删除{record.name}吗？</div>,
+      content: <Typography.Text>您确定要删除{record.name}吗？</Typography.Text>,
       okText: '确认',
       cancelText: '取消',
       onOk: async () => {
@@ -227,7 +226,7 @@ export const Token = () => {
       width: 180,
       render: (_, record) => {
         return (
-          <div>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}</div>
+          <Typography.Text>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>
         )
       },
     },
@@ -238,11 +237,11 @@ export const Token = () => {
       width: 180,
       render: (_, record) => {
         return (
-          <div>
+          <Typography.Text>
             {!!record.expiresAt
               ? dayjs(record.expiresAt).format('YYYY-MM-DD HH:mm:ss')
               : '永久'}
-          </div>
+          </Typography.Text>
         )
       },
     },
@@ -255,7 +254,7 @@ export const Token = () => {
           <Space>
             <Tooltip title="编辑">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => handleOpenModal(true, record)}
               >
                 <MyIcon icon="edit" size={20}></MyIcon>
@@ -263,7 +262,7 @@ export const Token = () => {
             </Tooltip>
             <Tooltip title="复制">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => {
                   copy(
                     `${domain || window.location.origin}/api/v1/${record.token}`
@@ -276,7 +275,7 @@ export const Token = () => {
             </Tooltip>
             <Tooltip title="Token访问日志">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => handleTokenLogs(record)}
               >
                 <MyIcon icon="rizhi" size={20}></MyIcon>
@@ -284,7 +283,7 @@ export const Token = () => {
             </Tooltip>
             <Tooltip title="切换启用状态">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => {
                   handleToggleStatus(record)
                 }}
@@ -300,7 +299,7 @@ export const Token = () => {
             </Tooltip>
             <Tooltip title="删除Token">
               <span
-                className="cursor-pointer hover:text-primary"
+                className="cursor-pointer hover:text-primary text-gray-600 dark:text-gray-400"
                 onClick={() => handleDelete(record)}
               >
                 <MyIcon icon="delete" size={20}></MyIcon>
@@ -317,10 +316,10 @@ export const Token = () => {
       title: '访问时间',
       dataIndex: 'accessTime',
       key: 'accessTime',
-      width: 200,
+      width: 300,
       render: (_, record) => {
         return (
-          <div>{dayjs(record.accessTime).format('YYYY-MM-DD HH:mm:ss')}</div>
+          <Typography.Text>{dayjs(record.accessTime).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>
         )
       },
     },
@@ -328,25 +327,41 @@ export const Token = () => {
       title: 'IP地址',
       dataIndex: 'ipAddress',
       key: 'ipAddress',
-      width: 150,
+      width: 200,
+      render: (_, record) => (
+        <Typography.Text code>{record.ipAddress}</Typography.Text>
+      ),
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 200,
+      width: 150,
+      render: (_, record) => (
+        <Typography.Text>{record.status}</Typography.Text>
+      ),
     },
     {
       title: '路径',
-      width: 250,
+      width: 300,
       dataIndex: 'path',
       key: 'path',
+      render: (_, record) => (
+        <Typography.Text code className="text-xs break-all">
+          {record.path}
+        </Typography.Text>
+      ),
     },
     {
       title: 'User-Agent',
       dataIndex: 'userAgent',
       key: 'userAgent',
-      width: 400,
+      width: 250,
+      render: (_, record) => (
+        <span className="text-gray-600 dark:text-gray-400 text-xs break-all">
+          {record.userAgent}
+        </span>
+      ),
     },
   ]
 
@@ -363,13 +378,112 @@ export const Token = () => {
           </>
         }
       >
-        <Table
+        <ResponsiveTable
           pagination={false}
           size="small"
           dataSource={tokenList}
           columns={columns}
           rowKey={'id'}
           scroll={{ x: '100%' }}
+          renderCard={(record) => {
+            const isEnabled = record.isEnabled;
+            const isInfinite = record.dailyCallLimit === -1;
+            const percent = isInfinite
+              ? 0
+              : Math.round(
+                  (record.dailyCallCount / record.dailyCallLimit) * 100
+                );
+            const limitText = isInfinite ? '∞' : record.dailyCallLimit;
+
+            return (
+              <div className="space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="font-bold text-base mb-2">{record.name}</div>
+                    <div className="text-sm space-y-1">
+                      <div className="flex items-center gap-2">
+                        {isEnabled ? (
+                          <Tag color="green">启用</Tag>
+                        ) : (
+                          <Tag color="red">禁用</Tag>
+                        )}
+                      </div>
+                                            <div className="text-gray-600 dark:text-gray-400">
+                        Token: <Input.Password
+                          value={record.token}
+                          readOnly
+                          bordered={false}
+                          style={{ padding: 0, background: 'transparent' }}
+                          iconRender={visible =>
+                            visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />
+                          }
+                        />
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        创建时间: {dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        有效期: {!!record.expiresAt
+                          ? dayjs(record.expiresAt).format('YYYY-MM-DD HH:mm:ss')
+                          : '永久'}
+                      </div>
+                      {isEnabled && (
+                        <div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                            今日调用: {record.dailyCallCount} / {limitText}
+                          </div>
+                          <Progress percent={percent} size="small" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                  <Button
+                    size="small"
+                    icon={<MyIcon icon="edit" size={16} />}
+                    onClick={() => handleOpenModal(true, record)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<MyIcon icon="copy" size={16} />}
+                    onClick={() => {
+                      copy(
+                        `${domain || window.location.origin}/api/v1/${record.token}`
+                      )
+                      messageApi.success('复制成功')
+                    }}
+                  >
+                    复制
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<MyIcon icon="rizhi" size={16} />}
+                    onClick={() => handleTokenLogs(record)}
+                  >
+                    日志
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={isEnabled ? <MyIcon icon="pause" size={16} /> : <MyIcon icon="start" size={16} />}
+                    onClick={() => handleToggleStatus(record)}
+                  >
+                    {isEnabled ? '禁用' : '启用'}
+                  </Button>
+                  <Button
+                    size="small"
+                    danger
+                    icon={<MyIcon icon="delete" size={16} />}
+                    onClick={() => handleDelete(record)}
+                  >
+                    删除
+                  </Button>
+                </div>
+              </div>
+            )
+          }}
         />
       </Card>
       <Modal
@@ -444,24 +558,83 @@ export const Token = () => {
         </Form>
       </Modal>
       <Modal
-        title="Token访问日志"
+        title={
+          <div className="flex items-center gap-3">
+            <Typography.Text>Token访问日志</Typography.Text>
+          </div>
+        }
+        width={isMobile ? '100%' : 900}
         open={logsOpen}
         cancelText="取消"
         okText="确认"
         onCancel={() => setLogsOpen(false)}
         onOk={() => setLogsOpen(false)}
+        styles={isMobile ? { body: { height: 'calc(100vh - 200px)' } } : {}}
+        className="modern-modal"
       >
-        <Table
-          pagination={false}
-          size="small"
-          dataSource={tokenLogs}
-          columns={logsColumns}
-          rowKey={'accessTime'}
-          scroll={{
-            x: '100%',
-            y: 400,
-          }}
-        />
+        {isMobile ? (
+          <div className="space-y-4">
+            {tokenLogs.map((log, index) => {
+              const isAllowed = log.status?.toLowerCase().includes('allowed');
+              return (
+                <Card
+                  key={index}
+                  size="small"
+                  className="hover:shadow-lg transition-shadow duration-300"
+                  bodyStyle={{ padding: '12px' }}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${isAllowed ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <span className="text-sm font-medium">
+                          {dayjs(log.accessTime).format('MM-DD HH:mm:ss')}
+                        </span>
+                      </div>
+                      <Tag color={isAllowed ? 'success' : 'error'}>
+                        {log.status}
+                      </Tag>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-8 shrink-0">IP:</span>
+                        <Typography.Text code className="text-sm font-mono">
+                          {log.ipAddress}
+                        </Typography.Text>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-8 shrink-0 mt-1">路径:</span>
+                        <Typography.Text code className="text-xs break-all flex-1">
+                          {log.path}
+                        </Typography.Text>
+                      </div>
+                      {log.userAgent && (
+                        <div className="flex items-start gap-3">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-8 shrink-0 mt-1">UA:</span>
+                          <Typography.Text code className="text-xs break-all flex-1">
+                            {log.userAgent}
+                          </Typography.Text>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        ) : (
+          <Table
+            pagination={false}
+            size="small"
+            dataSource={tokenLogs}
+            columns={logsColumns}
+            rowKey={'accessTime'}
+            scroll={{
+              x: '100%',
+            }}
+            className="modern-table"
+          />
+        )}
       </Modal>
     </div>
   )

@@ -60,7 +60,7 @@ export const CreateAnimeModal = ({ open, onCancel, onSuccess }) => {
           </Select>
         </Form.Item>
         <Form.Item name="season" label="季度" initialValue={1}>
-          <InputNumber min={1} style={{ width: '100%' }} />
+          <InputNumber min={0} style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item name="year" label="年份">
           <InputNumber

@@ -7,13 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import Request
 from pydantic import BaseModel
 
-from .. import crud
-from ..config_manager import ConfigManager
-from ..task_manager import TaskManager
-from ..rate_limiter import RateLimiter
-from ..tasks import webhook_search_and_dispatch_task
-from ..scraper_manager import ScraperManager
-from ..metadata_manager import MetadataSourceManager
+from src.db import crud, ConfigManager
+from src.services import TaskManager, ScraperManager, MetadataSourceManager
+from src.rate_limiter import RateLimiter
+
+# 延迟导入，避免循环依赖
+def _get_webhook_search_and_dispatch_task():
+    from src.tasks import webhook_search_and_dispatch_task
+    return webhook_search_and_dispatch_task
 
 class WebhookPayload(BaseModel):
     """定义 Webhook 负载的通用结构。"""
@@ -25,7 +26,7 @@ class WebhookPayload(BaseModel):
 class BaseWebhook(ABC):
     """所有 Webhook 处理器的抽象基类。"""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager):
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession], task_manager: TaskManager, scraper_manager: ScraperManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, config_manager: ConfigManager, title_recognition_manager, ai_matcher_manager):
         self._session_factory = session_factory
         self.task_manager = task_manager
         self.scraper_manager = scraper_manager
@@ -33,6 +34,7 @@ class BaseWebhook(ABC):
         self.metadata_manager = metadata_manager
         self.config_manager = config_manager
         self.title_recognition_manager = title_recognition_manager
+        self.ai_matcher_manager = ai_matcher_manager
         self.logger = logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
@@ -82,11 +84,12 @@ class BaseWebhook(ABC):
                     session, task_title, unique_key, payload, webhook_source,
                     True, timedelta(hours=delay_hours)
                 )
-                await session.commit()
+                # create_webhook_task 内部已经commit,这里不需要再次commit
                 self.logger.info(f"Webhook 任务 '{task_title}' 已加入延时队列。")
             else:
                 # 延时导入关闭：直接提交到 TaskManager
                 self.logger.info(f"Webhook 延时导入已关闭，正在立即执行任务 '{task_title}'...")
+                webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
                 task_coro = lambda s, cb: webhook_search_and_dispatch_task(
                     webhookSource=webhook_source,
                     progress_callback=cb,
@@ -95,6 +98,7 @@ class BaseWebhook(ABC):
                     task_manager=self.task_manager,
                     metadata_manager=self.metadata_manager,
                     config_manager=self.config_manager,
+                    ai_matcher_manager=self.ai_matcher_manager,
                     rate_limiter=self.rate_limiter,
                     title_recognition_manager=self.title_recognition_manager,
                     **payload

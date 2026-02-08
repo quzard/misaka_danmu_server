@@ -12,10 +12,9 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 # 现在可以安全地从 src 导入
-from src import crud, security
-from src.config import settings
-from src.database import _get_db_url
-from src.timezone import get_app_timezone, get_timezone_offset_str
+from src.db import crud, _get_db_url
+from src import security
+from src.core import settings, get_app_timezone, get_timezone_offset_str
 
 async def reset_password(username: str):
     """

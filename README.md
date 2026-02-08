@@ -1,25 +1,31 @@
 <div align="center">
-  <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
-</div>
+<img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
+<h1 align="center" style="margin-top: 0">御坂网络弹幕服务</h1>
+<p align="center">
+<strong>自托管弹幕聚合与管理服务，兼容 dandanplay API</strong>
+</p>
 
-<h2 align="center">
-御坂网络弹幕服务
-</h2>
-
-<div align="center">
+[快速开始](https://docs.misaka10876.top/快速开始)
+|
+[客户端配置](https://docs.misaka10876.top/客户端配置)
+|
+[元数据配置](https://docs.misaka10876.top/config/元数据源配置)
+|
+[常见问题](https://docs.misaka10876.top/常见问题)
+|
+[问题反馈](https://docs.misaka10876.top/问题反馈)
 
 [![GitHub](https://img.shields.io/badge/-GitHub-181717?logo=github)](https://github.com/l429609201/misaka_danmu_server)
 ![GitHub License](https://img.shields.io/github/license/l429609201/misaka_danmu_server)
 ![Docker Pulls](https://img.shields.io/docker/pulls/l429609201/misaka_danmu_server)
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/l429609201/misaka_danmu_server?color=blue&label=download&sort=semver)](https://github.com/l429609201/misaka_danmu_server/releases/latest)
-[![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmu_server)
+[![Telegram](https://img.shields.io/badge/Telegram-misaka__danmu__server-blue?logo=telegram)](https://t.me/misaka_danmaku)
+[![Docs](https://img.shields.io/badge/Docs-文档-blue?logo=readthedocs)](https://docs.misaka10876.top/)
 
 </div>
 
 ---
 
-
-一个功能强大的自托管弹幕（Danmaku）聚合与管理服务，兼容 [dandanplay](https://api.dandanplay.net/swagger/index.html) API 规范。
 
 本项目旨在通过刮削主流视频网站的弹幕，为您自己的媒体库提供一个统一、私有的弹幕API。它自带一个现代化的Web界面，方便您管理弹幕库、搜索源、API令牌和系统设置。
 
@@ -42,6 +48,7 @@
   - 创建和管理供第三方客户端（如 yamby, hills, 小幻影视, SenPlayer等）使用的API令牌。
   - 配置搜索源的优先级和启用状态。
   - 查看后台任务进度和系统日志。
+- **弹幕源管理**: 支持从[资源仓库](https://docs.misaka10876.top/advanced/%E5%BC%B9%E5%B9%95%E6%BA%90%E7%AE%A1%E7%90%86)加载或上传离线包来安装弹幕源，支持备份和恢复功能。
 - **元数据整合**: 支持与 TMDB, TVDB, Bangumi, Douban, IMDb 集成，丰富您的媒体信息。
 - **自动化**: 支持通过 Webhook 接收来自 Sonarr, Radarr, Emby 等服务的通知，实现全自动化的弹幕导入。
 - **灵活部署**: 提供 Docker 镜像和 Docker Compose 文件，方便快速部署。
@@ -80,17 +87,9 @@
 
 - 请不要在 ***B站*** 或中国大陆社交平台发布视频或文章宣传本项目
 
-## 📚 文档导航
+### 相关文章
 
-- **[🚀 快速开始](docs/quick-start.md)** - Docker Compose 一键部署指南
-- **[📱 客户端配置](docs/client-configuration.md)** - 播放器弹幕接口配置
-- **[🔗 Webhook 配置](docs/webhook-configuration.md)** - Emby/Jellyfin/Plex 自动化配置
-- **[🤖 Telegram Bot](docs/telegram-bot.md)** - 机器人集成指南
-- **[🔍 智能搜索](docs/smart-search.md)** - 后备搜索与匹配功能
-- **[⚡ MySQL 优化](docs/mysql-optimization.md)** - 内存优化配置指南
-- **[❓ 常见问题](docs/faq.md)** - 故障排除与解决方案
-
----
+- [Docker 部署御坂网络弹幕服务 Misaka Danmu Server](https://catcat.blog/2025/12/misaka-danmu-server-deploy)
 
 ### 贡献者
 
@@ -100,10 +99,18 @@
 
 ## 参考项目
 
- - [dandanplayapi](https://api.dandanplay.net/swagger/index.html) 
+ - [dandanplayapi](https://api.dandanplay.net/swagger/index.html)
  - [danmuku](https://github.com/lyz05/danmaku)
- - [emby-toolkit](https://github.com/hbq0405/emby-toolkit) 
+ - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
  - [swagger-ui](https://github.com/swagger-api/swagger-ui)
  - [Bangumi-syncer](https://github.com/SanaeMio/Bangumi-syncer)
  - [imdbsource](https://github.com/wumode/MoviePilot-Plugins/tree/main/plugins.v2/imdbsource)
  - [MoviePilot](https://github.com/jxxghp/MoviePilot)
+
+---
+
+## 📈 项目 Star 数增长趋势
+
+### Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=l429609201/misaka_danmu_server&type=Date)](https://www.star-history.com/#l429609201/misaka_danmu_server&Date)

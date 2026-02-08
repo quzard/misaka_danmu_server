@@ -115,8 +115,14 @@ export const CommentDetail = () => {
             title: <Link to="/library">弹幕库</Link>,
           },
           {
-            title: <Link to="javascript:void(0)">分集列表</Link>,
-            onClick: () => navigate(-1),
+            title: (
+              <span
+                style={{ cursor: 'pointer', color: '#1890ff' }}
+                onClick={() => navigate(-1)}
+              >
+                分集列表
+              </span>
+            ),
           },
           {
             title: '弹幕列表',

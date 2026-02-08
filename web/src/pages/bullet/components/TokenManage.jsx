@@ -1,12 +1,28 @@
+import { useState, useEffect } from 'react'
 import { Domain } from './Domain'
 import { Token } from './Token'
 import { Ua } from './Ua'
+import { getCustomDomain } from '../../../apis'
 
 export const TokenManage = () => {
+  const [domain, setDomain] = useState('')
+
+  // 在父组件统一管理 domain 状态
+  useEffect(() => {
+    getCustomDomain().then(res => {
+      setDomain(res.data?.value ?? '')
+    })
+  }, [])
+
+  // 提供给子组件的回调，用于更新 domain
+  const handleDomainChange = (newDomain) => {
+    setDomain(newDomain)
+  }
+
   return (
     <>
-      <Token />
-      <Domain />
+      <Token domain={domain} />
+      <Domain domain={domain} onDomainChange={handleDomainChange} />
       <Ua />
       <p>
         本项目参考了

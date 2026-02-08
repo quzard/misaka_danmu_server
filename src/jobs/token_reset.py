@@ -2,16 +2,17 @@ import logging
 from typing import Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..jobs.base import BaseJob
-from .. import crud
+from .base import BaseJob
+from src.db import crud
 
 logger = logging.getLogger(__name__)
 
 class TokenResetJob(BaseJob):
     """系统内置任务：每日重置API Token调用次数"""
-    
+
     job_type = "tokenReset"
     job_name = "重置API Token每日调用次数"
+    description = "系统内置任务，每日自动重置所有API Token的调用次数统计。此任务不可手动创建或删除。"
     is_system_task = True  # 硬编码：标记为系统内置任务
     
     def __init__(self, session_factory, **kwargs):

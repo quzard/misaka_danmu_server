@@ -1,1 +1,9 @@
-APP_VERSION = "2.0.17"
+# 版本号
+APP_VERSION = "2.5.1"
+
+# 文档信息
+DOCS_URL = "https://docs.misaka10876.top/"
+
+# GitHub 仓库信息
+GITHUB_OWNER = "l429609201"
+GITHUB_REPO = "misaka_danmu_server"

@@ -2,16 +2,11 @@ import { getSearchResult, clearSearchCache } from '../../../apis'
 import { useEffect, useRef, useState } from 'react'
 import {
   Button,
-  Card,
   Checkbox,
-  Col,
   Form,
   Input,
   InputNumber,
-  message,
-  Modal,
   Progress,
-  Row,
   Tag,
 } from 'antd'
 import { useAtom, useAtomValue } from 'jotai'
@@ -58,7 +53,7 @@ export const SearchBar = () => {
     form.setFieldValue('keyword', `${keyword}${formatted}`)
   }
 
-  const onSearch = async values => {
+  const onSearch = async (values, page = 1, pageSize = 10) => {
     try {
       if (loading) return
       setLoading(true)
@@ -74,6 +69,8 @@ export const SearchBar = () => {
       const res = await getSearchResult(
         {
           keyword: values.keyword,
+          page,
+          pageSize,
         },
         onProgress
       )
@@ -122,7 +119,7 @@ export const SearchBar = () => {
           messageApi.success(res.data.message || '缓存已成功清除！')
         } catch (err) {
           messageApi.destroy()
-          messageApi.error(`清除缓存失败: ${error.message || error}`)
+          messageApi.error(`清除缓存失败: ${err.message || err}`)
         } finally {
           setCacheLoading(false)
         }
@@ -137,141 +134,96 @@ export const SearchBar = () => {
   }, [])
 
   return (
-    <div className="my-4">
-      <Card
-        title="搜索"
-        extra={
-          <Button type="primary" loading={cacheLoading} onClick={onClearCache}>
-            清除缓存
-          </Button>
-        }
-      >
-        <Form
-          form={form}
-          layout="horizontal"
-          onFinish={onSearch}
-          className="px-6 pb-6"
-        >
-          <Row gutter={12}>
-            <Col md={18} xs={24}>
-              {/* 名称输入 */}
-              <Form.Item
-                name="keyword"
-                label="输入番剧名称"
-                rules={[{ required: true, message: '请输入番剧名称' }]}
-              >
-                <Input placeholder="请输入番剧名称" />
-              </Form.Item>
-            </Col>
-            <Col md={6} xs={24}>
-              <Form.Item>
-                <Button
-                  block
-                  type="primary"
-                  htmlType="submit"
-                  loading={loading}
-                >
-                  搜索
-                </Button>
-              </Form.Item>
-            </Col>
-          </Row>
-          {loading && (
-            <div className="-mt-4 mb-4">
-              <Progress percent={percent} />
-            </div>
-          )}
-          <Row gutter={12} className="mb-5 md:mb-0">
-            <Col md={6} xs={24}>
-              <Form.Item
-                style={{
-                  marginBottom: 0,
-                }}
-              >
-                <Checkbox
-                  checked={exactSearch}
-                  onChange={e => setExactSearch(e.target.checked)}
-                >
-                  电视节目精确搜索
-                </Checkbox>
-              </Form.Item>
-            </Col>
-            {exactSearch && (
-              <Col md={18} xs={24}>
-                <div className="flex items-center justify-start gap-3">
-                  <Form.Item name="season" label="季度：">
-                    <InputNumber min={0} placeholder="季数" />
-                  </Form.Item>
-                  <Form.Item name="episode" label="集数：">
-                    <InputNumber
-                      min={1}
-                      placeholder="集数"
-                      disabled={!season}
-                    />
-                  </Form.Item>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-lg font-semibold">搜索番剧</div>
+        <Button type="primary" loading={cacheLoading} onClick={onClearCache}>
+          清除缓存
+        </Button>
+      </div>
 
-                  {!isMobile && (
-                    <>
-                      <Form.Item>
-                        <Button type="primary" onClick={onInsert}>
-                          插入
-                        </Button>
-                      </Form.Item>
-                      <Form.Item>
-                        <div className="text-xs">
-                          需要填写季、集后可插入，其中季可单独插入
-                        </div>
-                      </Form.Item>
-                    </>
-                  )}
-                </div>
-                {isMobile && (
-                  <>
-                    <div>
-                      <Button block type="primary" onClick={onInsert}>
-                        插入
-                      </Button>
-                    </div>
-                    <div className="text-xs mt-3">
-                      需要填写季、集后可插入，其中季可单独插入
-                    </div>
-                  </>
-                )}
-              </Col>
-            )}
-          </Row>
-        </Form>
-        {!!searchHistory.length && (
-          <div className="flex items-center justify-start flex-wrap gap-2 mt-4">
-            {searchHistory.map((it, index) => {
-              return (
-                <span
-                  key={index}
-                  className="cursor-pointer"
-                  onClick={() => {
-                    form.setFieldsValue({
-                      keyword: it,
-                    })
-                    onSearch({
-                      keyword: it,
-                    })
-                  }}
-                >
-                  <Tag
-                    closable
-                    onClose={e => {
-                      e.preventDefault()
-                      setSearchHistory(history => history.filter(o => o !== it))
-                    }}
-                  >
-                    {it}
-                  </Tag>
-                </span>
-              )
-            })}
+      <Form form={form} onFinish={onSearch}>
+        <div className="flex items-center gap-3 mb-4">
+          <Form.Item
+            name="keyword"
+            className="flex-1 mb-0"
+            rules={[{ required: true, message: '请输入番剧名称' }]}
+          >
+            <Input.Search
+              placeholder="请输入番剧名称"
+              size="large"
+              enterButton="搜索"
+              loading={loading}
+              onSearch={value => {
+                if (value) {
+                  form.setFieldValue('keyword', value)
+                  form.submit()
+                }
+              }}
+            />
+          </Form.Item>
+        </div>
+
+        {loading && (
+          <div className="mb-4">
+            <Progress percent={percent} />
           </div>
         )}
-      </Card>
+
+        <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3 flex-wrap'}`}>
+          <Checkbox
+            checked={exactSearch}
+            onChange={e => setExactSearch(e.target.checked)}
+          >
+            {isMobile ? <span>精确<br />搜索</span> : '精确搜索'}
+          </Checkbox>
+
+          <div className={`flex items-center ${isMobile ? 'gap-2' : 'gap-3'}`}>
+            <div className="flex items-center gap-1">
+              <span className={`leading-8 ${exactSearch ? '' : 'text-gray-400'}`}>季</span>
+              <Form.Item name="season" noStyle>
+                <InputNumber min={0} placeholder="季" disabled={!exactSearch} style={{ width: 80 }} />
+              </Form.Item>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className={`leading-8 ${exactSearch ? '' : 'text-gray-400'}`}>集</span>
+              <Form.Item name="episode" noStyle>
+                <InputNumber min={1} placeholder="集" disabled={!exactSearch || !season} style={{ width: 80 }} />
+              </Form.Item>
+            </div>
+            <Button type="primary" onClick={onInsert} size="small" disabled={!exactSearch}>
+              插入
+            </Button>
+          </div>
+          {!isMobile && (
+            <span className={`text-xs ${exactSearch ? 'text-gray-500' : 'text-gray-300'}`}>
+              填写季、集后可插入到名称中
+            </span>
+          )}
+        </div>
+      </Form>
+
+      {!!searchHistory.length && (
+        <div className="flex items-center flex-wrap gap-2 mt-4">
+          {searchHistory.map((it, index) => (
+            <Tag
+              key={index}
+              closable
+              className="cursor-pointer"
+              onClick={() => {
+                form.setFieldsValue({ keyword: it })
+                onSearch({ keyword: it })
+              }}
+              onClose={e => {
+                e.preventDefault()
+                setSearchHistory(history => history.filter(o => o !== it))
+              }}
+            >
+              {it}
+            </Tag>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

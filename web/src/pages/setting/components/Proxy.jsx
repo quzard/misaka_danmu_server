@@ -5,7 +5,6 @@ import {
   Form,
   Input,
   Row,
-  Tooltip,
   Select,
   Switch,
   Spin,
@@ -18,7 +17,7 @@ import { getProxyConfig, setProxyConfig, testProxy } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 
 export const Proxy = () => {
-  const [proxyEnabled, setProxyEnabled] = useState(false)
+  const [proxyMode, setProxyMode] = useState('none')
   const [loading, setLoading] = useState(true)
   const [form] = Form.useForm()
   const [isSaveLoading, setIsSaveLoading] = useState(false)
@@ -29,10 +28,11 @@ export const Proxy = () => {
   useEffect(() => {
     getProxyConfig()
       .then(res => {
-        setProxyEnabled(res.data?.proxyEnabled ?? false)
-        // 修正：确保 proxySslVerify 字段即使在API未返回时也有一个默认值
+        const mode = res.data?.proxyMode ?? 'none'
+        setProxyMode(mode)
         form.setFieldsValue({
           ...res.data,
+          proxyMode: mode,
           proxySslVerify: res.data?.proxySslVerify ?? true,
         })
       })
@@ -45,7 +45,7 @@ export const Proxy = () => {
     try {
       setIsSaveLoading(true)
       const values = await form.validateFields()
-      setProxyEnabled(values.proxyEnabled)
+      setProxyMode(values.proxyMode)
       await setProxyConfig(values)
       setIsSaveLoading(false)
       messageApi.success('保存成功')
@@ -61,9 +61,11 @@ export const Proxy = () => {
       setIsTestLoading(true)
       setTestResult(null)
       const values = await form.validateFields()
+
+      // 构建测试请求参数
       let proxyUrl = ''
       if (
-        values.proxyEnabled &&
+        values.proxyMode === 'http_socks' &&
         values.proxyHost &&
         values.proxyPort &&
         values.proxyProtocol
@@ -78,7 +80,12 @@ export const Proxy = () => {
         }
         proxyUrl = `${values.proxyProtocol}://${userinfo}${values.proxyHost}:${values.proxyPort}`
       }
-      const res = await testProxy({ proxy_url: proxyUrl })
+
+      const res = await testProxy({
+        proxy_mode: values.proxyMode,
+        proxy_url: proxyUrl,
+        accelerate_proxy_url: values.accelerateProxyUrl || ''
+      })
       setTestResult(res.data)
     } catch (error) {
       messageApi.error('测试请求失败')
@@ -95,12 +102,12 @@ export const Proxy = () => {
       : `失败: ${result.error}`
     return <Tag color={color}>{text}</Tag>
   }
+
   return (
     <div className="my-6">
       <Card loading={loading} title="代理配置">
         <div className="mb-4">
-          配置一个全局代理，可用于访问受限的网络资源。支持 http, https, socks5
-          协议。
+          配置一个全局代理，可用于访问受限的网络资源。
         </div>
 
         <Form
@@ -110,75 +117,88 @@ export const Proxy = () => {
           className="px-6 pb-6"
         >
           <Form.Item
-            name="proxyEnabled"
-            label="启用代理"
+            name="proxyMode"
+            label="代理模式"
             className="mb-6"
-            valuePropName="checked"
           >
-            <Switch onChange={checked => setProxyEnabled(checked)} />
-          </Form.Item>
-          <Form.Item name="proxyProtocol" label="协议" className="mb-6">
             <Select
-              disabled={!proxyEnabled}
+              onChange={value => setProxyMode(value)}
               options={[
-                {
-                  value: 'http',
-                  label: 'http',
-                },
-                {
-                  value: 'https',
-                  label: 'https',
-                },
-                {
-                  value: 'socks5',
-                  label: 'socks5',
-                },
+                { value: 'none', label: '不使用代理' },
+                { value: 'http_socks', label: 'HTTP/SOCKS 代理' },
+                { value: 'accelerate', label: '加速代理' },
               ]}
             />
           </Form.Item>
-          <Row gutter={[12, 12]}>
-            <Col md={12} xs={24}>
-              <Form.Item name="proxyHost" label="主机" className="mb-4">
-                <Input placeholder="例如：127.0.0.1" disabled={!proxyEnabled} />
+
+          {/* HTTP/SOCKS 代理配置 */}
+          {proxyMode === 'http_socks' && (
+            <>
+              <Form.Item name="proxyProtocol" label="协议" className="mb-6">
+                <Select
+                  options={[
+                    { value: 'http', label: 'http' },
+                    { value: 'https', label: 'https' },
+                    { value: 'socks5', label: 'socks5' },
+                  ]}
+                />
               </Form.Item>
-            </Col>
-            <Col md={12} xs={24}>
-              <Form.Item name="proxyPort" label="端口" className="mb-4">
-                <Input placeholder="例如：7890" disabled={!proxyEnabled} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={[12, 12]}>
-            <Col md={12} xs={24}>
-              <Form.Item
-                name="proxyUsername"
-                label="用户名(可选)"
-                className="mb-4"
-              >
-                <Input disabled={!proxyEnabled} />
-              </Form.Item>
-            </Col>
-            <Col md={12} xs={24}>
-              <Form.Item
-                name="proxyPassword"
-                label="密码(可选)"
-                className="mb-4"
-              >
-                <Input disabled={!proxyEnabled} />
-              </Form.Item>
-            </Col>
-            <Col md={12} xs={24}>
-              <Form.Item
-                label="跳过SSL证书验证"
-                name="proxySslVerify"
-                valuePropName="checked"
-                tooltip="当您的HTTPS代理使用自签名证书时，请开启此项以避免SSL验证错误。"
-                className="mb-4"
-              >
-                <Switch disabled={!proxyEnabled} />
-              </Form.Item>
-            </Col>
-          </Row>
+              <Row gutter={[12, 12]}>
+                <Col md={12} xs={24}>
+                  <Form.Item name="proxyHost" label="主机" className="mb-4">
+                    <Input placeholder="例如：127.0.0.1" />
+                  </Form.Item>
+                </Col>
+                <Col md={12} xs={24}>
+                  <Form.Item name="proxyPort" label="端口" className="mb-4">
+                    <Input placeholder="例如：7890" />
+                  </Form.Item>
+                </Col>
+              </Row>
+              <Row gutter={[12, 12]}>
+                <Col md={12} xs={24}>
+                  <Form.Item
+                    name="proxyUsername"
+                    label="用户名(可选)"
+                    className="mb-4"
+                  >
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col md={12} xs={24}>
+                  <Form.Item
+                    name="proxyPassword"
+                    label="密码(可选)"
+                    className="mb-4"
+                  >
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col md={12} xs={24}>
+                  <Form.Item
+                    label="跳过SSL证书验证"
+                    name="proxySslVerify"
+                    valuePropName="checked"
+                    tooltip="当您的HTTPS代理使用自签名证书时，请开启此项以避免SSL验证错误。"
+                    className="mb-4"
+                  >
+                    <Switch />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )}
+
+          {/* 加速代理配置 */}
+          {proxyMode === 'accelerate' && (
+            <Form.Item
+              name="accelerateProxyUrl"
+              label="加速代理地址"
+              className="mb-6"
+            >
+              <Input placeholder="例如：https://your-proxy.vercel.app" />
+            </Form.Item>
+          )}
 
           <Form.Item>
             <div className="flex justify-end">

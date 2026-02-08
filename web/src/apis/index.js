@@ -3,6 +3,23 @@ import api from './fetch'
 /** 获取应用版本号 */
 export const getVersion = () => api.get('/api/ui/version')
 
+/** 检查应用更新 */
+export const checkAppUpdate = (forceRefresh = false) =>
+  api.get(`/api/ui/version/check?force_refresh=${forceRefresh}`)
+
+/** 获取历史版本列表 */
+export const getReleaseHistory = (limit = 10) =>
+  api.get(`/api/ui/version/releases?limit=${limit}`)
+
+/** 获取 Docker 状态 */
+export const getDockerStatus = () => api.get('/api/ui/docker/status')
+
+/** 获取容器资源使用统计 */
+export const getDockerStats = () => api.get('/api/ui/docker/stats')
+
+/** 重启服务 */
+export const restartService = () => api.post('/api/ui/restart')
+
 /** -------------------------------------------------用户相关开始------------------------------------------------- */
 /** 登录 */
 export const login = data =>
@@ -29,6 +46,17 @@ export const changePassword = data =>
     })
   )
 
+/** 获取当前用户所有会话 */
+export const getUserSessions = () => api.get('/api/ui/auth/sessions')
+
+/** 踢出指定会话 */
+export const revokeSession = sessionId =>
+  api.delete(`/api/ui/auth/sessions/${sessionId}`)
+
+/** 踢出所有其他会话 */
+export const revokeOtherSessions = () =>
+  api.delete('/api/ui/auth/sessions/others/all')
+
 /** ---------------------------------------------------首页接口------------------------------------------------ */
 /** 获取日志 */
 export const getLogs = (options = {}) =>
@@ -43,16 +71,52 @@ export const getMatchTest = data =>
     JSON.stringify({ fileName: data.fileName })
   )
 
+/** 搜索分集测试 */
+export const searchEpisodesTest = data =>
+  api.get(
+    `/api/v1/${data.apiToken}/search/episodes?anime=${encodeURIComponent(data.anime)}${data.episode ? `&episode=${encodeURIComponent(data.episode)}` : ''}`
+  )
+
+/** 搜索作品测试 */
+export const searchAnimeTest = data =>
+  api.get(
+    `/api/v1/${data.apiToken}/search/anime?keyword=${encodeURIComponent(data.keyword)}`
+  )
+
+/** 番剧详情测试 */
+export const getBangumiDetailTest = data =>
+  api.get(`/api/v1/${data.apiToken}/bangumi/${data.bangumiId}`)
+
+/** 弹幕获取测试 */
+export const getCommentTest = data =>
+  api.get(`/api/v1/${data.apiToken}/comment/${data.episodeId}`)
+
 /** 清除搜索缓存 */
 export const clearSearchCache = () => api.post('/api/ui/cache/clear')
 
 /** 搜索结果 */
 export const getSearchResult = (data, onProgress) => {
+  const params = {
+    keyword: data.keyword,
+    page: data.page || 1,
+    pageSize: data.pageSize || 10,
+  }
+  // 添加可选的过滤参数
+  if (data.typeFilter && data.typeFilter !== 'all') {
+    params.typeFilter = data.typeFilter
+  }
+  if (data.yearFilter && data.yearFilter !== 'all') {
+    params.yearFilter = data.yearFilter
+  }
+  if (data.providerFilter && data.providerFilter !== 'all') {
+    params.providerFilter = data.providerFilter
+  }
+  if (data.titleFilter) {
+    params.titleFilter = data.titleFilter
+  }
   return api.get(
     '/api/ui/search/provider',
-    {
-      keyword: data.keyword,
-    },
+    params,
     {
       onDownloadProgress: onProgress,
     }
@@ -96,6 +160,21 @@ export const getAllEpisode = data =>
     egid: data.egid,
     tmdbId: data.tmdbId,
   })
+
+/** 获取本地剧集组JSON（支持URL和本地路径） */
+export const fetchLocalEpisodeGroupUrl = data =>
+  api.post(`/api/ui/local-episode-group/fetch`, { url: data.url })
+
+/** 应用本地剧集组映射 */
+export const applyLocalEpisodeGroup = data =>
+  api.post(`/api/ui/local-episode-group/apply`, {
+    tmdbId: data.tmdbId,
+    localEpisodeGroup: data.localEpisodeGroup,
+  })
+
+/** 获取已保存的剧集组详情（从数据库读取） */
+export const getEpisodeGroupDetail = (groupId) =>
+  api.get(`/api/ui/local-episode-group/detail?groupId=${encodeURIComponent(groupId)}`)
 
 /** 搜索BGM */
 export const getBgmSearch = data =>
@@ -189,12 +268,36 @@ export const getDanmuOutputTotal = () =>
 
 export const setDanmuOutputTotal = data =>
   api.put('/api/ui/config/danmakuOutputLimitPerSource', data)
-/** 弹幕输出控制 启用弹幕聚合 */
-export const getDanmuOutputAggregation = () =>
-  api.get('/api/ui/config/danmakuAggregationEnabled')
-/** 弹幕输出控制 启用弹幕聚合 */
-export const setDanmuOutputAggregation = data =>
-  api.put('/api/ui/config/danmakuAggregationEnabled', data)
+/** 弹幕输出控制 合并输出开关 */
+export const getDanmakuMergeOutputEnabled = () =>
+  api.get('/api/ui/config/danmakuMergeOutputEnabled')
+/** 弹幕输出控制 合并输出开关 */
+export const setDanmakuMergeOutputEnabled = data =>
+  api.put('/api/ui/config/danmakuMergeOutputEnabled', data)
+/** 弹幕输出配置 随机颜色模式 */
+export const getDanmakuRandomColorMode = () =>
+  api.get('/api/ui/config/danmakuRandomColorMode')
+/** 弹幕输出配置 随机颜色模式 */
+export const setDanmakuRandomColorMode = data =>
+  api.put('/api/ui/config/danmakuRandomColorMode', data)
+/** 弹幕输出配置 随机颜色色板 */
+export const getDanmakuRandomColorPalette = () =>
+  api.get('/api/ui/config/danmakuRandomColorPalette')
+/** 弹幕输出配置 随机颜色色板 */
+export const setDanmakuRandomColorPalette = data =>
+  api.put('/api/ui/config/danmakuRandomColorPalette', data)
+/** 弹幕输出配置 黑名单开关 */
+export const getDanmakuBlacklistEnabled = () =>
+  api.get('/api/ui/config/danmakuBlacklistEnabled')
+/** 弹幕输出配置 黑名单开关 */
+export const setDanmakuBlacklistEnabled = data =>
+  api.put('/api/ui/config/danmakuBlacklistEnabled', data)
+/** 弹幕输出配置 黑名单规则 */
+export const getDanmakuBlacklistPatterns = () =>
+  api.get('/api/ui/config/danmakuBlacklistPatterns')
+/** 弹幕输出配置 黑名单规则 */
+export const setDanmakuBlacklistPatterns = data =>
+  api.put('/api/ui/config/danmakuBlacklistPatterns', data)
 
 /** 获取匹配后备机制状态 */
 export const getMatchFallback = () =>
@@ -255,6 +358,9 @@ export const getWebhookTasks = data => api.get('/api/ui/webhook-tasks', data)
 /** 批量删除webhook任务 */
 export const deleteWebhookTasks = data =>
   api.post('/api/ui/webhook-tasks/delete-bulk', data)
+/** 清空所有webhook任务 */
+export const clearAllWebhookTasks = () =>
+  api.delete('/api/ui/webhook-tasks/clear-all')
 /** 立即执行webhook任务 */
 export const runWebhookTasksNow = data =>
   api.post('/api/ui/webhook-tasks/run-now', data)
@@ -318,6 +424,54 @@ export const setSingleScraper = data =>
 export const getSingleScraper = data =>
   api.get(`/api/ui/scrapers/${data.name}/config`)
 
+/** 获取资源仓库配置 */
+export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
+/** 保存资源仓库配置 */
+export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
+/** 获取资源包版本信息 */
+export const getScraperVersions = () => api.get('/api/ui/scrapers/versions')
+/** 加载弹幕源资源 */
+export const loadScraperResources = data => api.post('/api/ui/scrapers/load-resources', data)
+/** 备份弹幕源 */
+export const backupScrapers = () => api.post('/api/ui/scrapers/backup')
+/** 还原弹幕源 */
+export const restoreScrapers = () => api.post('/api/ui/scrapers/restore')
+/** 获取备份信息 */
+export const getBackupInfo = () => api.get('/api/ui/scrapers/backup-info')
+/** 重载弹幕源 */
+export const reloadScrapers = () => api.post('/api/ui/scrapers/reload')
+/** 删除弹幕源备份 */
+export const deleteScraperBackup = () => api.delete('/api/ui/scrapers/backup')
+/** 删除当前弹幕源 */
+export const deleteCurrentScrapers = () => api.delete('/api/ui/scrapers/current')
+/** 删除当前源和备份源 */
+export const deleteAllScrapers = () => api.delete('/api/ui/scrapers/all')
+/** 获取自动更新配置 */
+export const getScraperAutoUpdate = () => api.get('/api/ui/scrapers/auto-update')
+/** 保存自动更新配置 */
+export const saveScraperAutoUpdate = data => api.put('/api/ui/scrapers/auto-update', data)
+/** 获取全量替换配置 */
+export const getScraperFullReplace = () => api.get('/api/ui/scrapers/full-replace')
+/** 保存全量替换配置 */
+export const saveScraperFullReplace = data => api.put('/api/ui/scrapers/full-replace', data)
+
+/** 启动下载任务（新版后台任务模式） */
+export const startScraperDownload = data => api.post('/api/ui/scrapers/download/start', data)
+/** 获取下载任务状态 */
+export const getScraperDownloadStatus = taskId => api.get(`/api/ui/scrapers/download/status/${taskId}`)
+/** 获取当前下载任务 */
+export const getCurrentScraperDownload = () => api.get('/api/ui/scrapers/download/current')
+/** 取消下载任务 */
+export const cancelScraperDownload = taskId => api.post(`/api/ui/scrapers/download/cancel/${taskId}`)
+/** 获取GitHub Token */
+export const getGithubToken = () => api.get('/api/ui/config/github-token')
+/** 保存GitHub Token */
+export const saveGithubToken = data => api.post('/api/ui/config/github-token', data)
+/** 验证GitHub Token */
+export const verifyGithubToken = data => api.post('/api/ui/config/github-token/verify', data)
+/** 上传弹幕源离线包 */
+export const uploadScraperPackage = (data, config) => api.post('/api/ui/scrapers/upload-package', data, config)
+
 /** 获取元信息搜索 配置 */
 export const getMetaData = () => api.get('/api/ui/metadata-sources')
 /** 设置元数据 配置 */
@@ -336,6 +490,13 @@ export const getGlobalFilter = () => api.get('/api/ui/settings/global-filter')
 /** 更新全局过滤规则 */
 export const setGlobalFilter = data =>
   api.put('/api/ui/settings/global-filter', data)
+/** 获取全局过滤默认规则 */
+export const getGlobalFilterDefaults = () => api.get('/api/ui/settings/global-filter/defaults')
+/** 获取搜索源默认分集黑名单 */
+export const getScraperDefaultBlacklist = (providerName) =>
+  api.get(`/api/ui/scrapers/${providerName}/default-blacklist`)
+/** 获取通用分集黑名单规则 */
+export const getCommonBlacklist = () => api.get('/api/ui/scrapers/common-blacklist')
 
 /** 获取bi站登录信息 */
 export const getbiliUserinfo = () =>
@@ -350,12 +511,16 @@ export const pollBiliLogin = data =>
 export const biliLogout = () =>
   api.post('/api/ui/scrapers/bilibili/actions/logout')
 
+/** 通用 scraper action 调用 */
+export const executeScraperAction = (providerName, actionName, payload = {}) =>
+  api.post(`/api/ui/scrapers/${providerName}/actions/${actionName}`, payload)
+
 /** ----------------------------------------------弹幕库----------------------------------------------  */
 /** 弹幕库列表 (支持搜索和分页) */
 export const getAnimeLibrary = data => api.get('/api/ui/library', data)
 /** 删除单个资源 */
 export const deleteAnime = data =>
-  api.delete(`/api/ui/library/anime/${data.animeId}`)
+  api.delete(`/api/ui/library/anime/${data.animeId}?deleteFiles=${data.deleteFiles !== false}`)
 /** 获取影视信息 */
 export const getAnimeDetail = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/details`)
@@ -375,9 +540,23 @@ export const addSourceToAnime = data =>
 export const batchManualImport = data =>
   api.post(`/api/ui/library/source/${data.sourceId}/batch-import`, data)
 
+/** 校验并解析导入URL */
+export const validateImportUrl = data =>
+  api.post('/api/ui/validate-url', data)
+
+/** 从URL导入弹幕 */
+export const importFromUrl = data =>
+  api.post('/api/ui/import-from-url', data)
+
 /** 获取影视的资源 */
 export const getAnimeSource = data =>
   api.get(`/api/ui/library/anime/${data.animeId}/sources`)
+
+/** 检测关联冲突 */
+export const checkReassociationConflicts = data =>
+  api.post(`/api/ui/library/anime/${data.sourceAnimeId}/reassociate/check`, {
+    targetAnimeId: data.targetAnimeId,
+  })
 
 /** 关联数据源 */
 export const setAnimeSource = data =>
@@ -385,13 +564,20 @@ export const setAnimeSource = data =>
     targetAnimeId: data.targetAnimeId,
   })
 
+/** 关联数据源并解决冲突 */
+export const reassociateWithResolution = data =>
+  api.post(`/api/ui/library/anime/${data.sourceAnimeId}/reassociate/resolve`, {
+    targetAnimeId: data.targetAnimeId,
+    resolutions: data.resolutions,
+  })
+
 /** 批量删除数据源 */
 export const deleteAnimeSource = data =>
-  api.post('/api/ui/library/sources/delete-bulk', data)
+  api.post('/api/ui/library/sources/delete-bulk', { sourceIds: data.sourceIds, deleteFiles: data.deleteFiles !== false })
 
 /** 删除单个数据源 */
 export const deleteAnimeSourceSingle = data =>
-  api.delete(`/api/ui/library/source/${data.sourceId}`)
+  api.delete(`/api/ui/library/source/${data.sourceId}?deleteFiles=${data.deleteFiles !== false}`)
 
 /** 数据源收藏状态 */
 export const toggleSourceFavorite = data =>
@@ -426,15 +612,19 @@ export const manualImportEpisode = data =>
 
 /** 批量删除集 */
 export const deleteAnimeEpisode = data =>
-  api.post('/api/ui/library/episodes/delete-bulk', data)
+  api.post('/api/ui/library/episodes/delete-bulk', { episodeIds: data.episodeIds, deleteFiles: data.deleteFiles !== false })
 
 /** 刷新集弹幕 */
 export const refreshEpisodeDanmaku = data =>
   api.post(`/api/ui/library/episode/${data.id}/refresh`)
 
+/** 批量刷新集弹幕 */
+export const refreshEpisodesBulk = data =>
+  api.post('/api/ui/library/episodes/refresh-bulk', data)
+
 /** 删除集 */
 export const deleteAnimeEpisodeSingle = data =>
-  api.delete(`/api/ui/library/episode/${data.id}`)
+  api.delete(`/api/ui/library/episode/${data.id}?deleteFiles=${data.deleteFiles !== false}`)
 
 /** 重整集数 */
 export const resetEpisode = data =>
@@ -495,3 +685,249 @@ export const saveTmdbReverseLookupConfig = (data) => api.post('/api/ui/config/tm
 /** 通用配置管理 */
 export const getConfig = (key) => api.get(`/api/ui/config/${key}`)
 export const setConfig = (key, value) => api.put(`/api/ui/config/${key}`, { value })
+/** 获取参数配置 Schema */
+export const getConfigSchema = () => api.get('/api/ui/config/schema/parameters')
+export const getDefaultAIPrompts = () => api.get('/api/ui/config/ai/default-prompts')
+
+/** AI 余额查询 */
+export const getAIBalance = () => api.get('/api/ui/config/ai/balance')
+
+/** AI 调用统计 */
+export const getAIMetrics = (hours = 24, source = 'db') => api.get(`/api/ui/config/ai/metrics?hours=${hours}&source=${source}`)
+
+/** 清空 AI 缓存 */
+export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
+
+/** 获取 AI 模型列表 */
+export const getAIModels = (provider, refresh = false) => api.get(`/api/ui/config/ai/models?provider=${provider}&refresh=${refresh}`)
+
+/** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
+/** 获取所有媒体服务器 */
+export const getMediaServers = () => api.get('/api/ui/media-servers')
+
+/** 创建媒体服务器 */
+export const createMediaServer = (data) => api.post('/api/ui/media-servers', data)
+
+/** 更新媒体服务器 */
+export const updateMediaServer = (serverId, data) => api.put(`/api/ui/media-servers/${serverId}`, data)
+
+/** 删除媒体服务器 */
+export const deleteMediaServer = (serverId) => api.delete(`/api/ui/media-servers/${serverId}`)
+
+/** 测试媒体服务器连接 */
+export const testMediaServerConnection = (serverId) => api.post(`/api/ui/media-servers/${serverId}/test`)
+
+/** 获取媒体服务器的媒体库列表 */
+export const getMediaServerLibraries = (serverId) => api.get(`/api/ui/media-servers/${serverId}/libraries`)
+
+/** 扫描媒体服务器 */
+export const scanMediaServer = (serverId, libraryIds = null) =>
+  api.post(`/api/ui/media-servers/${serverId}/scan`, { library_ids: libraryIds })
+
+/** 获取媒体项列表 */
+export const getMediaItems = (params) => api.get('/api/ui/media-items', params)
+
+/** 获取作品列表(按作品分组) */
+export const getMediaWorks = (params) => api.get('/api/ui/media-works', params)
+
+/** 获取剧集的季度信息 */
+export const getShowSeasons = (title, serverId) => api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons`, { server_id: serverId })
+
+/** 获取某一季的分集列表 */
+export const getSeasonEpisodes = (title, season, serverId, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    server_id: serverId,
+    page,
+    page_size: pageSize
+  })
+
+/** 更新媒体项 */
+export const updateMediaItem = (itemId, data) => api.put(`/api/ui/media-items/${itemId}`, data)
+
+/** 删除媒体项 */
+export const deleteMediaItem = (itemId) => api.delete(`/api/ui/media-items/${itemId}`)
+
+/** 批量删除媒体项 */
+export const batchDeleteMediaItems = (payload) => api.post('/api/ui/media-items/batch-delete', payload)
+
+/** 导入媒体项 */
+export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)
+
+// ==================== 本地弹幕扫描 ====================
+
+/** 浏览本地目录 */
+export const browseDirectory = (fileitem, sort = 'name') => api.post('/api/ui/local-scan/browse', fileitem, { params: { sort } })
+
+/** 获取上次使用的扫描路径 */
+export const getLastScanPath = () => api.get('/api/ui/local-scan/last-path')
+
+/** 保存扫描路径 */
+export const saveScanPath = (scanPath) => api.post('/api/ui/local-scan/save-path', { scanPath })
+
+/** 扫描本地弹幕文件 */
+export const scanLocalDanmaku = (scanPath) => api.post('/api/ui/local-scan', { scanPath })
+
+/** 创建文件夹 */
+export const createFolder = (parentPath, folderName) => api.post('/api/ui/local-scan/create-folder', { parentPath, folderName })
+
+/** 删除文件夹 */
+export const deleteFolder = (folderPath) => api.delete('/api/ui/local-scan/delete-folder', { params: { folderPath } })
+
+/** 获取本地弹幕项列表 */
+export const getLocalItems = (params) => api.get('/api/ui/local-items', params)
+
+/** 获取本地作品列表(按作品分组) */
+export const getLocalWorks = (params) => api.get('/api/ui/local-works', params)
+
+/** 获取电影的弹幕文件列表 */
+export const getLocalMovieFiles = (title, year = null, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-movies/${encodeURIComponent(title)}/files`, {
+    year,
+    page,
+    page_size: pageSize
+  })
+
+/** 获取本地剧集的季度信息 */
+export const getLocalShowSeasons = (title) => api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons`)
+
+/** 获取本地某一季的分集列表 */
+export const getLocalSeasonEpisodes = (title, season, page = 1, pageSize = 100) =>
+  api.get(`/api/ui/local-shows/${encodeURIComponent(title)}/seasons/${season}/episodes`, {
+    page,
+    page_size: pageSize
+  })
+
+/** 更新本地弹幕项 */
+export const updateLocalItem = (itemId, data) => api.put(`/api/ui/local-items/${itemId}`, data)
+
+/** 删除本地弹幕项 */
+export const deleteLocalItem = (itemId) => api.delete(`/api/ui/local-items/${itemId}`)
+
+/** 批量删除本地弹幕项 */
+export const batchDeleteLocalItems = (itemIds) => api.post('/api/ui/local-items/batch-delete', { itemIds })
+
+/** 导入本地弹幕项 */
+export const importLocalItems = (data) => api.post('/api/ui/local-items/import', data)
+
+// ==================== 弹幕存储批量操作 ====================
+
+/** 预览批量迁移 */
+export const previewMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-migrate', data)
+
+/** 批量迁移弹幕文件 */
+export const batchMigrateDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-migrate', data)
+
+/** 预览批量重命名 */
+export const previewRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/preview-rename', data)
+
+/** 批量重命名弹幕文件 */
+export const batchRenameDanmaku = (data) => api.post('/api/ui/danmaku-storage/batch-rename', data)
+
+/** 预览应用模板 */
+export const previewDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/preview-template', data)
+
+/** 应用新模板 */
+export const applyDanmakuTemplate = (data) => api.post('/api/ui/danmaku-storage/apply-template', data)
+
+/** 获取模板变量列表 */
+export const getTemplateVariables = () => api.get('/api/ui/danmaku-storage/template-variables')
+
+// --- 追更与标记管理 ---
+
+/** 获取所有源（按番剧分组）用于批量管理，支持分页和过滤 */
+export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all', typeFilter = 'all' } = {}) => {
+  const queryParams = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+    keyword,
+    favoriteFilter,
+    refreshFilter,
+    typeFilter
+  })
+  return api.get(`/api/ui/library/incremental-refresh/sources?${queryParams.toString()}`)
+}
+
+/** 获取增量追更定时任务状态 */
+export const getIncrementalRefreshTaskStatus = () => api.get('/api/ui/library/incremental-refresh/task-status')
+
+/** 批量开启/关闭追更 */
+export const batchToggleIncrementalRefresh = (data) => api.post('/api/ui/library/incremental-refresh/batch-toggle', data)
+
+/** 批量设置标记 */
+export const batchSetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-favorite', data)
+
+/** 批量取消标记 */
+export const batchUnsetFavorite = (data) => api.post('/api/ui/library/incremental-refresh/batch-unfavorite', data)
+
+// --- 数据库备份管理 ---
+
+/** 获取备份列表 */
+export const getBackupList = () => api.get('/api/ui/backup/list')
+
+/** 创建备份 */
+export const createBackup = () => api.post('/api/ui/backup/create')
+
+/** 下载备份 */
+export const downloadBackup = (filename) => `/api/ui/backup/download/${filename}`
+
+/** 删除备份 */
+export const deleteBackup = (filename) => api.delete(`/api/ui/backup/delete/${filename}`)
+
+/** 批量删除备份 */
+export const deleteBackupBatch = (filenames) => {
+  const params = new URLSearchParams()
+  filenames.forEach(f => params.append('filenames', f))
+  return api.delete(`/api/ui/backup/delete-batch?${params.toString()}`)
+}
+
+/** 还原备份 */
+export const restoreBackup = (data) => api.post('/api/ui/backup/restore', data)
+
+/** 获取备份定时任务状态 */
+export const getBackupJobStatus = () => api.get('/api/ui/backup/job-status')
+
+/** 获取备份配置 */
+export const getBackupConfig = () => api.get('/api/ui/backup/config')
+
+/** 上传备份文件 */
+export const uploadBackup = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return api.post('/api/ui/backup/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+
+/** ---------------------------------------------------弹幕编辑相关------------------------------------------------ */
+/** 获取弹幕编辑详情（统计、分布、预览） */
+export const getDanmakuEditDetail = (episodeId) => api.get(`/api/ui/danmaku/detail/${episodeId}`)
+
+/** 分页获取弹幕列表（用于编辑预览） */
+export const getDanmakuEditComments = (episodeId, params = {}) => {
+  const queryParams = new URLSearchParams()
+  if (params.page) queryParams.append('page', params.page)
+  if (params.pageSize) queryParams.append('pageSize', params.pageSize)
+  if (params.startTime !== undefined) queryParams.append('startTime', params.startTime)
+  if (params.endTime !== undefined) queryParams.append('endTime', params.endTime)
+  const queryString = queryParams.toString()
+  return api.get(`/api/ui/danmaku/comments/${episodeId}${queryString ? `?${queryString}` : ''}`)
+}
+
+/** 应用时间偏移 */
+export const applyDanmakuOffset = (data) => api.post('/api/ui/danmaku/offset', JSON.stringify(data))
+
+/** 分集拆分 */
+export const splitEpisodeDanmaku = (data) => api.post('/api/ui/danmaku/split', JSON.stringify(data))
+
+/** 分集合并 */
+export const mergeEpisodesDanmaku = (data) => api.post('/api/ui/danmaku/merge', JSON.stringify(data))
+
+// ==================== 拆分数据源 ====================
+
+/** 获取数据源的分集列表（用于拆分选择） */
+export const getSourceEpisodesForSplit = (sourceId) =>
+  api.get(`/api/ui/library/source/${sourceId}/episodes-for-split`)
+
+/** 拆分数据源 */
+export const splitSource = (animeId, data) =>
+  api.post(`/api/ui/library/anime/${animeId}/split-source`, JSON.stringify(data))

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Set
 import httpx
 from fastapi import HTTPException, status
 
-from .. import crud, models
+from src.db import crud, models
 from .base import BaseMetadataSource, HTTPStatusError
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,10 @@ class TvdbMetadataSource(BaseMetadataSource):
     test_url = "https://api4.thetvdb.com"
 
     async def _get_tvdb_token(self, client: httpx.AsyncClient) -> str:
-        """获取一个有效的TVDB令牌，如果需要则从数据库或API刷新。"""
+        """获取一个有效的TVDB令牌，如果需要则从数据库或API刷新。
+
+        参考Bangumi源的实现：主动监测token有效性，当剩余天数<=7天时提前刷新。
+        """
         # 1. 尝试从数据库配置中获取缓存的token和过期时间
         token = await self.config_manager.get("tvdbJwtToken")
         expires_at_str = await self.config_manager.get("tvdbTokenExpiresAt")
@@ -23,13 +26,23 @@ class TvdbMetadataSource(BaseMetadataSource):
         if token and expires_at_str:
             try:
                 expires_at = datetime.fromisoformat(expires_at_str)
-                if expires_at > datetime.utcnow():
-                    self.logger.debug("TVDB: 使用数据库中缓存的有效token。")
+                now = datetime.utcnow()
+                days_left = (expires_at - now).days
+
+                if days_left > 7:
+                    # 剩余超过7天，直接使用缓存的token
+                    self.logger.debug(f"TVDB: 使用缓存的有效token (剩余 {days_left} 天)。")
                     return token
+                elif days_left > 0:
+                    # 剩余1-7天，提前刷新
+                    self.logger.info(f"TVDB token 剩余 {days_left} 天，提前刷新以避免过期...")
+                else:
+                    # 已过期
+                    self.logger.info("TVDB token 已过期，正在刷新...")
             except ValueError:
                 self.logger.warning("TVDB: 数据库中的过期时间格式无效，将重新获取token。")
-
-        self.logger.info("TVDB token 已过期或未找到，正在请求新的令牌。")
+        else:
+            self.logger.info("TVDB token 未找到，正在请求新的令牌。")
         api_key = await self.config_manager.get("tvdbApiKey", "")
         if not api_key:
             raise ValueError("TVDB API Key 未配置。")
@@ -101,11 +114,17 @@ class TvdbMetadataSource(BaseMetadataSource):
         except ValueError as e:
             self.logger.error(f"TVDB搜索失败，配置错误: {e}")
             return []
+        except httpx.ConnectError as e:
+            self.logger.warning(f"TVDB搜索失败，连接错误（可能是网络问题或服务不可用）: {e}")
+            return []
+        except httpx.TimeoutException as e:
+            self.logger.warning(f"TVDB搜索失败，请求超时: {e}")
+            return []
         except httpx.HTTPStatusError as e:
             self.logger.error(f"TVDB搜索失败，HTTP错误: {e.response.status_code} for URL: {e.request.url}")
             return []
         except Exception as e:
-            self.logger.error(f"TVDB搜索失败，发生意外错误: {e}", exc_info=True)
+            self.logger.warning(f"TVDB搜索失败，发生意外错误: {e}")
             return []
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:

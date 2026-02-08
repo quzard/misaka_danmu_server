@@ -2,7 +2,8 @@ import axios from 'axios'
 import Cookies from 'js-cookie'
 
 const getURL = url => {
-  const baseURL = import.meta.env.DEV ? 'http://0.0.0.0:7768' : '/'
+  // 开发环境使用 Vite 代理，生产环境使用相对路径
+  const baseURL = '/'
   return { baseURL, url }
 }
 
@@ -27,7 +28,14 @@ instance.interceptors.response.use(
   res => res,
   error => {
     console.log('resError', error.response?.data, error.response?.config.url)
-    return Promise.reject(error.response?.data || {})
+    const errorData = error.response?.data || {}
+    // 统一转换为message字段,兼容FastAPI的detail字段和自定义的message字段
+    const errorObj = {
+      ...errorData,
+      message: errorData.detail || errorData.message || '未知错误',
+      code: error.response?.status
+    }
+    return Promise.reject(errorObj)
   }
 )
 
@@ -78,15 +86,31 @@ const api = {
     })
   },
   delete(url, data, other = { headers: {} }) {
-    return instance({
-      method: 'delete',
-      baseURL: getURL(url).baseURL,
-      url: getURL(url).url,
-      headers: { ...other.headers },
-      data,
-      onUploadProgress: other.onUploadProgress,
-      onDownloadProgress: other.onDownloadProgress,
-    })
+    // 检查是否是config对象（包含params属性）
+    const isConfig = data && typeof data === 'object' && (data.params || data.headers || data.data);
+    if (isConfig) {
+      return instance({
+        method: 'delete',
+        baseURL: getURL(url).baseURL,
+        url: getURL(url).url,
+        headers: { ...other.headers, ...(data.headers || {}) },
+        params: data.params,
+        data: data.data,
+        onUploadProgress: data.onUploadProgress || other.onUploadProgress,
+        onDownloadProgress: data.onDownloadProgress || other.onDownloadProgress,
+      });
+    } else {
+      // 向后兼容：data作为请求体
+      return instance({
+        method: 'delete',
+        baseURL: getURL(url).baseURL,
+        url: getURL(url).url,
+        headers: { ...other.headers },
+        data,
+        onUploadProgress: other.onUploadProgress,
+        onDownloadProgress: other.onDownloadProgress,
+      });
+    }
   },
 }
 
