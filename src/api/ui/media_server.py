@@ -603,6 +603,24 @@ async def import_media_items(
     sorted_ids = sorted(item_ids_list)
     unique_key = f"media-import-{hash(tuple(sorted_ids))}"
 
+    # 查询媒体项标题，用于生成可读的任务标题
+    from src.db.orm_models import MediaItem
+    from sqlalchemy import select, func
+    title_stmt = select(MediaItem.title, func.count(MediaItem.id).label('cnt')).where(
+        MediaItem.id.in_(item_ids_list)
+    ).group_by(MediaItem.title)
+    title_result = await session.execute(title_stmt)
+    title_groups = title_result.all()  # [(title, count), ...]
+
+    if len(title_groups) == 1:
+        name, cnt = title_groups[0]
+        task_title = f"导入媒体项: {name}" if cnt == 1 else f"导入媒体项: {name} ({cnt}集)"
+    elif len(title_groups) <= 3:
+        task_title = f"导入媒体项: {', '.join(t.title for t in title_groups)}"
+    else:
+        first_titles = ', '.join(t.title for t in title_groups[:2])
+        task_title = f"导入媒体项: {first_titles} 等{len(title_groups)}部"
+
     task_id, _ = await task_manager.submit_task(
         lambda session, progress_callback: tasks.import_media_items(
             item_ids_list,
@@ -616,7 +634,7 @@ async def import_media_items(
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager
         ),
-        title=f"导入媒体项: {len(item_ids_list)}个",
+        title=task_title,
         queue_type="download",
         unique_key=unique_key
     )
@@ -679,7 +697,7 @@ async def import_all_unimported_media_items(
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager
         ),
-        title=f"一键导入全部未导入: {len(item_ids_list)}个",
+        title=f"一键导入全部未导入: 共{len(item_ids_list)}个",
         queue_type="download",
         unique_key=unique_key
     )
