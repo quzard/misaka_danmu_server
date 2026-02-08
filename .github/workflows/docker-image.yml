@@ -60,7 +60,7 @@ jobs:
         run: |
           # 默认值
           SO_TAG="latest"      # 默认使用 latest 标签的 .so 文件
-          BUILD_ARM="true"     # 默认构建 ARM64
+          BUILD_ARM="false"     # 默认构建 ARM64
           EXTRA_TAGS=""        # 默认无额外标签
 
           # 根据触发事件设置参数
