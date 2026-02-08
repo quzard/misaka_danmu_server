@@ -384,7 +384,7 @@ async def webhook_search_and_dispatch_task(
             all_search_results = filtered_by_season
 
         timer.step_start("结果排序与匹配")
-        # 5. 使用与WebUI相同的智能匹配算法选择最佳匹配项
+        # 5. 使用加权总分制选择最佳匹配项
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
 
@@ -393,50 +393,100 @@ async def webhook_search_and_dispatch_task(
         for i, item in enumerate(all_search_results[:5]):
             logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
 
-        # 使用与WebUI相同的智能排序逻辑，优化年份权重
-        # 🔧 使用 effective_year（数据库年份优先）进行排序，而不是 webhook 传来的 year
-        # 🔧 使用 match_title（名称转换后的标题）进行匹配，而不是原始的 animeTitle
-        all_search_results.sort(
-            key=lambda item: (
-                # 1. 最高优先级：完全匹配的标题
-                10000 if item.title.strip() == match_title.strip() else 0,
-                # 2. 次高优先级：去除标点符号后的完全匹配
-                5000 if item.title.replace("：", ":").replace(" ", "").strip() == match_title.replace("：", ":").replace(" ", "").strip() else 0,
-                # 3. 第三优先级：高相似度匹配（98%以上）且标题长度差异不大
-                2000 if (fuzz.token_sort_ratio(match_title, item.title) > 98 and abs(len(item.title) - len(match_title)) <= 10) else 0,
-                # 4. 第四优先级：较高相似度匹配（95%以上）且标题长度差异不大
-                1000 if (fuzz.token_sort_ratio(match_title, item.title) > 95 and abs(len(item.title) - len(match_title)) <= 20) else 0,
-                # 5. 🔧 长期连载作品优先：标题完全匹配 + 搜索结果年份比 webhook 年份早 3 年以上
-                # 理由：长期连载的作品（如从2020年播到2025年），webhook 传来的是单集年份（2025），
-                # 而搜索结果中年份更早的版本（2020）更可能是用户想要的原版
-                800 if (
-                    item.title.strip() == match_title.strip() and
-                    effective_year is not None and
-                    item.year is not None and
-                    effective_year - item.year >= 3
-                ) else 0,
-                # 6. 年份匹配（使用 effective_year，优先使用数据库中的首播年份）
-                500 if effective_year is not None and item.year is not None and item.year == effective_year else 0,
-                # 7. 季度匹配（仅对电视剧）
-                100 if season is not None and mediaType == 'tv_series' and item.season == season else 0,
-                # 8. 一般相似度，但必须达到85%以上才考虑
-                fuzz.token_set_ratio(match_title, item.title) if fuzz.token_set_ratio(match_title, item.title) >= 85 else 0,
-                # 9. 惩罚标题长度差异大的结果
-                -abs(len(item.title) - len(match_title)),
-                # 10. 惩罚年份不匹配的结果（使用 effective_year）
-                -500 if effective_year is not None and item.year is not None and item.year != effective_year else 0,
-                # 11. 最后考虑源优先级
-                -provider_order.get(item.provider, 999)
-            ),
-            reverse=True # 按得分从高到低排序
-        )
+        # 🔧 查询库内已有源：搜索结果中哪些 provider+mediaId 已存在于 AnimeSource 表中
+        existing_source_keys = set()
+        if all_search_results:
+            for result in all_search_results:
+                stmt = (
+                    select(AnimeSource.id)
+                    .where(
+                        AnimeSource.providerName == result.provider,
+                        AnimeSource.mediaId == result.mediaId
+                    )
+                    .limit(1)
+                )
+                result_row = await session.execute(stmt)
+                if result_row.scalar_one_or_none() is not None:
+                    existing_source_keys.add(f"{result.provider}:{result.mediaId}")
+            if existing_source_keys:
+                logger.info(f"Webhook 任务: 发现 {len(existing_source_keys)} 个库内已有源: {existing_source_keys}")
 
-        # 添加排序后的调试日志
+        # 🔧 加权总分排序（替代旧的 tuple 字典序排序）
+        # 所有因素贡献到一个总分，避免 tuple 字典序导致后面的因素成为死代码
+        # 🔧 使用 effective_year（数据库年份优先）进行排序
+        # 🔧 使用 match_title（名称转换后的标题）进行匹配
+        normalized_match = match_title.replace("：", ":").replace(" ", "").strip()
+
+        def _compute_webhook_score(item):
+            """计算单个搜索结果的加权总分"""
+            score = 0
+            item_title_stripped = item.title.strip()
+            match_title_stripped = match_title.strip()
+
+            # 1. 完全匹配标题: +10000
+            title_exact = item_title_stripped == match_title_stripped
+            if title_exact:
+                score += 10000
+
+            # 2. 去标点完全匹配: +5000
+            normalized_item = item.title.replace("：", ":").replace(" ", "").strip()
+            if normalized_item == normalized_match:
+                score += 5000
+
+            # 3. 高相似度(>98%)且标题长度差异不大: +2000
+            token_sort = fuzz.token_sort_ratio(match_title, item.title)
+            len_diff = abs(len(item.title) - len(match_title))
+            if token_sort > 98 and len_diff <= 10:
+                score += 2000
+
+            # 4. 较高相似度(>95%)且标题长度差异不大: +1000
+            if token_sort > 95 and len_diff <= 20:
+                score += 1000
+
+            # 5. 长期连载作品优先: +800
+            if (title_exact and effective_year is not None and
+                    item.year is not None and effective_year - item.year >= 3):
+                score += 800
+
+            # 6. 年份匹配: +500
+            if effective_year is not None and item.year is not None and item.year == effective_year:
+                score += 500
+
+            # 7. 季度匹配: +100
+            if season is not None and mediaType == 'tv_series' and item.season == season:
+                score += 100
+
+            # 8. 一般相似度 (>=85%时计入实际分数 0~100)
+            token_set = fuzz.token_set_ratio(match_title, item.title)
+            if token_set >= 85:
+                score += token_set
+
+            # 9. 标题长度差异惩罚
+            score -= len_diff * 2
+
+            # 10. 年份不匹配惩罚: -500
+            if effective_year is not None and item.year is not None and item.year != effective_year:
+                score -= 500
+
+            # 11. 源优先级加分 (displayOrder 越小越好，order=1 → +500, order=20 → +25)
+            order = provider_order.get(item.provider, 999)
+            score += max(0, 525 - order * 25)
+
+            # 12. 🆕 库内已有源加分: +3000
+            source_key = f"{item.provider}:{item.mediaId}"
+            if source_key in existing_source_keys:
+                score += 3000
+
+            return score
+
+        all_search_results.sort(key=_compute_webhook_score, reverse=True)
+
+        # 添加排序后的调试日志（显示总分和库内已有状态）
         logger.info(f"Webhook 任务: 排序后的前5个结果 (effective_year={effective_year}, match_title='{match_title}'):")
         for i, item in enumerate(all_search_results[:5]):
+            item_score = _compute_webhook_score(item)
             title_match = "✓" if item.title.strip() == match_title.strip() else "✗"
             year_match = "✓" if effective_year is not None and item.year is not None and item.year == effective_year else ("✗" if effective_year is not None and item.year is not None else "-")
-            # 检查是否为长期连载作品（年份差>=3年）
             is_long_running = (
                 item.title.strip() == match_title.strip() and
                 effective_year is not None and
@@ -444,9 +494,12 @@ async def webhook_search_and_dispatch_task(
                 effective_year - item.year >= 3
             )
             long_running_mark = "📺" if is_long_running else ""
+            source_key = f"{item.provider}:{item.mediaId}"
+            in_library = "📚" if source_key in existing_source_keys else ""
             similarity = fuzz.token_set_ratio(match_title, item.title)
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}")
+            src_order = provider_order.get(item.provider, 999)
+            logger.info(f"  {i+1}. [{item_score}分] '{item.title}' (Provider: {item.provider}[#{src_order}], Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}{in_library}")
 
         # 评估所有候选项 (不限制数量)
         logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
@@ -563,12 +616,13 @@ async def webhook_search_and_dispatch_task(
                 success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
             raise TaskSuccess(success_message)
 
-        # 传统匹配: 优先查找精确标记源 (需验证类型匹配和标题相似度)
+        # 传统匹配: 优先查找精确标记源，其次查找库内已有源 (需验证类型匹配和标题相似度)
         favorited_match = None
+        existing_source_match = None  # 🆕 库内已有但未标记精确的源
         target_type = "movie" if mediaType == "movie" else "tv_series"
 
         for result in all_search_results:
-            # 查找是否有相同provider和mediaId的源被标记
+            # 查找是否有相同provider和mediaId的源存在于库中
             stmt = (
                 select(AnimeSource.isFavorited)
                 .where(
@@ -579,22 +633,32 @@ async def webhook_search_and_dispatch_task(
             )
             result_row = await session.execute(stmt)
             is_favorited = result_row.scalar_one_or_none()
-            if is_favorited:
-                # 验证类型匹配和标题相似度
-                # 🔧 使用 match_title（名称转换后的标题）进行相似度计算
+
+            if is_favorited is not None:
+                # 源存在于库中，验证类型匹配和标题相似度
                 type_matched = result.type == target_type
                 similarity = fuzz.token_set_ratio(match_title, result.title)
-                logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} "
-                           f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
 
-                # 必须满足：类型匹配 AND 相似度 >= 70%
-                if type_matched and similarity >= 70:
-                    favorited_match = result
-                    logger.info(f"Webhook 任务: 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
-                    break
-                else:
-                    logger.warning(f"Webhook 任务: 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
-                                 f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
+                if is_favorited:
+                    # 精确标记源（最高优先级）
+                    logger.info(f"Webhook 任务: 找到精确标记源: {result.provider} - {result.title} "
+                               f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
+                    if type_matched and similarity >= 70:
+                        favorited_match = result
+                        logger.info(f"Webhook 任务: 精确标记源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
+                        break
+                    else:
+                        logger.warning(f"Webhook 任务: 精确标记源验证失败 (类型匹配: {'✓' if type_matched else '✗'}, "
+                                     f"相似度: {similarity}% {'<' if similarity < 70 else '>='} 70%)，跳过")
+                elif existing_source_match is None:
+                    # 🆕 库内已有源（次优先级，只记录第一个通过验证的）
+                    logger.info(f"Webhook 任务: 找到库内已有源: {result.provider} - {result.title} "
+                               f"(类型: {result.type}, 类型匹配: {'✓' if type_matched else '✗'}, 相似度: {similarity}%)")
+                    if type_matched and similarity >= 70:
+                        existing_source_match = result
+                        logger.info(f"Webhook 任务: 库内已有源验证通过 (类型匹配: ✓, 相似度: {similarity}% >= 70%)")
+                    else:
+                        logger.info(f"Webhook 任务: 库内已有源验证失败，继续查找")
 
         # 检查是否启用顺延机制
         fallback_enabled = (await config_manager.get("webhookFallbackEnabled", "false")).lower() == 'true'
@@ -602,6 +666,10 @@ async def webhook_search_and_dispatch_task(
         if favorited_match:
             best_match = favorited_match
             logger.info(f"Webhook 任务: 使用精确标记源: {best_match.provider} - {best_match.title}")
+        elif existing_source_match:
+            # 🆕 使用库内已有源（次优先级）
+            best_match = existing_source_match
+            logger.info(f"Webhook 任务: 使用库内已有源: {best_match.provider} - {best_match.title}")
         elif not fallback_enabled:
             # 顺延机制关闭，验证第一个结果是否满足条件
             if all_search_results:
