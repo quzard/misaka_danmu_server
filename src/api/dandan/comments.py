@@ -109,7 +109,8 @@ async def get_external_comments_from_url(
     chConvert: int = Query(0, description="中文简繁转换。0-不转换，1-转换为简体，2-转换为繁体。"),
     token: str = Depends(get_token_from_path),
     session: AsyncSession = Depends(get_db_session),
-    manager: ScraperManager = Depends(get_scraper_manager)
+    manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """
     从外部URL获取弹幕，并转换为dandanplay格式。
@@ -144,22 +145,23 @@ async def get_external_comments_from_url(
         # 缓存结果5小时 (18000秒)
         await crud.set_cache(session, cache_key, comments_data, 18000)
 
-    # 处理简繁转换（使用客户端参数）
-    if chConvert in [1, 2] and comments_data:
-        try:
-            converter = None
-            if chConvert == 1:
-                converter = OpenCC('t2s')  # 繁转简
-            elif chConvert == 2:
-                converter = OpenCC('s2t')  # 简转繁
+    # 处理简繁转换（根据优先级决定使用服务端配置还是播放器参数）
+    try:
+        server_ch = int(await config_manager.get('danmakuChConvert', '0'))
+        priority = await config_manager.get('danmakuChConvertPriority', 'player')
+        if priority == 'server':
+            final_convert = server_ch
+        else:
+            final_convert = chConvert if chConvert != 0 else server_ch
 
-            if converter:
-                for comment in comments_data:
-                    if 'm' in comment and comment['m']:
-                        comment['m'] = converter.convert(comment['m'])
-                logger.debug(f"外部弹幕简繁转换 (url: {url}): 模式={chConvert}, 处理 {len(comments_data)} 条")
-        except Exception as e:
-            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
+        if final_convert in [1, 2] and comments_data:
+            converter = OpenCC('t2s') if final_convert == 1 else OpenCC('s2t')
+            for comment in comments_data:
+                if 'm' in comment and comment['m']:
+                    comment['m'] = converter.convert(comment['m'])
+            logger.debug(f"外部弹幕简繁转换 (url: {url}): 最终模式={final_convert}(优先级={priority}, 播放器={chConvert}, 服务端={server_ch}), 处理 {len(comments_data)} 条")
+    except Exception as e:
+        logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # 修正：使用统一的弹幕处理函数，以确保输出格式符合 dandanplay 客户端规范
     processed_comments = process_comments_for_dandanplay(comments_data)
@@ -1121,22 +1123,23 @@ async def get_comments_for_dandan(
     except Exception as e:
         logger.error(f"应用随机颜色失败: {e}", exc_info=True)
 
-    # 处理简繁转换（使用客户端参数）
-    if chConvert in [1, 2] and comments_data:
-        try:
-            converter = None
-            if chConvert == 1:
-                converter = OpenCC('t2s')  # 繁转简
-            elif chConvert == 2:
-                converter = OpenCC('s2t')  # 简转繁
+    # 处理简繁转换（根据优先级决定使用服务端配置还是播放器参数）
+    try:
+        server_ch = int(await config_manager.get('danmakuChConvert', '0'))
+        priority = await config_manager.get('danmakuChConvertPriority', 'player')
+        if priority == 'server':
+            final_convert = server_ch
+        else:
+            final_convert = chConvert if chConvert != 0 else server_ch
 
-            if converter:
-                for comment in comments_data:
-                    if 'm' in comment and comment['m']:
-                        comment['m'] = converter.convert(comment['m'])
-                logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 模式={chConvert}, 处理 {len(comments_data)} 条")
-        except Exception as e:
-            logger.error(f"应用简繁转换失败: {e}", exc_info=True)
+        if final_convert in [1, 2] and comments_data:
+            converter = OpenCC('t2s') if final_convert == 1 else OpenCC('s2t')
+            for comment in comments_data:
+                if 'm' in comment and comment['m']:
+                    comment['m'] = converter.convert(comment['m'])
+            logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 最终模式={final_convert}(优先级={priority}, 播放器={chConvert}, 服务端={server_ch}), 处理 {len(comments_data)} 条")
+    except Exception as e:
+        logger.error(f"应用简繁转换失败: {e}", exc_info=True)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")

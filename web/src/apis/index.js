@@ -274,6 +274,18 @@ export const getDanmakuMergeOutputEnabled = () =>
 /** 弹幕输出控制 合并输出开关 */
 export const setDanmakuMergeOutputEnabled = data =>
   api.put('/api/ui/config/danmakuMergeOutputEnabled', data)
+/** 弹幕输出配置 简繁转换 */
+export const getDanmakuChConvert = () =>
+  api.get('/api/ui/config/danmakuChConvert')
+/** 弹幕输出配置 简繁转换 */
+export const setDanmakuChConvert = data =>
+  api.put('/api/ui/config/danmakuChConvert', data)
+/** 弹幕输出配置 简繁转换优先级 */
+export const getDanmakuChConvertPriority = () =>
+  api.get('/api/ui/config/danmakuChConvertPriority')
+/** 弹幕输出配置 简繁转换优先级 */
+export const setDanmakuChConvertPriority = data =>
+  api.put('/api/ui/config/danmakuChConvertPriority', data)
 /** 弹幕输出配置 随机颜色模式 */
 export const getDanmakuRandomColorMode = () =>
   api.get('/api/ui/config/danmakuRandomColorMode')
