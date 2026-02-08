@@ -78,6 +78,8 @@ from .media_server import (
     delete_media_items_batch,
     mark_media_items_imported,
     clear_media_items_by_server,
+    get_unimported_item_ids,
+    get_unimported_count,
 )
 
 # Scraper模块

@@ -753,6 +753,12 @@ export const batchDeleteMediaItems = (payload) => api.post('/api/ui/media-items/
 /** 导入媒体项 */
 export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)
 
+/** 获取未导入媒体项数量 */
+export const getUnimportedCount = (serverId, mediaType) => api.get('/api/ui/media-items/unimported-count', { server_id: serverId, media_type: mediaType })
+
+/** 一键导入全部未导入的媒体项 */
+export const importAllUnimported = (data) => api.post('/api/ui/media-items/import-all-unimported', data)
+
 // ==================== 本地弹幕扫描 ====================
 
 /** 浏览本地目录 */
