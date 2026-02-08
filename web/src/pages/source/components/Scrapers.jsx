@@ -2656,7 +2656,9 @@ export const Scrapers = () => {
                   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
                 }}
               >
-                {changelogModal.content}
+                {changelogModal.content
+                  ? changelogModal.content.replace(/\r\n/g, '\n').replace(/\n(?!\n)/g, '\n\n')
+                  : ''}
               </ReactMarkdown>
             </div>
           ) : (

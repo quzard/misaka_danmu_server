@@ -622,6 +622,21 @@ async def _migrate_docker_image_name_v1(conn: AsyncConnection):
         logger.info(f"dockerImageName 当前值为 '{current_value}'，无需修正")
 
 
+async def _drop_force_scrape_column_v1(conn: AsyncConnection, db_type: str):
+    """删除 scheduled_tasks 表中已废弃的 force_scrape 列（已被 task_config JSON 列取代）。"""
+    try:
+        await conn.execute(text("SELECT force_scrape FROM scheduled_tasks LIMIT 1"))
+    except Exception:
+        logger.info("force_scrape 列不存在，无需删除")
+        return
+
+    if db_type == "mysql":
+        await conn.execute(text("ALTER TABLE `scheduled_tasks` DROP COLUMN `force_scrape`"))
+    else:
+        await conn.execute(text('ALTER TABLE "scheduled_tasks" DROP COLUMN "force_scrape"'))
+    logger.info("已删除 scheduled_tasks 表的 force_scrape 列")
+
+
 async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
     """
     按顺序执行所有数据库架构迁移。
@@ -640,6 +655,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("rename_duplicate_idx_created_at_v1", _rename_duplicate_idx_created_at, (db_type,)),  # 修复重复索引名
         ("fix_title_recognition_id_autoincrement_v1", _fix_title_recognition_id_autoincrement, ()),  # 修复 title_recognition.id 自增
         ("migrate_docker_image_name_v1", _migrate_docker_image_name_v1, ()),  # 修正 dockerImageName 默认值
+        ("drop_force_scrape_column_v1", _drop_force_scrape_column_v1, (db_type,)),  # 删除已废弃的 force_scrape 列
     ]
 
     for migration_id, migration_func, args in migrations:

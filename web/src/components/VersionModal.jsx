@@ -10,6 +10,18 @@ import ReactMarkdown from 'react-markdown'
 
 const { Text, Title } = Typography
 
+/**
+ * 预处理 GitHub Release 的 changelog 文本，使 ReactMarkdown 能正确渲染换行。
+ * GitHub Release body 使用 \r\n 单换行，Markdown 中单换行不会产生实际换行效果，
+ * 需要转换为双换行（段落分隔）才能正确显示。
+ */
+const preprocessChangelog = (text) => {
+  if (!text) return text
+  return text
+    .replace(/\r\n/g, '\n')       // 统一换行符
+    .replace(/\n(?!\n)/g, '\n\n') // 单换行 → 双换行（保留已有的双换行）
+}
+
 // Markdown 渲染样式
 const markdownComponents = {
   a: ({ href, children }) => (
@@ -198,7 +210,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
         <Title level={5}>更新日志</Title>
         <div className="text-sm">
           <ReactMarkdown components={markdownComponents}>
-            {updateInfo.changelog}
+            {preprocessChangelog(updateInfo.changelog)}
           </ReactMarkdown>
         </div>
       </div>

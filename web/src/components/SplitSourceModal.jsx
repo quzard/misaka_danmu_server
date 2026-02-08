@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Modal, Select, Checkbox, Form, Input, InputNumber, Radio, Spin, Empty, Button, List } from 'antd'
 import { InfoCircleOutlined, ScissorOutlined } from '@ant-design/icons'
 import { getSourceEpisodesForSplit, splitSource, getAnimeLibrary } from '../apis'
@@ -13,6 +13,9 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
   const [selectedSourceId, setSelectedSourceId] = useState(null)
   const [episodes, setEpisodes] = useState([])
   const [selectedEpisodeIds, setSelectedEpisodeIds] = useState([])
+  const lastClickedIndexRef = useRef(null) // Shift 多选：记录上次点击的索引
+  const [rangeStart, setRangeStart] = useState(null) // 区间选择：起始集数
+  const [rangeEnd, setRangeEnd] = useState(null) // 区间选择：结束集数
   const [targetType, setTargetType] = useState('new')
   const [searchKeyword, setSearchKeyword] = useState('')
   const [libraryList, setLibraryList] = useState([])
@@ -25,6 +28,9 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
       setSelectedSourceId(null)
       setEpisodes([])
       setSelectedEpisodeIds([])
+      lastClickedIndexRef.current = null
+      setRangeStart(null)
+      setRangeEnd(null)
       setTargetType('new')
       setSearchKeyword('')
       setLibraryList([])
@@ -134,6 +140,55 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
     }
   }
 
+  // 区间批量选择
+  const handleRangeSelect = () => {
+    if (rangeStart == null || rangeEnd == null) {
+      messageApi.warning('请输入起始和结束集数')
+      return
+    }
+    const min = Math.min(rangeStart, rangeEnd)
+    const max = Math.max(rangeStart, rangeEnd)
+    const rangeIds = episodes
+      .filter(ep => ep.episodeIndex >= min && ep.episodeIndex <= max)
+      .map(ep => ep.episodeId)
+    if (rangeIds.length === 0) {
+      messageApi.warning('该范围内没有匹配的分集')
+      return
+    }
+    setSelectedEpisodeIds(prev => {
+      const newSet = new Set(prev)
+      rangeIds.forEach(id => newSet.add(id))
+      return [...newSet]
+    })
+  }
+
+  // Shift 多选处理
+  const handleEpisodeClick = (episodeId, index, e) => {
+    e.preventDefault() // 阻止 Checkbox 默认行为，由我们手动控制
+    const isSelected = selectedEpisodeIds.includes(episodeId)
+
+    if (e.shiftKey && lastClickedIndexRef.current !== null) {
+      // Shift + 点击：选中范围内的所有项
+      const start = Math.min(lastClickedIndexRef.current, index)
+      const end = Math.max(lastClickedIndexRef.current, index)
+      const rangeIds = episodes.slice(start, end + 1).map(ep => ep.episodeId)
+      // 将范围内的 id 合并到已选列表（去重）
+      setSelectedEpisodeIds(prev => {
+        const newSet = new Set(prev)
+        rangeIds.forEach(id => newSet.add(id))
+        return [...newSet]
+      })
+    } else {
+      // 普通点击：切换单个选中状态
+      if (isSelected) {
+        setSelectedEpisodeIds(prev => prev.filter(id => id !== episodeId))
+      } else {
+        setSelectedEpisodeIds(prev => [...prev, episodeId])
+      }
+    }
+    lastClickedIndexRef.current = index
+  }
+
   return (
     <Modal
       title={<><ScissorOutlined className="mr-2" />拆分数据源</>}
@@ -183,25 +238,55 @@ export const SplitSourceModal = ({ open, animeId, animeTitle, sources, onCancel,
               </Button>
             )}
           </div>
+          {/* 区间选择 */}
+          {episodes.length > 0 && (
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <span className="text-sm shrink-0" style={{ color: 'var(--color-text)' }}>区间选择：</span>
+              <span className="text-sm" style={{ color: 'var(--color-text)' }}>第</span>
+              <InputNumber
+                size="small"
+                min={1}
+                placeholder="起始"
+                value={rangeStart}
+                onChange={setRangeStart}
+                style={{ width: 70 }}
+              />
+              <span className="text-sm" style={{ color: 'var(--color-text)' }}>~</span>
+              <InputNumber
+                size="small"
+                min={1}
+                placeholder="结束"
+                value={rangeEnd}
+                onChange={setRangeEnd}
+                style={{ width: 70 }}
+              />
+              <span className="text-sm" style={{ color: 'var(--color-text)' }}>集</span>
+              <Button size="small" type="primary" onClick={handleRangeSelect}>
+                选择
+              </Button>
+            </div>
+          )}
           {loading ? (
             <div className="text-center py-4"><Spin /></div>
           ) : episodes.length === 0 ? (
             <Empty description={selectedSourceId ? "该数据源暂无分集" : "请先选择数据源"} />
           ) : (
             <div className="max-h-48 overflow-y-auto border rounded p-2 dark:border-gray-600">
-              <Checkbox.Group
-                value={selectedEpisodeIds}
-                onChange={setSelectedEpisodeIds}
-                className="flex flex-col gap-1"
-              >
-                {episodes.map(ep => (
-                  <Checkbox key={ep.episodeId} value={ep.episodeId} className="!ml-0">
+              <div className="flex flex-col gap-1">
+                {episodes.map((ep, index) => (
+                  <Checkbox
+                    key={ep.episodeId}
+                    checked={selectedEpisodeIds.includes(ep.episodeId)}
+                    className="!ml-0"
+                    onClick={(e) => handleEpisodeClick(ep.episodeId, index, e)}
+                    onChange={() => {}} // 由 onClick 控制，这里阻止默认行为
+                  >
                     <span style={{ color: 'var(--color-text)' }}>
                       第{ep.episodeIndex}集 - {ep.title} ({ep.commentCount}条弹幕)
                     </span>
                   </Checkbox>
                 ))}
-              </Checkbox.Group>
+              </div>
             </div>
           )}
           {selectedEpisodeIds.length > 0 && (

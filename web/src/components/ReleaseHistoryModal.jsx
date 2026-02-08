@@ -7,6 +7,16 @@ import ReactMarkdown from 'react-markdown'
 
 const { Text } = Typography
 
+/**
+ * 预处理 GitHub Release 的 changelog 文本，使 ReactMarkdown 能正确渲染换行。
+ */
+const preprocessChangelog = (text) => {
+  if (!text) return text
+  return text
+    .replace(/\r\n/g, '\n')       // 统一换行符
+    .replace(/\n(?!\n)/g, '\n\n') // 单换行 → 双换行（保留已有的双换行）
+}
+
 // Markdown 渲染样式
 const markdownComponents = {
   // 链接
@@ -119,7 +129,7 @@ export const ReleaseHistoryModal = ({ open, onClose }) => {
                       <div className="max-h-[300px] overflow-y-auto">
                         <div className="text-sm bg-gray-50 dark:bg-gray-800 p-3 rounded">
                           <ReactMarkdown components={markdownComponents}>
-                            {release.changelog || '暂无更新说明'}
+                            {preprocessChangelog(release.changelog) || '暂无更新说明'}
                           </ReactMarkdown>
                         </div>
                         {release.releaseUrl && (

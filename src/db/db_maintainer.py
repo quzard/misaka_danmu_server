@@ -152,8 +152,13 @@ def _build_add_column_sql(table_name: str, column, db_type: str) -> str:
     null_str = "NULL" if nullable else "NOT NULL"
     
     # 处理默认值
+    # MySQL strict mode 下，TEXT/BLOB/JSON/GEOMETRY 类型不允许设置 DEFAULT 值
+    # 这些类型的默认值由 SQLAlchemy ORM 层（Python 侧）处理即可
     default_str = ""
-    if column.default is not None:
+    type_str_upper = str(type_str).upper()
+    is_lob_type = any(t in type_str_upper for t in ('TEXT', 'BLOB', 'JSON', 'GEOMETRY'))
+
+    if column.default is not None and not (db_type == "mysql" and is_lob_type):
         if hasattr(column.default, 'arg'):
             default_val = column.default.arg
             if callable(default_val):

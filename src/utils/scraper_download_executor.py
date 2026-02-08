@@ -601,7 +601,18 @@ class ScraperDownloadExecutor:
         # 如果没有需要下载的文件
         if need_download_count == 0:
             self._log("所有弹幕源都是最新的，无需下载")
+            self.task.need_restart = False
             self.task.status = TaskStatus.COMPLETED
+
+            # 等待 SSE 发送最新的进度消息
+            await asyncio.sleep(1.0)
+
+            # 设置 restart_pending 让 SSE 发送 done 消息并退出
+            self.task.restart_pending = True
+            logger.info(f"[任务 {self.task.task_id}] 所有弹幕源已是最新，设置 restart_pending=True，等待 SSE 发送 done 消息")
+
+            # 等待 SSE 发送 done 消息
+            await asyncio.sleep(2.0)
             return
 
         # 创建临时下载目录
@@ -663,7 +674,18 @@ class ScraperDownloadExecutor:
 
             if download_count == 0:
                 self._log("没有成功下载的弹幕源", "warning")
+                self.task.need_restart = False
                 self.task.status = TaskStatus.COMPLETED
+
+                # 等待 SSE 发送最新的进度消息
+                await asyncio.sleep(1.0)
+
+                # 设置 restart_pending 让 SSE 发送 done 消息并退出
+                self.task.restart_pending = True
+                logger.info(f"[任务 {self.task.task_id}] 无成功下载，设置 restart_pending=True，等待 SSE 发送 done 消息")
+
+                # 等待 SSE 发送 done 消息
+                await asyncio.sleep(2.0)
                 return
 
             # 判断是否是首次下载（本地没有任何弹幕源）
@@ -838,7 +860,18 @@ class ScraperDownloadExecutor:
                     self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
                     logger.info(f"用户 '{self.current_user.username}' 更新了 {deploy_count} 个弹幕源，需要手动重启容器")
 
+            self.task.need_restart = False
             self.task.status = TaskStatus.COMPLETED
+
+            # 等待 SSE 发送最新的进度消息
+            await asyncio.sleep(1.0)
+
+            # 设置 restart_pending 让 SSE 发送 done 消息并退出
+            self.task.restart_pending = True
+            logger.info(f"[任务 {self.task.task_id}] 任务完成，设置 restart_pending=True，等待 SSE 发送 done 消息")
+
+            # 等待 SSE 发送 done 消息
+            await asyncio.sleep(2.0)
 
         finally:
             # 清理临时下载目录（如果还存在的话）

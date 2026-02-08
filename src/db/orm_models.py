@@ -252,6 +252,7 @@ class ScheduledTask(Base):
     jobType: Mapped[str] = mapped_column("job_type", String(500))
     cronExpression: Mapped[str] = mapped_column("cron_expression", String(500))
     isEnabled: Mapped[bool] = mapped_column("is_enabled", Boolean, default=True)
+    taskConfig: Mapped[Optional[str]] = mapped_column("task_config", TEXT, default="{}")  # JSON 格式的任务实例级配置
     lastRunAt: Mapped[Optional[datetime]] = mapped_column("last_run_at", NaiveDateTime)
     nextRunAt: Mapped[Optional[datetime]] = mapped_column("next_run_at", NaiveDateTime)
 
