@@ -244,6 +244,12 @@ CONFIG_SCHEMA = [
                 "type": "boolean",
                 "description": "搜索时自动将非中文名称转换为中文，提高在中文弹幕源中的搜索准确率。元数据源都失败时，若启用了AI名称转换则使用AI兜底。",
             },
+            {
+                "key": "nameConversionT2SEnabled",
+                "label": "繁体自动转简体",
+                "type": "boolean",
+                "description": "搜索时自动将繁体中文标题转换为简体，提高在简体弹幕源中的搜索匹配率。此选项独立于上方的名称转换开关。",
+            },
         ],
         "customComponent": {
             "type": "SortablePriorityList",

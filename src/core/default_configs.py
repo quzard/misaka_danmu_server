@@ -150,6 +150,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiCacheTtl': ('3600', 'AI缓存过期时间(秒)。默认3600秒(1小时)。'),
             # 名称转换功能配置
             'nameConversionEnabled': ('false', '是否启用名称转换功能。启用后，搜索时自动将非中文名称转换为中文。'),
+            'nameConversionT2SEnabled': ('false', '是否启用繁体自动转简体。启用后，搜索时自动将繁体中文标题转换为简体。'),
             'nameConversionSourcePriority': ('[{"key":"bangumi","enabled":true},{"key":"tmdb","enabled":true},{"key":"tvdb","enabled":true},{"key":"douban","enabled":true},{"key":"imdb","enabled":true}]', '名称转换元数据源优先级配置（JSON格式）'),
         })
 
