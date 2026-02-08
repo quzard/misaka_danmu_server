@@ -5,6 +5,7 @@ import secrets
 import httpx
 import logging
 import json
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, status
@@ -30,6 +31,7 @@ from src.api.dandan import dandan_router
 from src.ai import AIMatcherManager
 from src.ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
 from src.rate_limiter import RateLimiter
+from src.rate_limiter_disabled import RateLimiter as DisabledRateLimiter
 from src._version import APP_VERSION
 from src import security
     
@@ -190,7 +192,12 @@ async def lifespan(app: FastAPI):
         }
 
     # 初始化关键组件（同步执行，确保启动正常）
-    app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
+    disable_rate_limiter = os.getenv("DISABLE_RATE_LIMITER", "").strip().lower() in {"1", "true", "yes", "on"}
+    if disable_rate_limiter:
+        logger.warning("检测到 DISABLE_RATE_LIMITER 已开启，当前运行在无流控模式。")
+        app.state.rate_limiter = DisabledRateLimiter(session_factory, app.state.scraper_manager)
+    else:
+        app.state.rate_limiter = RateLimiter(session_factory, app.state.scraper_manager)
     app.include_router(app.state.metadata_manager.router, prefix="/api/metadata")
 
     # Add bangumi specific routes with /bangumi prefix
