@@ -448,9 +448,9 @@ async def webhook_search_and_dispatch_task(
                     item.year is not None and effective_year - item.year >= 3):
                 score += 800
 
-            # 6. 年份匹配: +500
+            # 6. 年份匹配: +200（webhook 年份经常不准确，降低权重）
             if effective_year is not None and item.year is not None and item.year == effective_year:
-                score += 500
+                score += 200
 
             # 7. 季度匹配: +100
             if season is not None and mediaType == 'tv_series' and item.season == season:
@@ -464,13 +464,13 @@ async def webhook_search_and_dispatch_task(
             # 9. 标题长度差异惩罚
             score -= len_diff * 2
 
-            # 10. 年份不匹配惩罚: -500
+            # 10. 年份不匹配惩罚: -200（webhook 年份经常不准确，降低权重）
             if effective_year is not None and item.year is not None and item.year != effective_year:
-                score -= 500
+                score -= 200
 
-            # 11. 源优先级加分 (displayOrder 越小越好，order=1 → +500, order=20 → +25)
+            # 11. 源优先级加分 (displayOrder 越小越好，order=1 → +940, order=2 → +880, 相邻差60)
             order = provider_order.get(item.provider, 999)
-            score += max(0, 525 - order * 25)
+            score += max(0, 1000 - order * 60)
 
             # 12. 🆕 库内已有源加分: +3000
             source_key = f"{item.provider}:{item.mediaId}"
