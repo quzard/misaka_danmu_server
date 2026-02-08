@@ -12,6 +12,11 @@ from typing import Optional, Tuple, List, TYPE_CHECKING
 from src.tasks import is_chinese_title
 from src.db import models, ConfigManager
 
+try:
+    from opencc import OpenCC
+except ImportError:
+    OpenCC = None
+
 if TYPE_CHECKING:
     from .metadata_manager import MetadataSourceManager
     from src.ai import AIMatcherManager
@@ -41,13 +46,31 @@ async def convert_to_chinese_title(
     """
     # 检查是否启用名称转换
     name_conversion_enabled_str = await config_manager.get("nameConversionEnabled", "false")
-    logger.info(f"名称转换配置检查: nameConversionEnabled='{name_conversion_enabled_str}'")
-    if name_conversion_enabled_str.lower() != "true":
-        logger.info(f"○ 名称转换功能未启用，跳过: '{title}'")
-        return title, False
-    
-    # 如果已经是中文标题，无需转换
+    name_conversion_enabled = name_conversion_enabled_str.lower() == "true"
+
+    # 检查繁体转简体开关（独立于名称转换开关）
+    t2s_enabled_str = await config_manager.get("nameConversionT2SEnabled", "false")
+    t2s_enabled = t2s_enabled_str.lower() == "true"
+
+    logger.info(f"名称转换配置检查: nameConversionEnabled='{name_conversion_enabled_str}', t2sEnabled='{t2s_enabled_str}'")
+
+    # 如果已经是中文标题
     if is_chinese_title(title):
+        # 检查繁体转简体
+        if t2s_enabled and OpenCC:
+            try:
+                converter = OpenCC('t2s')
+                converted = converter.convert(title)
+                if converted != title:
+                    logger.info(f"✓ 繁体转简体: '{title}' → '{converted}'")
+                    return converted, True
+            except Exception as e:
+                logger.warning(f"繁体转简体失败: {e}")
+        return title, False
+
+    # 非中文标题，检查名称转换开关
+    if not name_conversion_enabled:
+        logger.info(f"○ 名称转换功能未启用，跳过: '{title}'")
         return title, False
     
     logger.info(f"检测到非中文标题: '{title}'，尝试名称转换...")

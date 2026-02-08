@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ColorPicker, InputNumber, Select, Tag, Switch, Input, Tooltip } from 'antd'
+import { Button, Card, ColorPicker, InputNumber, Select, Segmented, Tag, Switch, Input, Tooltip } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import {
   getDanmuOutputTotal,
   setDanmuOutputTotal,
   getDanmakuMergeOutputEnabled,
   setDanmakuMergeOutputEnabled,
+  getDanmakuChConvert,
+  setDanmakuChConvert,
+  getDanmakuChConvertPriority,
+  setDanmakuChConvertPriority,
   getDanmakuRandomColorMode,
   setDanmakuRandomColorMode,
   getDanmakuRandomColorPalette,
@@ -78,19 +82,23 @@ export const OutputManage = () => {
   const [blacklistEnabled, setBlacklistEnabled] = useState(false)
   const [blacklistPatterns, setBlacklistPatterns] = useState('')
   const [blacklistSaveLoading, setBlacklistSaveLoading] = useState(false)
+  const [chConvert, setChConvert] = useState('0')
+  const [chConvertPriority, setChConvertPriority] = useState('player')
 
   const messageApi = useMessage()
 
   const getConfig = async () => {
     setLoading(true)
     try {
-      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes] = await Promise.all([
+      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes, chConvertRes, chConvertPriorityRes] = await Promise.all([
         getDanmuOutputTotal(),
         getDanmakuMergeOutputEnabled(),
         getDanmakuRandomColorMode(),
         getDanmakuRandomColorPalette(),
         getDanmakuBlacklistEnabled(),
         getDanmakuBlacklistPatterns(),
+        getDanmakuChConvert(),
+        getDanmakuChConvertPriority(),
       ])
       setLimit(limitRes.data?.value ?? '-1')
       setMergeEnabled(mergeEnabledRes.data?.value === 'true')
@@ -98,6 +106,8 @@ export const OutputManage = () => {
       setPalette(parsePaletteFromServer(colorPaletteRes.data?.value))
       setBlacklistEnabled(blacklistEnabledRes.data?.value === 'true')
       setBlacklistPatterns(blacklistPatternsRes.data?.value || '')
+      setChConvert(chConvertRes.data?.value || '0')
+      setChConvertPriority(chConvertPriorityRes.data?.value || 'player')
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -112,6 +122,8 @@ export const OutputManage = () => {
       await Promise.all([
         setDanmuOutputTotal({ value: `${limit}` }),
         setDanmakuMergeOutputEnabled({ value: mergeEnabled ? 'true' : 'false' }),
+        setDanmakuChConvert({ value: chConvert }),
+        setDanmakuChConvertPriority({ value: chConvertPriority }),
       ])
       messageApi.success('弹幕输出配置已保存')
     } catch (e) {
@@ -199,6 +211,45 @@ export const OutputManage = () => {
           <div className="text-sm text-gray-600">
             设置弹幕 API 返回的最大数量。-1 表示无限制。为防止客户端卡顿，建议设置 1000-5000。
             当弹幕总数超过限制时，系统按时间段均匀采样，确保弹幕在视频时长中分布均匀。
+          </div>
+        </div>
+        <div className="my-4">
+          <div className="flex items-center gap-4 mb-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span>简繁转换</span>
+              <Select
+                value={chConvert}
+                style={{ width: 150 }}
+                onChange={setChConvert}
+                options={[
+                  { label: '不转换', value: '0' },
+                  { label: '转换为简体', value: '1' },
+                  { label: '转换为繁体', value: '2' },
+                ]}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span>优先级</span>
+              <Segmented
+                value={chConvertPriority}
+                onChange={setChConvertPriority}
+                options={[
+                  { label: '服务端优先', value: 'server' },
+                  { label: '播放器优先', value: 'player' },
+                ]}
+              />
+              <Tooltip title={
+                <div>
+                  <div><b>服务端优先</b>：始终使用此处配置，忽略播放器传入的参数</div>
+                  <div><b>播放器优先</b>：播放器明确指定转换模式时覆盖此处配置；未指定时使用此处配置作为默认值</div>
+                </div>
+              }>
+                <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+              </Tooltip>
+            </div>
+          </div>
+          <div className="text-sm text-gray-600">
+            控制弹幕输出时的简繁体转换行为。大多数播放器默认不指定转换模式，此时服务端配置生效。
           </div>
         </div>
         <div className="flex items-center justify-end gap-3">

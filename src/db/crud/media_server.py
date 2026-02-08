@@ -308,7 +308,8 @@ async def get_media_works(
             MI.createdAt.label('createdAt'),
             MI.updatedAt.label('updatedAt'),
             literal(0).label('seasonCount'),
-            literal(0).label('episodeCount')
+            literal(0).label('episodeCount'),
+            case((MI.isImported == True, 1), else_=0).label('importedCount')
         ).where(*build_movie_conditions())
         queries.append(movie_query)
 
@@ -330,7 +331,8 @@ async def get_media_works(
             func.max(MI.createdAt).label('createdAt'),
             func.max(MI.updatedAt).label('updatedAt'),
             func.count(func.distinct(MI.season)).label('seasonCount'),
-            func.count(MI.id).label('episodeCount')
+            func.count(MI.id).label('episodeCount'),
+            func.sum(case((MI.isImported == True, 1), else_=0)).label('importedCount')
         ).where(*build_tv_conditions()).group_by(MI.title, MI.serverId)
         queries.append(tv_query)
 
@@ -373,6 +375,7 @@ async def get_media_works(
         else:
             work["seasonCount"] = row.seasonCount
             work["episodeCount"] = row.episodeCount
+            work["importedCount"] = int(row.importedCount or 0)
         paginated_works.append(work)
 
     # ============================================================
@@ -385,12 +388,13 @@ async def get_media_works(
         server_ids = set(w['serverId'] for w in tv_shows_in_page)
         titles = [w['title'] for w in tv_shows_in_page]
 
-        # 一次性查询所有电视剧的季度信息
+        # 一次性查询所有电视剧的季度信息（含导入状态统计）
         seasons_stmt = select(
             MI.title,
             MI.serverId,
             MI.season,
             func.count(MI.id).label('episodeCount'),
+            func.sum(case((MI.isImported == True, 1), else_=0)).label('importedCount'),
             func.min(MI.year).label('year'),
             func.min(MI.posterUrl).label('posterUrl')
         ).where(
@@ -424,6 +428,7 @@ async def get_media_works(
             seasons_map[key].append({
                 "season": s.season,
                 "episodeCount": s.episodeCount,
+                "importedCount": int(s.importedCount or 0),
                 "year": s.year,
                 "posterUrl": s.posterUrl
             })
@@ -679,6 +684,38 @@ async def mark_media_items_imported(session: AsyncSession, item_ids: List[int]) 
     result = await session.execute(stmt)
     await session.flush()
     return result.rowcount
+
+
+async def get_unimported_item_ids(
+    session: AsyncSession,
+    server_id: int,
+    media_type: Optional[str] = None
+) -> List[int]:
+    """获取指定服务器下所有未导入的媒体项ID"""
+    stmt = select(orm_models.MediaItem.id).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.isImported == False
+    )
+    if media_type is not None:
+        stmt = stmt.where(orm_models.MediaItem.mediaType == media_type)
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]
+
+
+async def get_unimported_count(
+    session: AsyncSession,
+    server_id: int,
+    media_type: Optional[str] = None
+) -> int:
+    """获取指定服务器下未导入的媒体项数量"""
+    stmt = select(func.count(orm_models.MediaItem.id)).where(
+        orm_models.MediaItem.serverId == server_id,
+        orm_models.MediaItem.isImported == False
+    )
+    if media_type is not None:
+        stmt = stmt.where(orm_models.MediaItem.mediaType == media_type)
+    result = await session.execute(stmt)
+    return result.scalar_one()
 
 
 async def clear_media_items_by_server(session: AsyncSession, server_id: int) -> int:

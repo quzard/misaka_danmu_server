@@ -102,11 +102,13 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
           isGroup: true,
           seasonCount: work.seasonCount,
           episodeCount: work.episodeCount,
+          importedCount: work.importedCount,
           children: seasons.map(s => ({
             key: `season-${work.title}-S${s.season}`,
             title: `第 ${s.season} 季 (${s.episodeCount}集)`,
             season: s.season,
             episodeCount: s.episodeCount,
+            importedCount: s.importedCount,
             year: s.year,
             posterUrl: s.posterUrl,
             mediaType: 'tv_season',
@@ -398,7 +400,20 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
       key: 'isImported',
       width: '10%',
       render: (isImported, record) => {
-        if (record.isGroup) return '-';
+        if (record.isGroup) {
+          const imported = record.importedCount;
+          const total = record.episodeCount;
+          if (imported !== undefined && total !== undefined) {
+            if (imported === total && total > 0) {
+              return <Tag color="success">全部已导入</Tag>;
+            } else if (imported > 0) {
+              return <Tag color="processing">{imported}/{total}</Tag>;
+            } else {
+              return <Tag>未导入</Tag>;
+            }
+          }
+          return '-';
+        }
         return isImported ? (
           <Tag color="success">已导入</Tag>
         ) : (
@@ -1204,7 +1219,22 @@ const MediaItemList = ({ serverId, refreshTrigger, selectedItems = [], onSelecti
                           else setSelectedRowKeys(selectedRowKeys.filter(k => k !== item.key));
                         }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 16, fontWeight: 500 }}>{item.title}</div>
+                          <div style={{ fontSize: 16, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {item.title}
+                            {item.isGroup ? (
+                              item.importedCount !== undefined && item.episodeCount !== undefined ? (
+                                item.importedCount === item.episodeCount && item.episodeCount > 0 ?
+                                  <Tag color="success" style={{ marginLeft: 4 }}>全部已导入</Tag> :
+                                item.importedCount > 0 ?
+                                  <Tag color="processing" style={{ marginLeft: 4 }}>{item.importedCount}/{item.episodeCount}</Tag> :
+                                  <Tag style={{ marginLeft: 4 }}>未导入</Tag>
+                              ) : null
+                            ) : (
+                              item.isImported ?
+                                <Tag color="success" style={{ marginLeft: 4 }}>已导入</Tag> :
+                                <Tag style={{ marginLeft: 4 }}>未导入</Tag>
+                            )}
+                          </div>
                           {item.year && <div style={{ color: 'var(--color-text-secondary)' }}>{item.year}</div>}
                         </div>
                       </div>
