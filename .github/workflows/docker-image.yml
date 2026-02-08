@@ -74,6 +74,9 @@ jobs:
             echo "image_tag=test" >> $GITHUB_OUTPUT
             SO_TAG="test"
             BUILD_ARM="false"
+          elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            # main 分支触发：使用 main 标签
+            echo "image_tag=main" >> $GITHUB_OUTPUT
           fi
 
           echo "so_tag=${SO_TAG}" >> $GITHUB_OUTPUT
