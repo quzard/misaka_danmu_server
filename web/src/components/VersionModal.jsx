@@ -25,7 +25,7 @@ const preprocessChangelog = (text) => {
 // Markdown 渲染样式
 const markdownComponents = {
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)' }} className="hover:underline">
       {children}
     </a>
   ),
@@ -34,10 +34,10 @@ const markdownComponents = {
   ol: ({ children }) => <ol className="list-decimal list-inside my-1 space-y-0.5">{children}</ol>,
   li: ({ children }) => <li className="ml-2">{children}</li>,
   code: ({ children }) => (
-    <code className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-sm font-mono">{children}</code>
+    <code style={{ backgroundColor: 'var(--color-hover)' }} className="px-1 py-0.5 rounded text-sm font-mono">{children}</code>
   ),
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-blue-400 pl-3 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r text-sm">
+    <blockquote style={{ borderColor: 'var(--color-primary)', backgroundColor: 'var(--color-hover)' }} className="border-l-4 pl-3 py-1 my-2 rounded-r text-sm">
       {children}
     </blockquote>
   ),
@@ -206,7 +206,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     if (!updateInfo?.changelog) return null
 
     return (
-      <div className="max-h-[300px] overflow-y-auto bg-gray-50 dark:bg-gray-800 rounded-lg p-4 mt-4">
+      <div className="max-h-[300px] overflow-y-auto rounded-lg p-4 mt-4" style={{ backgroundColor: 'var(--color-hover)' }}>
         <Title level={5}>更新日志</Title>
         <div className="text-sm">
           <ReactMarkdown components={markdownComponents}>
@@ -285,7 +285,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
             >
               <Row gutter={[16, 12]}>
                 <Col span={12}>
-                  <div className="text-xs text-gray-500 mb-1">CPU 使用率</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>CPU 使用率</div>
                   <Progress
                     percent={dockerStats.cpu?.percent || 0}
                     size="small"
@@ -294,7 +294,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                   />
                 </Col>
                 <Col span={12}>
-                  <div className="text-xs text-gray-500 mb-1">内存使用 ({dockerStats.memory?.limitFormatted || '-'})</div>
+                  <div className="text-xs mb-1" style={{ color: 'var(--color-text-secondary)' }}>内存使用 ({dockerStats.memory?.limitFormatted || '-'})</div>
                   <Progress
                     percent={dockerStats.memory?.percent || 0}
                     size="small"
