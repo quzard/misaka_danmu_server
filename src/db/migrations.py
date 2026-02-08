@@ -624,9 +624,23 @@ async def _migrate_docker_image_name_v1(conn: AsyncConnection):
 
 async def _drop_force_scrape_column_v1(conn: AsyncConnection, db_type: str):
     """删除 scheduled_tasks 表中已废弃的 force_scrape 列（已被 task_config JSON 列取代）。"""
-    try:
-        await conn.execute(text("SELECT force_scrape FROM scheduled_tasks LIMIT 1"))
-    except Exception:
+    # 使用 information_schema 安全检测列是否存在，避免 PostgreSQL 事务因失败的 SELECT 进入 aborted 状态
+    if db_type == "mysql":
+        check_sql = text("""
+            SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME = 'scheduled_tasks'
+            AND COLUMN_NAME = 'force_scrape'
+        """)
+    else:  # postgresql
+        check_sql = text("""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = 'scheduled_tasks'
+            AND column_name = 'force_scrape'
+        """)
+
+    result = await conn.execute(check_sql)
+    if result.scalar() == 0:
         logger.info("force_scrape 列不存在，无需删除")
         return
 
