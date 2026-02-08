@@ -403,22 +403,8 @@ class TaskManager:
             queue_type: 队列类型，"download" (下载队列)、"management" (管理队列) 或 "fallback" (后备队列)
         """
         async with self._lock:
-            # 检查是否有同名任务正在排队或运行
-            if title in self._pending_titles:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"任务 '{title}' 已在队列中，请勿重复提交。"
-                )
-            # 检查三个队列的当前任务
-            if (self._current_download_task and self._current_download_task.title == title) or \
-               (self._current_management_task and self._current_management_task.title == title) or \
-               (self._current_fallback_task and self._current_fallback_task.title == title):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"任务 '{title}' 已在运行中，请勿重复提交。"
-                )
-
             # 新增：检查唯一键，防止同一资源的多个任务同时进行
+            # unique_key 是精确的去重机制，优先于 title 去重
             if unique_key:
                 if unique_key in self._active_unique_keys:
                     # 根据unique_key的前缀提供更友好的错误消息
@@ -431,7 +417,22 @@ class TaskManager:
                         detail=error_msg
                     )
                 self._active_unique_keys.add(unique_key)
-            self._pending_titles.add(title)
+            else:
+                # 没有 unique_key 时，使用 title 作为兜底去重
+                if title in self._pending_titles:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"任务 '{title}' 已在队列中，请勿重复提交。"
+                    )
+                # 检查三个队列的当前任务
+                if (self._current_download_task and self._current_download_task.title == title) or \
+                   (self._current_management_task and self._current_management_task.title == title) or \
+                   (self._current_fallback_task and self._current_fallback_task.title == title):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"任务 '{title}' 已在运行中，请勿重复提交。"
+                    )
+                self._pending_titles.add(title)
 
         task_id = str(uuid4())
         task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters, queue_type=queue_type)
