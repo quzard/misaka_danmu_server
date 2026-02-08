@@ -22,6 +22,7 @@ name: Publish to Docker Hub & GitHub Packages
 on:
   push:
     branches:
+      - main
       - "test"       # test 分支：仅构建 AMD64 用于测试
     tags:
       - "v*.*.*"     # 版本标签：构建双架构正式版
