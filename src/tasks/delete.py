@@ -18,29 +18,51 @@ _get_fs_path_from_web_path = crud._get_fs_path_from_web_path
 logger = logging.getLogger(__name__)
 
 
-def _is_safe_to_delete_directory(dir_path: Path) -> bool:
+def _determine_cleanup_stop_dir(fs_path: Path) -> Path:
+    """
+    根据文件路径确定空目录清理的停止点。
+
+    - 如果路径在 DANMAKU_BASE_DIR 下，停止点为 DANMAKU_BASE_DIR
+    - 如果是自定义路径（不在 DANMAKU_BASE_DIR 下），停止点为文件上方3级目录
+      （覆盖大多数自定义模板结构：title/season/episode.xml 等）
+    """
+    try:
+        fs_path.resolve().relative_to(DANMAKU_BASE_DIR.resolve())
+        return DANMAKU_BASE_DIR
+    except ValueError:
+        # 自定义路径 — 向上推3级作为安全边界
+        stop = fs_path.parent
+        for _ in range(3):
+            if stop.parent and stop.parent != stop:
+                stop = stop.parent
+            else:
+                break
+        return stop
+
+
+def _is_safe_to_delete_directory(dir_path: Path, base_dir: Path = DANMAKU_BASE_DIR) -> bool:
     """
     检查目录是否可以安全删除。
 
     安全条件：
     1. 目录必须存在且是目录
     2. 目录必须为空（没有任何文件或子目录）
-    3. 目录必须在 DANMAKU_BASE_DIR 下（防止误删系统目录）
-    4. 目录不能是 DANMAKU_BASE_DIR 本身
+    3. 目录必须在 base_dir 下（防止误删系统目录）
+    4. 目录不能是 base_dir 本身
     """
     if not dir_path or not dir_path.exists() or not dir_path.is_dir():
         return False
 
-    # 安全检查：确保目录在弹幕基础目录下
+    # 安全检查：确保目录在 base_dir 下
     try:
-        dir_path.resolve().relative_to(DANMAKU_BASE_DIR.resolve())
+        dir_path.resolve().relative_to(base_dir.resolve())
     except ValueError:
-        # 目录不在 DANMAKU_BASE_DIR 下，不允许删除
-        logger.warning(f"目录 {dir_path} 不在弹幕基础目录下，跳过删除")
+        # 目录不在 base_dir 下，不允许删除
+        logger.warning(f"目录 {dir_path} 不在安全边界 {base_dir} 下，跳过删除")
         return False
 
-    # 不能删除弹幕基础目录本身
-    if dir_path.resolve() == DANMAKU_BASE_DIR.resolve():
+    # 不能删除 base_dir 本身
+    if dir_path.resolve() == base_dir.resolve():
         return False
 
     # 检查目录是否为空
@@ -66,7 +88,7 @@ def _cleanup_empty_parent_directories(file_path: Path, stop_at: Path = DANMAKU_B
 
     # 向上遍历，清理空目录
     while parent and parent != stop_at and parent.resolve() != stop_at.resolve():
-        if _is_safe_to_delete_directory(parent):
+        if _is_safe_to_delete_directory(parent, base_dir=stop_at):
             try:
                 parent.rmdir()
                 logger.info(f"已清理空目录: {parent}")
@@ -102,7 +124,8 @@ def delete_danmaku_file(danmaku_file_path_str: Optional[str], cleanup_empty_dirs
 
             # 清理空的父目录
             if cleanup_empty_dirs:
-                _cleanup_empty_parent_directories(fs_path)
+                stop_at = _determine_cleanup_stop_dir(fs_path)
+                _cleanup_empty_parent_directories(fs_path, stop_at)
 
             return fs_path
     except (ValueError, FileNotFoundError):
@@ -148,13 +171,18 @@ def delete_danmaku_files_batch(file_paths: List[Optional[str]]):
     cleaned_dirs: Set[Path] = set()
 
     for dir_path in sorted_dirs:
+        # 根据目录中任意一个文件的路径确定安全边界
+        # dir_path 是被删除文件的父目录，用一个虚拟子路径来推断 stop_at
+        dummy_file = dir_path / "dummy.xml"
+        stop_at = _determine_cleanup_stop_dir(dummy_file)
+
         # 向上遍历清理空目录
         current = dir_path
-        while current and current.resolve() != DANMAKU_BASE_DIR.resolve():
+        while current and current.resolve() != stop_at.resolve():
             if current in cleaned_dirs:
                 # 已经处理过这个目录，跳过
                 break
-            if _is_safe_to_delete_directory(current):
+            if _is_safe_to_delete_directory(current, base_dir=stop_at):
                 try:
                     current.rmdir()
                     logger.info(f"已清理空目录: {current}")

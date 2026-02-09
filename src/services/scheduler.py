@@ -107,7 +107,8 @@ class SchedulerManager:
                 "jobType": job.job_type,
                 "name": job.job_name,
                 "description": getattr(job, 'description', ''),
-                "isSystemTask": getattr(job, 'is_system_task', False)
+                "isSystemTask": getattr(job, 'is_system_task', False),
+                "configSchema": getattr(job, 'config_schema', [])
             }
             for job in self._job_classes.values()
         ]
@@ -115,12 +116,19 @@ class SchedulerManager:
     def _create_job_runner(self, job_type: str, scheduled_task_id: str) -> Callable:
         """创建一个包装器，用于在 TaskManager 中运行任务，并等待其完成。"""
         job_class = self._job_classes[job_type]
-        
+
         async def runner():
+            # 从数据库读取任务实例级配置（taskConfig JSON）
+            task_config = {}
+            async with self._session_factory() as session:
+                task_info = await crud.get_scheduled_task(session, scheduled_task_id)
+                if task_info:
+                    task_config = task_info.get('taskConfig', {})
+
             # 修正：智能地将依赖项传递给任务的构造函数
             # 这使得像 TmdbAutoMapJob 这样的任务可以选择不接收 rate_limiter
             init_params = inspect.signature(job_class.__init__).parameters
-            
+
             dependencies = {
                 "session_factory": self._session_factory,
                 "task_manager": self.task_manager,
@@ -131,10 +139,19 @@ class SchedulerManager:
                 "ai_matcher_manager": self.ai_matcher_manager,
                 "title_recognition_manager": self.title_recognition_manager,
             }
-            
+
             args_to_pass = {name: dep for name, dep in dependencies.items() if name in init_params}
             job_instance = job_class(**args_to_pass)
-            task_coro_factory = lambda session, callback: job_instance.run(session, callback)
+
+            # 检查 run 方法是否接受 task_config 参数
+            run_params = inspect.signature(job_instance.run).parameters
+            def make_task_coro(cfg):
+                if 'task_config' in run_params:
+                    return lambda session, callback: job_instance.run(session, callback, task_config=cfg)
+                else:
+                    return lambda session, callback: job_instance.run(session, callback)
+
+            task_coro_factory = make_task_coro(task_config)
             task_id, done_event = await self.task_manager.submit_task(
                 task_coro_factory,
                 job_instance.job_name,
@@ -149,7 +166,7 @@ class SchedulerManager:
                 logger.info(f"定时任务的运行器已确认任务 '{job_instance.job_name}' (ID: {task_id}) 执行完毕。")
             except asyncio.TimeoutError:
                 logger.warning(f"定时任务 '{job_instance.job_name}' (ID: {task_id}) 执行超时（可能因流控暂停），任务将在后台继续执行。")
-        
+
         return runner
 
     def _event_handler_wrapper(self, event: JobExecutionEvent):
@@ -213,7 +230,7 @@ class SchedulerManager:
                 task['isSystemTask'] = self._is_system_task(task['jobType'])
             return tasks
 
-    async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool) -> Dict[str, Any]:
+    async def add_task(self, name: str, job_type: str, cron: str, is_enabled: bool, task_config: dict = None) -> Dict[str, Any]:
         # 新增：禁止前端创建系统内置任务
         if job_type == "tokenReset":
             raise ValueError("系统内置任务 'tokenReset' 不允许手动创建。")
@@ -249,7 +266,7 @@ class SchedulerManager:
                     raise ValueError("Webhook 延时任务处理器已存在，无法重复创建。")
 
             task_id = str(uuid4())
-            await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled)
+            await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled, task_config)
             runner = self._create_job_runner(job_type, task_id)
             job = self.scheduler.add_job(runner, CronTrigger.from_crontab(cron), id=task_id, name=name)
             if not is_enabled: job.pause()
@@ -257,7 +274,7 @@ class SchedulerManager:
             await crud.update_scheduled_task_run_times(session, task_id, None, next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 
-    async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool) -> Optional[Dict[str, Any]]:
+    async def update_task(self, task_id: str, name: str, cron: str, is_enabled: bool, task_config: dict = None) -> Optional[Dict[str, Any]]:
         async with self._session_factory() as session:
             task_info = await crud.get_scheduled_task(session, task_id)
             if not task_info: return None
@@ -283,7 +300,7 @@ class SchedulerManager:
             else:
                 next_run_time = None
 
-            await crud.update_scheduled_task(session, task_id, name, cron, is_enabled)
+            await crud.update_scheduled_task(session, task_id, name, cron, is_enabled, task_config)
             await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], next_run_time)
             return await crud.get_scheduled_task(session, task_id)
 

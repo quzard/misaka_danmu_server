@@ -7,11 +7,21 @@ import ReactMarkdown from 'react-markdown'
 
 const { Text } = Typography
 
+/**
+ * 预处理 GitHub Release 的 changelog 文本，使 ReactMarkdown 能正确渲染换行。
+ */
+const preprocessChangelog = (text) => {
+  if (!text) return text
+  return text
+    .replace(/\r\n/g, '\n')       // 统一换行符
+    .replace(/\n(?!\n)/g, '\n\n') // 单换行 → 双换行（保留已有的双换行）
+}
+
 // Markdown 渲染样式
 const markdownComponents = {
   // 链接
   a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-600 hover:underline">
+    <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-primary)' }} className="hover:underline">
       {children}
     </a>
   ),
@@ -23,19 +33,19 @@ const markdownComponents = {
   li: ({ children }) => <li className="ml-2">{children}</li>,
   // 代码
   code: ({ children }) => (
-    <code className="bg-gray-200 dark:bg-gray-700 px-1.5 py-0.5 rounded text-sm font-mono">
+    <code style={{ backgroundColor: 'var(--color-hover)' }} className="px-1.5 py-0.5 rounded text-sm font-mono">
       {children}
     </code>
   ),
   // 代码块
   pre: ({ children }) => (
-    <pre className="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg overflow-x-auto my-2">
+    <pre style={{ backgroundColor: 'var(--color-hover)' }} className="p-3 rounded-lg overflow-x-auto my-2">
       {children}
     </pre>
   ),
   // 引用块
   blockquote: ({ children }) => (
-    <blockquote className="border-l-4 border-blue-400 pl-4 py-1 my-2 bg-blue-50 dark:bg-blue-900/20 rounded-r">
+    <blockquote style={{ borderColor: 'var(--color-primary)', backgroundColor: 'var(--color-hover)' }} className="border-l-4 pl-4 py-1 my-2 rounded-r">
       {children}
     </blockquote>
   ),
@@ -117,9 +127,9 @@ export const ReleaseHistoryModal = ({ open, onClose }) => {
                     ),
                     children: (
                       <div className="max-h-[300px] overflow-y-auto">
-                        <div className="text-sm bg-gray-50 dark:bg-gray-800 p-3 rounded">
+                        <div className="text-sm p-3 rounded" style={{ backgroundColor: 'var(--color-hover)' }}>
                           <ReactMarkdown components={markdownComponents}>
-                            {release.changelog || '暂无更新说明'}
+                            {preprocessChangelog(release.changelog) || '暂无更新说明'}
                           </ReactMarkdown>
                         </div>
                         {release.releaseUrl && (

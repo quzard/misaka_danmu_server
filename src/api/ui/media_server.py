@@ -603,6 +603,24 @@ async def import_media_items(
     sorted_ids = sorted(item_ids_list)
     unique_key = f"media-import-{hash(tuple(sorted_ids))}"
 
+    # 查询媒体项标题，用于生成可读的任务标题
+    from src.db.orm_models import MediaItem
+    from sqlalchemy import select, func
+    title_stmt = select(MediaItem.title, func.count(MediaItem.id).label('cnt')).where(
+        MediaItem.id.in_(item_ids_list)
+    ).group_by(MediaItem.title)
+    title_result = await session.execute(title_stmt)
+    title_groups = title_result.all()  # [(title, count), ...]
+
+    if len(title_groups) == 1:
+        name, cnt = title_groups[0]
+        task_title = f"导入媒体项: {name}" if cnt == 1 else f"导入媒体项: {name} ({cnt}集)"
+    elif len(title_groups) <= 3:
+        task_title = f"导入媒体项: {', '.join(t.title for t in title_groups)}"
+    else:
+        first_titles = ', '.join(t.title for t in title_groups[:2])
+        task_title = f"导入媒体项: {first_titles} 等{len(title_groups)}部"
+
     task_id, _ = await task_manager.submit_task(
         lambda session, progress_callback: tasks.import_media_items(
             item_ids_list,
@@ -616,9 +634,76 @@ async def import_media_items(
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager
         ),
-        title=f"导入媒体项: {len(item_ids_list)}个",
+        title=task_title,
         queue_type="download",
         unique_key=unique_key
     )
 
     return {"message": "媒体项导入任务已提交", "taskId": task_id}
+
+
+
+@router.get("/media-items/unimported-count", summary="获取未导入媒体项数量")
+async def get_unimported_media_count(
+    server_id: int = Query(..., description="媒体服务器ID"),
+    media_type: Optional[str] = Query(None, description="媒体类型过滤"),
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user)
+):
+    """获取指定服务器下未导入的媒体项数量"""
+    count = await crud.get_unimported_count(session, server_id, media_type)
+    return {"count": count}
+
+
+@router.post("/media-items/import-all-unimported", status_code=202, summary="一键导入全部未导入的媒体项")
+async def import_all_unimported_media_items(
+    payload: Dict[str, Any],
+    session: AsyncSession = Depends(get_db_session),
+    current_user: models.User = Depends(security.get_current_user),
+    task_manager: TaskManager = Depends(get_task_manager),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    ai_matcher_manager: AIMatcherManager = Depends(get_ai_matcher_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager)
+):
+    """一键导入指定服务器下所有未导入的媒体项"""
+    server_id = payload.get("serverId")
+    media_type = payload.get("mediaType")
+
+    if not server_id:
+        raise HTTPException(status_code=400, detail="serverId 是必填参数")
+
+    # 获取所有未导入的 item IDs
+    item_ids_list = await crud.get_unimported_item_ids(session, server_id, media_type)
+
+    if not item_ids_list:
+        return {"message": "没有未导入的媒体项", "count": 0}
+
+    # 生成 unique_key
+    unique_key = f"media-import-all-{server_id}-{len(item_ids_list)}"
+
+    task_id, _ = await task_manager.submit_task(
+        lambda session, progress_callback: tasks.import_media_items(
+            item_ids_list,
+            session,
+            task_manager,
+            progress_callback,
+            scraper_manager=scraper_manager,
+            metadata_manager=metadata_manager,
+            config_manager=config_manager,
+            ai_matcher_manager=ai_matcher_manager,
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager
+        ),
+        title=f"一键导入全部未导入: 共{len(item_ids_list)}个",
+        queue_type="download",
+        unique_key=unique_key
+    )
+
+    return {
+        "message": f"已提交导入任务，共 {len(item_ids_list)} 个未导入媒体项",
+        "taskId": task_id,
+        "count": len(item_ids_list)
+    }

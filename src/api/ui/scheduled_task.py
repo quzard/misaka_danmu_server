@@ -47,7 +47,7 @@ async def create_scheduled_task(
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
     try:
-        new_task = await scheduler.add_task(task_data.name, task_data.jobType, task_data.cronExpression, task_data.isEnabled)
+        new_task = await scheduler.add_task(task_data.name, task_data.jobType, task_data.cronExpression, task_data.isEnabled, task_data.taskConfig)
         return models.ScheduledTaskInfo.model_validate(new_task)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -64,7 +64,7 @@ async def update_scheduled_task(
     current_user: models.User = Depends(security.get_current_user),
     scheduler: SchedulerManager = Depends(get_scheduler_manager)
 ):
-    updated_task = await scheduler.update_task(taskId, task_data.name, task_data.cronExpression, task_data.isEnabled)
+    updated_task = await scheduler.update_task(taskId, task_data.name, task_data.cronExpression, task_data.isEnabled, task_data.taskConfig)
     if not updated_task:
         raise HTTPException(status_code=404, detail="找不到指定的任务ID")
     return models.ScheduledTaskInfo.model_validate(updated_task)

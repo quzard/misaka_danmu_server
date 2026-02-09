@@ -59,6 +59,7 @@ def get_default_configs(settings=None, ai_prompts=None):
         'danmakuOutputLimitPerSource': ('-1', '弹幕输出上限。-1为无限制。超出限制时按时间段均匀采样。'),
         'danmakuMergeOutputEnabled': ('false', '是否启用合并输出。启用后，将所有源的弹幕合并后再进行均衡采样输出。'),
         'danmakuChConvert': ('0', '弹幕简繁转换。0-不转换，1-转换为简体，2-转换为繁体。'),
+        'danmakuChConvertPriority': ('player', '简繁转换优先级。player-播放器优先（播放器明确指定时覆盖服务端配置），server-服务端优先（始终使用服务端配置）。'),
         'danmakuRandomColorMode': ('off', '弹幕颜色转换模式：off(不使用)、white_to_random(白色弹幕随机染色)、all_random(全部随机染色)、all_white(全部变白色)。'),
         'danmakuRandomColorPalette': (
             '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465',
@@ -149,6 +150,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiCacheTtl': ('3600', 'AI缓存过期时间(秒)。默认3600秒(1小时)。'),
             # 名称转换功能配置
             'nameConversionEnabled': ('false', '是否启用名称转换功能。启用后，搜索时自动将非中文名称转换为中文。'),
+            'nameConversionT2SEnabled': ('false', '是否启用繁体自动转简体。启用后，搜索时自动将繁体中文标题转换为简体。'),
             'nameConversionSourcePriority': ('[{"key":"bangumi","enabled":true},{"key":"tmdb","enabled":true},{"key":"tvdb","enabled":true},{"key":"douban","enabled":true},{"key":"imdb","enabled":true}]', '名称转换元数据源优先级配置（JSON格式）'),
         })
 

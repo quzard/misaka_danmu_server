@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber, Popover } from 'antd';
+import { Card, Select, Button, message, Space, Checkbox, Row, Col, Tag, Divider, Typography, Alert, Popconfirm, Grid, Segmented, InputNumber, Popover, Modal } from 'antd';
 import { CalendarOutlined } from '@ant-design/icons';
-import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined } from '@ant-design/icons';
+import { ReloadOutlined, PlusOutlined, ScanOutlined, SettingOutlined, SaveOutlined, DatabaseOutlined, DeleteOutlined, ImportOutlined, EyeOutlined, EyeInvisibleOutlined, VideoCameraOutlined, PlaySquareOutlined, EditOutlined, CloudDownloadOutlined } from '@ant-design/icons';
 import ServerConfigPanel from './ServerConfigPanel';
 import MediaItemList from './MediaItemList';
-import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer, batchDeleteMediaItems, importMediaItems, deleteMediaServer } from '../../../apis';
+import { getMediaServers, scanMediaServer, getMediaServerLibraries, updateMediaServer, batchDeleteMediaItems, importMediaItems, deleteMediaServer, getUnimportedCount, importAllUnimported } from '../../../apis';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -350,6 +350,46 @@ const LibraryScan = () => {
       setRefreshTrigger(prev => prev + 1);
     } catch (error) {
       message.error('批量导入失败: ' + (error.message || '未知错误'));
+      console.error(error);
+    }
+  };
+
+  // 一键导入全部未导入
+  const handleImportAllUnimported = async () => {
+    if (!selectedServerId) {
+      message.warning('请先选择媒体服务器');
+      return;
+    }
+
+    try {
+      // 先获取未导入数量
+      const countRes = await getUnimportedCount(selectedServerId);
+      const count = countRes.data.count;
+
+      if (count === 0) {
+        message.info('当前没有未导入的媒体项');
+        return;
+      }
+
+      // 弹出确认框
+      Modal.confirm({
+        title: '一键导入全部未导入',
+        content: `当前有 ${count} 个未导入的媒体项，确定要全部导入吗？导入过程可能需要较长时间。`,
+        okText: '确定导入',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            const res = await importAllUnimported({ serverId: selectedServerId });
+            message.success(res.data.message || '导入任务已提交');
+            setRefreshTrigger(prev => prev + 1);
+          } catch (error) {
+            message.error('导入失败: ' + (error.message || '未知错误'));
+            console.error(error);
+          }
+        }
+      });
+    } catch (error) {
+      message.error('获取未导入数量失败: ' + (error.message || '未知错误'));
       console.error(error);
     }
   };
@@ -910,6 +950,13 @@ const LibraryScan = () => {
                 >
                   导入选中
                 </Button>
+                <Button
+                  icon={<CloudDownloadOutlined />}
+                  onClick={handleImportAllUnimported}
+                  disabled={!selectedServerId}
+                >
+                  导入全部未导入
+                </Button>
               </Space>
             )
           }
@@ -992,6 +1039,14 @@ const LibraryScan = () => {
                   size="middle"
                 >
                   导入
+                </Button>
+                <Button
+                  icon={<CloudDownloadOutlined />}
+                  onClick={handleImportAllUnimported}
+                  disabled={!selectedServerId}
+                  size="middle"
+                >
+                  全部导入
                 </Button>
               </Space>
             </div>

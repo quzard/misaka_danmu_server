@@ -37,26 +37,31 @@ const SortableItem = ({ item, onToggle, showSwitch = true }) => {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
+    backgroundColor: 'var(--color-card)',
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: 'var(--color-border)',
   }
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center justify-between p-3 mb-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
+      className="flex items-center justify-between p-3 mb-2 rounded-lg"
     >
       <div className="flex items-center gap-3">
         <span
           {...attributes}
           {...listeners}
-          className="cursor-grab text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          className="cursor-grab"
+          style={{ color: 'var(--color-text-secondary, #999)' }}
         >
           <HolderOutlined />
         </span>
         <div>
-          <div className="font-medium">{item.name}</div>
+          <div className="font-medium" style={{ color: 'var(--color-text)' }}>{item.name}</div>
           {item.description && (
-            <div className="text-xs text-gray-500 dark:text-gray-400">{item.description}</div>
+            <div className="text-xs" style={{ color: 'var(--color-text-secondary, #999)' }}>{item.description}</div>
           )}
         </div>
       </div>
@@ -185,13 +190,13 @@ export const SortablePriorityList = ({
   }
 
   return (
-    <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+    <div className="mt-6 pt-6" style={{ borderTop: '1px solid var(--color-border)' }}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <h3 className="text-base font-medium m-0">{titleIcon} {title}</h3>
           {description && (
             <Tooltip title={description}>
-              <InfoCircleOutlined className="text-gray-400" />
+              <InfoCircleOutlined style={{ color: 'var(--color-text-secondary, #999)' }} />
             </Tooltip>
           )}
         </div>
@@ -199,7 +204,7 @@ export const SortablePriorityList = ({
       </div>
 
       {description && (
-        <div className="text-sm text-gray-500 mb-3">{description}</div>
+        <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary, #999)' }}>{description}</div>
       )}
 
       <DndContext
@@ -224,13 +229,19 @@ export const SortablePriorityList = ({
 
         <DragOverlay>
           {activeItem && (
-            <div className="flex items-center justify-between p-3 rounded-lg border-2 border-blue-400 bg-white dark:bg-gray-800 shadow-lg">
+            <div
+              className="flex items-center justify-between p-3 rounded-lg shadow-lg"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                border: '2px solid var(--color-primary)',
+              }}
+            >
               <div className="flex items-center gap-3">
-                <HolderOutlined className="text-gray-400 dark:text-gray-500" />
+                <HolderOutlined style={{ color: 'var(--color-text-secondary, #999)' }} />
                 <div>
-                  <div className="font-medium">{activeItem.name}</div>
+                  <div className="font-medium" style={{ color: 'var(--color-text)' }}>{activeItem.name}</div>
                   {activeItem.description && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{activeItem.description}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary, #999)' }}>{activeItem.description}</div>
                   )}
                 </div>
               </div>
@@ -240,7 +251,13 @@ export const SortablePriorityList = ({
       </DndContext>
 
       {tips.length > 0 && (
-        <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm text-gray-500 dark:text-gray-400">
+        <div
+          className="mt-4 p-3 rounded-lg text-sm"
+          style={{
+            backgroundColor: 'var(--color-hover)',
+            color: 'var(--color-text-secondary, #999)',
+          }}
+        >
           <div className="font-medium mb-1">💡 使用说明</div>
           <ul className="list-disc list-inside space-y-1 m-0">
             {tips.map((tip, index) => (

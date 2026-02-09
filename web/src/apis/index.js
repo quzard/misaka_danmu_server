@@ -274,6 +274,18 @@ export const getDanmakuMergeOutputEnabled = () =>
 /** 弹幕输出控制 合并输出开关 */
 export const setDanmakuMergeOutputEnabled = data =>
   api.put('/api/ui/config/danmakuMergeOutputEnabled', data)
+/** 弹幕输出配置 简繁转换 */
+export const getDanmakuChConvert = () =>
+  api.get('/api/ui/config/danmakuChConvert')
+/** 弹幕输出配置 简繁转换 */
+export const setDanmakuChConvert = data =>
+  api.put('/api/ui/config/danmakuChConvert', data)
+/** 弹幕输出配置 简繁转换优先级 */
+export const getDanmakuChConvertPriority = () =>
+  api.get('/api/ui/config/danmakuChConvertPriority')
+/** 弹幕输出配置 简繁转换优先级 */
+export const setDanmakuChConvertPriority = data =>
+  api.put('/api/ui/config/danmakuChConvertPriority', data)
 /** 弹幕输出配置 随机颜色模式 */
 export const getDanmakuRandomColorMode = () =>
   api.get('/api/ui/config/danmakuRandomColorMode')
@@ -752,6 +764,12 @@ export const batchDeleteMediaItems = (payload) => api.post('/api/ui/media-items/
 
 /** 导入媒体项 */
 export const importMediaItems = (data) => api.post('/api/ui/media-items/import', data)
+
+/** 获取未导入媒体项数量 */
+export const getUnimportedCount = (serverId, mediaType) => api.get('/api/ui/media-items/unimported-count', { server_id: serverId, media_type: mediaType })
+
+/** 一键导入全部未导入的媒体项 */
+export const importAllUnimported = (data) => api.post('/api/ui/media-items/import-all-unimported', data)
 
 // ==================== 本地弹幕扫描 ====================
 

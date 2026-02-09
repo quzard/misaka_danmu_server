@@ -40,6 +40,7 @@ import {
   CloseCircleOutlined,
   CalendarOutlined,
   CloudServerOutlined,
+  DownOutlined,
   LinkOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -1295,10 +1296,8 @@ export const SearchResult = () => {
                 pageSize={pageSize}
                 total={total}
                 onChange={(page) => handlePageChange(page, pageSize)}
-                onShowSizeChange={(_, size) => handlePageChange(1, size)}
                 showQuickJumper={!isMobile}
-                showSizeChanger
-                pageSizeOptions={['5', '10', '20', '50']}
+                showSizeChanger={false}
                 showLessItems={isMobile}
                 size={isMobile ? 'small' : 'default'}
               />
@@ -1686,21 +1685,36 @@ export const SearchResult = () => {
             </DndContext>
           </Card>
           {editEpisodeList.length > episodePageSize && (
-            <div className="flex justify-center mt-3 shrink-0">
+            <div className="flex justify-center items-center mt-3 shrink-0 gap-3">
               <Pagination
                 current={episodePage}
                 pageSize={episodePageSize}
                 total={editEpisodeList.length}
                 onChange={(page) => setEpisodePage(page)}
-                onShowSizeChange={(_, size) => {
-                  setEpisodePageSize(size)
-                  setEpisodePage(1)
-                }}
-                showSizeChanger
-                pageSizeOptions={['5', '10', '20', '50']}
+                showSizeChanger={false}
                 showLessItems
                 size="small"
               />
+              <Dropdown
+                menu={{
+                  items: [
+                    { key: '5', label: '5 条/页' },
+                    { key: '10', label: '10 条/页' },
+                    { key: '20', label: '20 条/页' },
+                    { key: '50', label: '50 条/页' },
+                  ],
+                  selectedKeys: [String(episodePageSize)],
+                  onClick: ({ key }) => {
+                    setEpisodePageSize(Number(key))
+                    setEpisodePage(1)
+                  },
+                }}
+                trigger={['click']}
+              >
+                <Button size="small" className="shrink-0">
+                  {episodePageSize} 条/页 <DownOutlined />
+                </Button>
+              </Dropdown>
             </div>
           )}
       </Modal>
