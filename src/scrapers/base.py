@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from src.db import crud
 from src.db import models
+from src.core.cache import get_cache_backend
 
 from src.utils import TransportManager
 
@@ -268,6 +269,14 @@ class BaseScraper(ABC):
         self.logger.debug(f"{self.provider_name}: 缓存未预取，进行单独查询 - {key}")
         async with self._session_factory() as session:
             try:
+                _backend = get_cache_backend()
+                if _backend is not None:
+                    try:
+                        result = await _backend.get(key, region="default")
+                        if result is not None:
+                            return result
+                    except Exception:
+                        pass
                 return await crud.get_cache(session, key)
             finally:
                 await session.close()
@@ -279,7 +288,14 @@ class BaseScraper(ABC):
         if ttl > 0:
             async with self._session_factory() as session:
                 try:
-                    await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
+                    _backend = get_cache_backend()
+                    if _backend is not None:
+                        try:
+                            await _backend.set(key, value, ttl=ttl, region="default")
+                        except Exception:
+                            await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
+                    else:
+                        await crud.set_cache(session, key, value, ttl, provider=self.provider_name)
                     await session.commit()
                 finally:
                     await session.close()
@@ -424,9 +440,7 @@ class BaseScraper(ABC):
 
         # 如果没有配置过滤规则，直接返回所有分集
         if not blacklist_pattern:
-            self.logger.info(f"{self.provider_name}: 分集过滤结果 (无过滤规则):")
-            for episode in episodes:
-                self.logger.info(f"  - {episode.title}")
+            self.logger.info(f"{self.provider_name}: 分集过滤结果 (无过滤规则): 共 {len(episodes)} 集")
             return episodes
 
         filtered_episodes = []
@@ -441,21 +455,23 @@ class BaseScraper(ABC):
             else:
                 filtered_episodes.append(episode)
 
-        # 打印分集过滤结果
-        self.logger.info(f"{self.provider_name}: 分集过滤结果:")
+        # 打印分集过滤摘要
+        summary_parts = [f"{self.provider_name}: 分集过滤结果:"]
 
-        # 打印过滤掉的分集
+        # 打印过滤掉的分集（这些比较重要，逐条列出）
         if filtered_out_episodes:
+            summary_parts.append(f"  已过滤 {len(filtered_out_episodes)} 集:")
             for episode, junk_type in filtered_out_episodes:
-                self.logger.info(f"  - 已过滤: {episode.title} (类型: {junk_type})")
+                summary_parts.append(f"    ✗ {episode.title} ({junk_type})")
 
-        # 打印保留的分集
+        # 保留的分集只显示数量
         if filtered_episodes:
-            for episode in filtered_episodes:
-                self.logger.info(f"  - {episode.title}")
+            summary_parts.append(f"  保留 {len(filtered_episodes)} 集")
 
         if not filtered_episodes and not filtered_out_episodes:
-            self.logger.info(f"  - 无分集数据")
+            summary_parts.append(f"  无分集数据")
+
+        self.logger.info("\n".join(summary_parts))
 
         return filtered_episodes
 
