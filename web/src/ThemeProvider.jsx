@@ -192,9 +192,10 @@ export function ThemeProvider({ children }) {
       colorBorder: colors.light.border,
       colorBorderSecondary: colors.light.borderSecondary,
       fontFamily: "'MyNunito', 'Nunito', 'Comic Sans MS', sans-serif",
+      controlHeight: 40,
     },
     components: {
-      Button: { borderRadius: 20, fontSize: 14, height: 40 },
+      Button: { borderRadius: 20, fontSize: 14 },
       Card: {
         borderRadius: 12,
         boxShadow: `0 4px 16px ${colors.shadowLight}`,
@@ -245,9 +246,10 @@ export function ThemeProvider({ children }) {
       colorBorder: '#334155',
       colorBorderSecondary: '#2A3A51',
       fontFamily: "'MyNunito', 'Nunito', 'Comic Sans MS', sans-serif",
+      controlHeight: 40,
     },
     components: {
-      Button: { borderRadius: 20, fontSize: 14, height: 40 },
+      Button: { borderRadius: 20, fontSize: 14 },
       Card: {
         borderRadius: 12,
         boxShadow: `0 4px 16px ${colors.shadow}`,

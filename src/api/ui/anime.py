@@ -86,6 +86,20 @@ async def get_anime_full_details(
 
 
 
+@router.post("/library/anime/bulk-set-finished", status_code=status.HTTP_204_NO_CONTENT, summary="批量标记番剧完结状态")
+async def bulk_set_finished(
+    animeIds: List[int] = Body(..., description="番剧ID列表"),
+    isFinished: bool = Body(..., description="是否完结"),
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """批量将指定番剧的所有数据源标记为完结或取消完结。完结后预下载将跳过该源。"""
+    count = await crud.bulk_set_sources_finished_by_anime_ids(session, animeIds, isFinished)
+    action = "完结" if isFinished else "取消完结"
+    logger.info(f"用户 '{current_user.username}' 批量{action}了 {len(animeIds)} 部番剧的 {count} 个数据源")
+    return
+
+
 @router.put("/library/anime/{animeId}", status_code=status.HTTP_204_NO_CONTENT, summary="编辑影视信息")
 async def edit_anime_info(
     animeId: int,
@@ -102,16 +116,21 @@ async def edit_anime_info(
 
     # 新增：如果提供了TMDB ID和剧集组ID，则更新映射表
     if update_data.tmdbId and update_data.tmdbEpisodeGroupId:
-        logger.info(f"检测到TMDB ID和剧集组ID，开始更新映射表...")
-        try:
-            await metadata_manager.update_tmdb_mappings(
-                tmdb_tv_id=int(update_data.tmdbId),
-                group_id=update_data.tmdbEpisodeGroupId,
-                user=current_user
-            )
-        except Exception as e:
-            # 仅记录错误，不中断主流程，因为核心信息已保存
-            logger.error(f"更新TMDB映射失败: {e}", exc_info=True)
+        group_id = update_data.tmdbEpisodeGroupId
+        # 本地剧集组（local-*）已通过本地接口保存，无需从 TMDB API 拉取
+        if group_id.startswith("local-"):
+            logger.info(f"剧集组 {group_id} 为本地剧集组，跳过 TMDB API 映射更新。")
+        else:
+            logger.info(f"检测到TMDB ID和剧集组ID，开始更新映射表...")
+            try:
+                await metadata_manager.update_tmdb_mappings(
+                    tmdb_tv_id=int(update_data.tmdbId),
+                    group_id=group_id,
+                    user=current_user
+                )
+            except Exception as e:
+                # 仅记录错误，不中断主流程，因为核心信息已保存
+                logger.error(f"更新TMDB映射失败: {e}", exc_info=True)
     return
 
 

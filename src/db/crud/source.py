@@ -162,7 +162,7 @@ async def get_episodes_for_source(session: AsyncSession, source_id: int, page: i
     )
     result = await session.execute(stmt)
     episodes = [dict(row) for row in result.mappings()]
-    
+
     return {"total": total_count, "episodes": episodes}
 
 
@@ -171,7 +171,7 @@ async def clear_source_data(session: AsyncSession, source_id: int):
     source = await session.get(AnimeSource, source_id)
     if not source:
         return
-    
+
     # 修正：逐个删除文件，而不是删除一个不存在的目录，以提高健壮性
     episodes_to_delete_res = await session.execute(
         select(Episode.danmakuFilePath).where(Episode.sourceId == source_id)
@@ -218,7 +218,7 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
 
     # Toggle the target source
     source.isFavorited = not source.isFavorited
-    
+
     # If it was favorited, unfavorite all others for the same anime
     if source.isFavorited:
         stmt = (
@@ -227,7 +227,7 @@ async def toggle_source_favorite_status(session: AsyncSession, source_id: int) -
             .values(isFavorited=False)
         )
         await session.execute(stmt)
-    
+
     await session.commit()
     return source.isFavorited
 
@@ -357,6 +357,7 @@ async def get_incremental_refresh_sources_grouped(
             AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
             AnimeSource.incrementalRefreshFailures.label("incrementalRefreshFailures"),
             AnimeSource.lastRefreshLatestEpisodeAt.label("lastRefreshLatestEpisodeAt"),
+            AnimeSource.isFinished.label("isFinished"),
             func.coalesce(episode_count_subquery.c.episode_count, 0).label("episodeCount")
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
@@ -418,6 +419,7 @@ async def get_incremental_refresh_sources_grouped(
             "incrementalRefreshEnabled": row["incrementalRefreshEnabled"],
             "incrementalRefreshFailures": row["incrementalRefreshFailures"],
             "lastRefreshLatestEpisodeAt": row["lastRefreshLatestEpisodeAt"],
+            "isFinished": row["isFinished"],
             "episodeCount": row["episodeCount"]
         })
         total_sources += 1
@@ -665,4 +667,40 @@ async def get_source_episode_list(session: AsyncSession, source_id: int) -> List
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
 
+
+
+async def toggle_source_finished(session: AsyncSession, source_id: int) -> Optional[bool]:
+    """切换源的完结状态。返回新状态，源不存在返回 None。"""
+    source = await session.get(AnimeSource, source_id)
+    if not source:
+        return None
+    source.isFinished = not source.isFinished
+    await session.commit()
+    return source.isFinished
+
+
+async def batch_set_finished(session: AsyncSession, source_ids: List[int]) -> int:
+    """批量标记源为完结。"""
+    if not source_ids:
+        return 0
+    result = await session.execute(
+        update(AnimeSource)
+        .where(AnimeSource.id.in_(source_ids))
+        .values(isFinished=True)
+    )
+    await session.commit()
+    return result.rowcount
+
+
+async def batch_unset_finished(session: AsyncSession, source_ids: List[int]) -> int:
+    """批量取消源的完结标记。"""
+    if not source_ids:
+        return 0
+    result = await session.execute(
+        update(AnimeSource)
+        .where(AnimeSource.id.in_(source_ids))
+        .values(isFinished=False)
+    )
+    await session.commit()
+    return result.rowcount
 

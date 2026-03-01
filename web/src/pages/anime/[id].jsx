@@ -14,12 +14,14 @@ import {
   setAnimeSource,
   toggleSourceFavorite,
   toggleSourceIncremental,
+  toggleSourceFinished,
 } from '../../apis'
 import {
   Breadcrumb,
   Button,
   Card,
   Col,
+  Dropdown,
   Empty,
   Input,
   List,
@@ -38,7 +40,7 @@ import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
-import { EditOutlined, HomeOutlined } from '@ant-design/icons'
+import { EditOutlined, HomeOutlined, MenuOutlined } from '@ant-design/icons'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
 import { AddSourceModal } from '../../components/AddSourceModal'
@@ -793,7 +795,62 @@ export const AnimeDetail = () => {
                           {record.providerName !== 'custom' && (
                             <>
                               {isMobile ? (
-                                <Tooltip title={record.isFavorited ? '取消精确标记' : '精确标记源，请求弹幕时优先使用该源'}>
+                                <Dropdown
+                                  menu={{
+                                    items: [
+                                      {
+                                        key: 'favorite',
+                                        label: record.isFavorited ? '取消标记' : '精确标记',
+                                        icon: <MyIcon icon={record.isFavorited ? 'favorites-fill' : 'favorites'} size={16} />,
+                                        onClick: async () => {
+                                          try {
+                                            await toggleSourceFavorite({ sourceId: record.sourceId })
+                                            setSourceList(list => list.map(it =>
+                                              it.sourceId === record.sourceId ? { ...it, isFavorited: !it.isFavorited } : it
+                                            ))
+                                          } catch (error) {
+                                            messageApi.error(`操作失败: ${error.message}`)
+                                          }
+                                        },
+                                      },
+                                      {
+                                        key: 'incremental',
+                                        label: record.incrementalRefreshEnabled ? '关闭定时' : '开启定时',
+                                        icon: <MyIcon icon="clock" size={16} />,
+                                        onClick: async () => {
+                                          try {
+                                            await toggleSourceIncremental({ sourceId: record.sourceId })
+                                            setSourceList(list => list.map(it =>
+                                              it.sourceId === record.sourceId ? { ...it, incrementalRefreshEnabled: !it.incrementalRefreshEnabled } : it
+                                            ))
+                                          } catch (error) {
+                                            messageApi.error(`操作失败: ${error.message}`)
+                                          }
+                                        },
+                                      },
+                                      {
+                                        key: 'finished',
+                                        label: record.isFinished ? '取消完结' : '标记完结',
+                                        icon: <MyIcon icon="wanjie" size={16} />,
+                                        onClick: async () => {
+                                          try {
+                                            await toggleSourceFinished({ sourceId: record.sourceId })
+                                            setSourceList(list => list.map(it =>
+                                              it.sourceId === record.sourceId ? { ...it, isFinished: !it.isFinished } : it
+                                            ))
+                                          } catch (error) {
+                                            messageApi.error(`操作失败: ${error.message}`)
+                                          }
+                                        },
+                                      },
+                                    ],
+                                  }}
+                                  trigger={['click']}
+                                >
+                                  <Button size="small" type="text" icon={<MenuOutlined />} onClick={(e) => e.stopPropagation()} />
+                                </Dropdown>
+                              ) : (
+                                <>
                                   <Button
                                     size="small"
                                     type="text"
@@ -801,60 +858,17 @@ export const AnimeDetail = () => {
                                     onClick={async (e) => {
                                       e.stopPropagation()
                                       try {
-                                        await toggleSourceFavorite({
-                                          sourceId: record.sourceId,
-                                        })
-                                        setSourceList(list => {
-                                          return list.map(it => {
-                                            if (it.sourceId === record.sourceId) {
-                                              return {
-                                                ...it,
-                                                isFavorited: !it.isFavorited,
-                                              }
-                                            } else {
-                                              return it
-                                            }
-                                          })
-                                        })
+                                        await toggleSourceFavorite({ sourceId: record.sourceId })
+                                        setSourceList(list => list.map(it =>
+                                          it.sourceId === record.sourceId ? { ...it, isFavorited: !it.isFavorited } : it
+                                        ))
                                       } catch (error) {
                                         messageApi.error(`操作失败: ${error.message}`)
                                       }
                                     }}
-                                  />
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<MyIcon icon={record.isFavorited ? 'favorites-fill' : 'favorites'} size={16} />}
-                                  onClick={async (e) => {
-                                    e.stopPropagation()
-                                    try {
-                                      await toggleSourceFavorite({
-                                        sourceId: record.sourceId,
-                                      })
-                                      setSourceList(list => {
-                                        return list.map(it => {
-                                          if (it.sourceId === record.sourceId) {
-                                            return {
-                                              ...it,
-                                              isFavorited: !it.isFavorited,
-                                            }
-                                          } else {
-                                            return it
-                                          }
-                                        })
-                                      })
-                                    } catch (error) {
-                                      messageApi.error(`操作失败: ${error.message}`)
-                                    }
-                                  }}
-                                >
-                                  {record.isFavorited ? '取消标记' : '精确标记'}
-                                </Button>
-                              )}
-                              {isMobile ? (
-                                <Tooltip title={record.incrementalRefreshEnabled ? '关闭定时增量刷新' : '开启定时增量刷新'}>
+                                  >
+                                    {record.isFavorited ? '取消标记' : '精确标记'}
+                                  </Button>
                                   <Button
                                     size="small"
                                     type="text"
@@ -862,57 +876,36 @@ export const AnimeDetail = () => {
                                     onClick={async (e) => {
                                       e.stopPropagation()
                                       try {
-                                        await toggleSourceIncremental({
-                                          sourceId: record.sourceId,
-                                        })
-                                        setSourceList(list => {
-                                          return list.map(it => {
-                                            if (it.sourceId === record.sourceId) {
-                                              return {
-                                                ...it,
-                                                incrementalRefreshEnabled: !it.incrementalRefreshEnabled,
-                                              }
-                                            } else {
-                                              return it
-                                            }
-                                          })
-                                        })
+                                        await toggleSourceIncremental({ sourceId: record.sourceId })
+                                        setSourceList(list => list.map(it =>
+                                          it.sourceId === record.sourceId ? { ...it, incrementalRefreshEnabled: !it.incrementalRefreshEnabled } : it
+                                        ))
                                       } catch (error) {
                                         messageApi.error(`操作失败: ${error.message}`)
                                       }
                                     }}
-                                  />
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<MyIcon icon="clock" size={16} />}
-                                  onClick={async (e) => {
-                                    e.stopPropagation()
-                                    try {
-                                      await toggleSourceIncremental({
-                                        sourceId: record.sourceId,
-                                      })
-                                      setSourceList(list => {
-                                        return list.map(it => {
-                                          if (it.sourceId === record.sourceId) {
-                                            return {
-                                              ...it,
-                                              incrementalRefreshEnabled: !it.incrementalRefreshEnabled,
-                                            }
-                                          } else {
-                                            return it
-                                          }
-                                        })
-                                      })
-                                    } catch (error) {
-                                      messageApi.error(`操作失败: ${error.message}`)
-                                    }
-                                  }}
-                                >
-                                  {record.incrementalRefreshEnabled ? '关闭定时' : '开启定时'}
-                                </Button>
+                                  >
+                                    {record.incrementalRefreshEnabled ? '关闭定时' : '开启定时'}
+                                  </Button>
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<MyIcon icon="wanjie" size={16} />}
+                                    onClick={async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        await toggleSourceFinished({ sourceId: record.sourceId })
+                                        setSourceList(list => list.map(it =>
+                                          it.sourceId === record.sourceId ? { ...it, isFinished: !it.isFinished } : it
+                                        ))
+                                      } catch (error) {
+                                        messageApi.error(`操作失败: ${error.message}`)
+                                      }
+                                    }}
+                                  >
+                                    {record.isFinished ? '取消完结' : '标记完结'}
+                                  </Button>
+                                </>
                               )}
                               {isMobile ? (
                                 <Tooltip title="增量获取下一集">

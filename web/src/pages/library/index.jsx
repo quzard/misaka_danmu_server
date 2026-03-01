@@ -42,6 +42,7 @@ import {
   setAnimeDetail,
   toggleSourceFavorite,
   toggleSourceIncremental,
+  toggleSourceFinished,
   downloadPosterToLocal,
 } from '../../apis'
 import { MyIcon } from '@/components/MyIcon'
@@ -249,7 +250,16 @@ export const Library = () => {
       title: '影视名称',
       dataIndex: 'title',
       key: 'title',
-      width: 200,
+      width: 220,
+      render: (text, record) => {
+        const allFinished = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
+        return (
+          <Space size={4}>
+            <span>{text}</span>
+            {allFinished && <Tag color="default" style={{ marginInlineEnd: 0 }}>已完结</Tag>}
+          </Space>
+        )
+      },
     },
     {
       title: '类型',
@@ -425,6 +435,30 @@ export const Library = () => {
     }
   }
 
+  // 处理完结操作
+  const handleFinished = async (record) => {
+    const sources = record.sources || []
+    if (sources.length === 0) {
+      messageApi.warning('该作品没有数据源')
+      return
+    }
+    if (sources.length === 1) {
+      try {
+        await toggleSourceFinished({ sourceId: sources[0].sourceId })
+        messageApi.success('完结状态已更新')
+        getList()
+      } catch (error) {
+        messageApi.error('操作失败')
+      }
+    } else {
+      setSourceSelectAction('finished')
+      setSourceSelectSources(sources)
+      setSourceSelectTitle(record.title)
+      setSelectedSourceId(sources.find(s => s.isFinished)?.sourceId || sources[0].sourceId)
+      setSourceSelectOpen(true)
+    }
+  }
+
   // 确认源选择
   const handleSourceSelectConfirm = async () => {
     if (!selectedSourceId) {
@@ -438,6 +472,9 @@ export const Library = () => {
       } else if (sourceSelectAction === 'incremental') {
         await toggleSourceIncremental({ sourceId: selectedSourceId })
         messageApi.success('追更状态已更新')
+      } else if (sourceSelectAction === 'finished') {
+        await toggleSourceFinished({ sourceId: selectedSourceId })
+        messageApi.success('完结状态已更新')
       }
       setSourceSelectOpen(false)
       getList()
@@ -1081,7 +1118,7 @@ export const Library = () => {
         {isMobile && (
           <div className="mb-4">
             <div className="flex gap-2 mb-3 items-center">
-              <div className="flex-1 flex items-center">
+              <div className="flex flex-1" style={{ height: 40 }}>
                 <Input
                   placeholder="请输入影视名称"
                   value={searchInputValue}
@@ -1089,53 +1126,49 @@ export const Library = () => {
                   onPressEnter={handleSearch}
                   allowClear
                   style={{
-                    height: 44,
-                    lineHeight: '44px',
-                    paddingTop: 0,
-                    paddingBottom: 0,
+                    height: 40,
                     borderTopRightRadius: 0,
                     borderBottomRightRadius: 0,
-                    fontSize: 14
                   }}
-                  className="flex-1"
                 />
                 <Button
                   type="primary"
                   onClick={handleSearch}
                   style={{
-                    height: 44,
-                    lineHeight: '44px',
+                    height: 40,
+                    flexShrink: 0,
                     borderTopLeftRadius: 0,
-                    borderTopRightRadius: 9,
                     borderBottomLeftRadius: 0,
-                    borderBottomRightRadius: 9,
-                    fontSize: 14
+                    borderTopRightRadius: 8,
+                    borderBottomRightRadius: 8,
                   }}
                 >
                   搜索
                 </Button>
               </div>
               {keyword && (
-                <Button onClick={handleReset} style={{ height: 44 }}>
+                <Button onClick={handleReset} style={{ height: 40, flexShrink: 0 }}>
                   重置
                 </Button>
               )}
             </div>
-            <div className="flex gap-2">
-              <Button
-                block
-                size="large"
-                onClick={() => setIsScanDuplicatesOpen(true)}
-              >
-                扫描重复项
-              </Button>
-              <Button
-                block
-                size="large"
-                onClick={() => setIsRefreshModalOpen(true)}
-              >
-                批量管理
-              </Button>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Button
+                  block
+                  size="large"
+                  onClick={() => setIsScanDuplicatesOpen(true)}
+                >
+                  扫描重复项
+                </Button>
+                <Button
+                  block
+                  size="large"
+                  onClick={() => setIsRefreshModalOpen(true)}
+                >
+                  批量管理
+                </Button>
+              </div>
               <Button
                 type="primary"
                 block
@@ -1192,6 +1225,7 @@ export const Library = () => {
                     <Tag color="blue">{DANDAN_TYPE_DESC_MAPPING[record.type]}</Tag>
                     {record.season && <Tag>第{record.season}季</Tag>}
                     {record.year && <Tag>{record.year}年</Tag>}
+                    {record.sources?.length > 0 && record.sources.every(s => s.isFinished) && <Tag color="default">已完结</Tag>}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
                     <span>集数: {record.episodeCount || 0}</span>
@@ -1203,7 +1237,7 @@ export const Library = () => {
                   </div>
                 </div>
               </div>
-              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex-wrap">
+              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex-wrap items-center">
                 <Button
                   size="small"
                   type="text"
@@ -1221,24 +1255,33 @@ export const Library = () => {
                 >
                   编辑
                 </Button>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon={record.sources?.some(s => s.isFavorited) ? "favorites-fill" : "favorites"} size={16} />}
-                  className={record.sources?.some(s => s.isFavorited) ? 'text-yellow-500' : ''}
-                  onClick={() => handleFavorite(record)}
+                <Dropdown
+                  menu={{
+                    items: [
+                      {
+                        key: 'favorite',
+                        label: record.sources?.some(s => s.isFavorited) ? '取消标记' : '标记',
+                        icon: <MyIcon icon={record.sources?.some(s => s.isFavorited) ? 'favorites-fill' : 'favorites'} size={16} />,
+                        onClick: () => handleFavorite(record),
+                      },
+                      {
+                        key: 'incremental',
+                        label: record.sources?.some(s => s.incrementalRefreshEnabled) ? '取消追更' : '追更',
+                        icon: <MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'zengliang' : 'clock'} size={16} />,
+                        onClick: () => handleIncremental(record),
+                      },
+                      {
+                        key: 'finished',
+                        label: record.sources?.every(s => s.isFinished) ? '取消完结' : '完结',
+                        icon: <MyIcon icon="wanjie" size={16} />,
+                        onClick: () => handleFinished(record),
+                      },
+                    ],
+                  }}
+                  trigger={['click']}
                 >
-                  标记
-                </Button>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? "zengliang" : "clock"} size={16} />}
-                  className={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'text-green-500' : ''}
-                  onClick={() => handleIncremental(record)}
-                >
-                  追更
-                </Button>
+                  <Button size="small" type="text" icon={<MenuOutlined />}>操作</Button>
+                </Dropdown>
                 <Button
                   size="small"
                   type="text"
@@ -1343,12 +1386,14 @@ export const Library = () => {
               </Form.Item>
               <Tooltip title="搜索海报">
                 <Button
+                  size="small"
                   icon={<SearchOutlined />}
                   onClick={() => setPosterSearchVisible(true)}
                 />
               </Tooltip>
               <Tooltip title="URL直搜（下载到本地）">
                 <Button
+                  size="small"
                   icon={<LinkOutlined />}
                   loading={downloadingLocal}
                   onClick={async () => {
@@ -1380,7 +1425,8 @@ export const Library = () => {
               </Tooltip>
               <Tooltip title="刷新海报缓存">
                 <Button
-                  icon={<MyIcon icon="refresh" size={16} />}
+                  size="small"
+                  icon={<MyIcon icon="refresh" size={14} />}
                   onClick={async () => {
                     try {
                       await refreshPoster({ animeId, imageUrl })

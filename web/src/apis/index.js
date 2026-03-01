@@ -607,6 +607,18 @@ export const deleteAnimeSource = data =>
 export const deleteAnimeSourceSingle = data =>
   api.delete(`/api/ui/library/source/${data.sourceId}?deleteFiles=${data.deleteFiles !== false}`)
 
+/** 数据源完结状态切换 */
+export const toggleSourceFinished = data =>
+  api.put(`/api/ui/library/source/${data.sourceId}/toggle-finished`)
+
+/** 批量标记源为完结 */
+export const batchSetSourceFinished = data =>
+  api.post('/api/ui/library/incremental-refresh/batch-set-finished', data)
+
+/** 批量取消源的完结标记 */
+export const batchUnsetSourceFinished = data =>
+  api.post('/api/ui/library/incremental-refresh/batch-unset-finished', data)
+
 /** 数据源收藏状态 */
 export const toggleSourceFavorite = data =>
   api.put(`/api/ui/library/source/${data.sourceId}/favorite`)

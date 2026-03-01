@@ -450,12 +450,12 @@ const MobileHeader = ({ activeKey }) => {
                     {
                       key: 'theme-color',
                       label: '主题色',
-                      icon: 'setting',
+                      icon: 'MenuIcon-gexinghua-heise',
                     },
                     {
                       key: 'session-manager',
                       label: '会话管理',
-                      icon: 'checksurface',
+                      icon: 'huihuaguanli',
                     },
                     {
                       key: 'change-password',
@@ -475,12 +475,12 @@ const MobileHeader = ({ activeKey }) => {
                           <span>重启服务</span>
                         </Popconfirm>
                       ),
-                      icon: 'refresh',
+                      icon: 'zhongqi',
                     }] : []),
                     {
                       key: 'logout',
                       label: '退出登录',
-                      icon: 'user',
+                      icon: 'tuichudenglu',
                     },
                   ]}
                   onItemClick={handleMenuItemClick}
@@ -763,6 +763,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                 items: [
                   {
                     key: 'themeColor',
+                    icon: <MyIcon icon="MenuIcon-gexinghua-heise" size={16} />,
                     label: (
                       <div onClick={() => setIsThemeColorOpen(true)} className="text-base">
                         主题色
@@ -771,6 +772,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   },
                   {
                     key: 'sessionManager',
+                    icon: <MyIcon icon="huihuaguanli" size={16} />,
                     label: (
                       <div onClick={() => setIsSessionModalOpen(true)} className="text-base">
                         会话管理
@@ -779,6 +781,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   },
                   {
                     key: 'changePassword',
+                    icon: <MyIcon icon="key" size={16} />,
                     label: (
                       <div onClick={() => setIsPasswordModalOpen(true)} className="text-base">
                         修改密码
@@ -787,6 +790,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   },
                   ...(dockerAvailable ? [{
                     key: 'restart',
+                    icon: <MyIcon icon="zhongqi" size={16} />,
                     label: (
                       <Popconfirm
                         title="确认重启"
@@ -801,6 +805,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   }] : []),
                   {
                     key: 'logout',
+                    icon: <MyIcon icon="tuichudenglu" size={16} />,
                     label: (
                       <div onClick={onLogout} className="text-base">
                         退出登录

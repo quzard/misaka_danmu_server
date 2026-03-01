@@ -1,4 +1,5 @@
 import yaml
+import secrets
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 
@@ -49,6 +50,73 @@ class BangumiConfig(BaseModel):
     client_id: str = "" # 将从数据库加载
     client_secret: str = "" # 将从数据库加载
 
+def _generate_config_template(jwt_secret: str) -> str:
+    """生成带注释的 config.yml 模板内容"""
+    return f"""\
+# ============================================================
+# Misaka Danmaku API 配置文件
+# 首次启动自动生成，请根据实际环境修改后重启服务
+# ============================================================
+
+# 服务器监听配置
+server:
+  host: "0.0.0.0"      # 监听地址，0.0.0.0 表示所有网卡
+  port: 7768            # 监听端口
+
+# 数据库配置（支持 mysql / postgresql / sqlite）
+database:
+  type: "mysql"
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  password: "password"  # 请修改为实际密码
+  name: "danmaku_db"
+  # 连接池配置（一般无需修改）
+  pool_type: "QueuePool"
+  pool_size: 10
+  max_overflow: 50
+  pool_recycle: 300
+  pool_timeout: 30
+  pool_pre_ping: true
+  echo: false
+
+# JWT 鉴权配置
+jwt:
+  secret_key: "{jwt_secret}"   # 自动生成，请勿泄露
+  algorithm: "HS256"
+  access_token_expire_minutes: 4320   # 默认 3 天
+
+# 初始管理员账号（首次启动后生效，之后修改此处无效）
+admin:
+  initial_user: null        # 留空则使用默认账号
+  initial_password: null    # 留空则使用默认密码
+
+# 日志级别（DEBUG / INFO / WARNING / ERROR）
+log:
+  level: "INFO"
+
+# 缓存配置
+cache:
+  backend: "hybrid"          # memory / redis / database / hybrid
+  redis_url: ""              # Redis 连接地址，如 redis://localhost:6379（仅 redis/hybrid 模式需要）
+  redis_max_memory: "256mb"
+  redis_socket_timeout: 30
+  redis_socket_connect_timeout: 5
+  memory_maxsize: 1024
+  memory_default_ttl: 600
+
+# 豆瓣配置（可选）
+douban:
+  cookie: null               # 豆瓣 Cookie，用于获取豆瓣数据
+
+# 时区（默认 Asia/Shanghai）
+tz: "Asia/Shanghai"
+
+# 运行环境（production / development）
+environment: "production"
+"""
+
+
 # 2. 创建一个自定义的配置源，用于从 YAML 文件加载设置
 class YamlConfigSettingsSource(PydanticBaseSettingsSource):
     def __init__(self, settings_cls: type[BaseSettings]):
@@ -75,6 +143,26 @@ class YamlConfigSettingsSource(PydanticBaseSettingsSource):
         else:
             # 源码运行环境
             self.yaml_file = Path("config/config.yml")
+
+        # 自动创建：若配置文件不存在则生成带注释的模板
+        if not self.yaml_file.exists():
+            try:
+                self.yaml_file.parent.mkdir(parents=True, exist_ok=True)
+                jwt_secret = secrets.token_urlsafe(32)
+                template = _generate_config_template(jwt_secret)
+                self.yaml_file.write_text(template, encoding="utf-8")
+                import sys
+                print(
+                    f"\n{'='*60}\n"
+                    f"[Misaka] 未检测到配置文件，已自动生成模板：\n"
+                    f"  {self.yaml_file.resolve()}\n"
+                    f"请根据实际环境修改配置后重启服务。\n"
+                    f"{'='*60}\n",
+                    file=sys.stderr,
+                )
+            except OSError as e:
+                import sys
+                print(f"[Misaka] 警告：无法创建配置文件 {self.yaml_file}: {e}", file=sys.stderr)
 
     def get_field_value(self, field, field_name):
         return None, None, False

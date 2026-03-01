@@ -132,6 +132,7 @@ from .anime import (
     get_animes_with_tmdb_id,
     get_anime_details_for_dandan,
     scan_duplicate_animes,
+    bulk_set_sources_finished_by_anime_ids,
 )
 
 # Episode模块
@@ -179,8 +180,12 @@ from .source import (
     get_incremental_refresh_sources_grouped,
     batch_toggle_incremental_refresh,
     batch_set_favorite,
+    batch_unset_favorite,
     split_source_episodes,
     get_source_episode_list,
+    toggle_source_finished,
+    batch_set_finished,
+    batch_unset_finished,
 )
 
 # Danmaku模块
@@ -395,6 +400,7 @@ __all__ = [
     'get_animes_with_tmdb_id',
     'get_anime_details_for_dandan',
     'scan_duplicate_animes',
+    'bulk_set_sources_finished_by_anime_ids',
     # Episode
     'get_last_episode_for_source',
     'get_episode_for_refresh',

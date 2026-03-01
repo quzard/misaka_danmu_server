@@ -151,7 +151,6 @@ export const SearchBar = () => {
           >
             <Input.Search
               placeholder="请输入番剧名称"
-              size="large"
               enterButton="搜索"
               loading={loading}
               onSearch={value => {

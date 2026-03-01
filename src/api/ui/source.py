@@ -328,6 +328,7 @@ class IncrementalRefreshSourceInfo(BaseModel):
     incrementalRefreshFailures: int
     lastRefreshLatestEpisodeAt: Optional[datetime] = None
     episodeCount: int
+    isFinished: bool = False
 
 
 class IncrementalRefreshAnimeGroup(BaseModel):
@@ -455,6 +456,41 @@ async def batch_unset_favorite(
     """批量取消标记。"""
     count = await crud.batch_unset_favorite(session, payload.sourceIds)
     return {"message": f"成功取消 {count} 个源的标记", "count": count}
+
+
+@router.put("/library/source/{sourceId}/toggle-finished", status_code=status.HTTP_204_NO_CONTENT, summary="切换数据源的完结状态")
+async def toggle_source_finished(
+    sourceId: int,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """切换指定数据源的完结标记。完结后不再预加载下一集。"""
+    new_state = await crud.toggle_source_finished(session, sourceId)
+    if new_state is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+    return
+
+
+@router.post("/library/incremental-refresh/batch-set-finished", summary="批量标记完结")
+async def batch_set_finished(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量将指定源标记为完结。"""
+    count = await crud.batch_set_finished(session, payload.sourceIds)
+    return {"message": f"成功标记 {count} 个源为完结", "count": count}
+
+
+@router.post("/library/incremental-refresh/batch-unset-finished", summary="批量取消完结标记")
+async def batch_unset_finished(
+    payload: BatchSetFavoriteRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """批量取消指定源的完结标记。"""
+    count = await crud.batch_unset_finished(session, payload.sourceIds)
+    return {"message": f"成功取消 {count} 个源的完结标记", "count": count}
 
 
 # --- 拆分数据源 ---
