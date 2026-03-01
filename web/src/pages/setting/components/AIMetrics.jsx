@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, Row, Col, Statistic, Button, Select, message, Spin, Empty } from 'antd'
 import { ReloadOutlined, DeleteOutlined, DownloadOutlined } from '@ant-design/icons'
 import { getAIMetrics, clearAICache } from '@/apis'
+import { MyIcon } from '@/components/MyIcon'
 
 const { Option } = Select
 
@@ -93,7 +94,7 @@ const AIMetrics = () => {
       </div>
 
       {/* 调用统计 */}
-      <Card title="📞 调用统计" style={{ marginBottom: 16 }}>
+      <Card title={<span><MyIcon icon="liukongcelve" size={16} style={{ marginRight: 6 }} />调用统计</span>} style={{ marginBottom: 16 }}>
         <Row gutter={16}>
           <Col xs={24} sm={12} md={6}>
             <Statistic

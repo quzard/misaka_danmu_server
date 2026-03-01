@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { getRateLimitStatus } from '../../../apis/index.js'
+import { MyIcon } from '@/components/MyIcon'
 import {
   Card,
   Table,
@@ -101,7 +102,7 @@ export const RateLimitPanel = () => {
             <Row gutter={16} className="!mb-6">
               {/* 左侧卡片 - 弹幕下载流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🌐 弹幕下载流控" className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
+                <Card type="inner" title={<span><MyIcon icon="celve-cebiandaohang-liukongcelve" size={16} style={{ marginRight: 6 }} />弹幕下载流控</span>} className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -134,7 +135,7 @@ export const RateLimitPanel = () => {
 
               {/* 右侧卡片 - 后备调用流控 */}
               <Col xs={24} lg={12}>
-                <Card type="inner" title="🔄 后备调用流控" className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
+                <Card type="inner" title={<span><MyIcon icon="liukongcelvefuwubeifen" size={16} style={{ marginRight: 6 }} />后备调用流控</span>} className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -160,7 +161,7 @@ export const RateLimitPanel = () => {
                       />
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '12px', height: '32px' }}>
-                      <strong>📊 调用统计:</strong>
+                      <strong><MyIcon icon="liukongcelve" size={15} style={{ marginRight: 4 }} />调用统计:</strong>
                       <span>匹配: {status.fallback?.matchCount || 0} 次</span>
                       <span>搜索: {status.fallback?.searchCount || 0} 次</span>
                     </div>
