@@ -84,6 +84,21 @@ class BilibiliInfoFilter(logging.Filter):
                 return False
         return True  # 其他所有日志都通过
 
+# 新增：过滤 SQLAlchemy 连接池关闭时的良性噪音
+class SQLAlchemyPoolShutdownFilter(logging.Filter):
+    """
+    服务关闭时，SQLAlchemy 连接池尝试 terminate 连接，
+    但 uvloop TCPTransport 已关闭，会抛出 RuntimeError。
+    这是已知的良性噪音，降级为 DEBUG 避免误报。
+    """
+    def filter(self, record):
+        if record.name.startswith('sqlalchemy.pool') and record.levelno >= logging.ERROR:
+            msg = record.getMessage()
+            if 'Exception terminating connection' in msg or 'unable to perform operation' in msg:
+                record.levelno = logging.DEBUG
+                record.levelname = 'DEBUG'
+        return True
+
 # 新增：一个过滤器，用于翻译 apscheduler 的日志
 class ApschedulerLogTranslatorFilter(logging.Filter):
     """一个用于翻译 apscheduler 日志的过滤器。"""
@@ -160,6 +175,7 @@ def setup_logging():
     # 添加新的过滤器到根日志记录器，以便翻译所有输出
     logger.addFilter(ApschedulerLogTranslatorFilter())
     logger.addFilter(SensitiveInfoFilter())  # 添加敏感信息过滤器到所有处理器
+    logger.addFilter(SQLAlchemyPoolShutdownFilter())  # 压制连接池关闭时的良性噪音
 
     logger.addHandler(logging.StreamHandler()) # 控制台处理器
     logger.addHandler(logging.handlers.RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')) # 文件处理器
