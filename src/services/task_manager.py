@@ -78,6 +78,8 @@ class TaskManager:
         self._recovery_dependencies: Optional[Dict[str, Any]] = None
         # 通知服务引用，通过 set_notification_service 方法注入
         self._notification_service = None
+        # 关闭标志位：优雅关闭时设为 True，区分「程序关闭」和「用户主动取消」
+        self._is_shutting_down: bool = False
 
     def set_recovery_dependencies(self, dependencies: Dict[str, Any]):
         """设置任务恢复所需的依赖
@@ -245,11 +247,19 @@ class TaskManager:
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
             await self._emit_task_event(task, True, final_message)
         except asyncio.CancelledError:
-            self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
-            async with self._session_factory() as final_session:
-                await crud.finalize_task_in_history(
-                    final_session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
-                )
+            if self._is_shutting_down:
+                # 程序优雅关闭导致的取消，不修改数据库状态
+                # 保留「运行中」状态，重启后 _handle_interrupted_tasks 会自动恢复该任务
+                self.logger.info(f"程序关闭，任务 '{task.title}' (ID: {task.task_id}) 将在重启后自动恢复")
+                task.done_event.set()
+                return
+            else:
+                # 用户主动取消（abort_current_task 触发）
+                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
+                async with self._session_factory() as final_session:
+                    await crud.finalize_task_in_history(
+                        final_session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
+                    )
         except Exception:
             error_message = f"任务执行失败 - {traceback.format_exc()}"
             async with self._session_factory() as final_session:
@@ -268,6 +278,10 @@ class TaskManager:
 
     async def stop(self):
         """停止任务管理器。"""
+        # 标记正在关闭，使运行中任务因 CancelledError 中断时不覆盖数据库状态
+        # 这样重启后 _handle_interrupted_tasks 能找到这些任务并恢复
+        self._is_shutting_down = True
+
         if self._download_worker_task:
             self._download_worker_task.cancel()
             try:
