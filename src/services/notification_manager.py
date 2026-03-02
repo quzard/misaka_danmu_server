@@ -42,14 +42,34 @@ class NotificationManager:
             except Exception as e:
                 logger.error(f"加载通知渠道模块 {modname} 失败: {e}", exc_info=True)
 
+    async def _get_proxy_url(self) -> str:
+        """从数据库读取全局代理 URL（仅 http_socks 模式下有效）"""
+        try:
+            async with self._session_factory() as session:
+                from src.db import crud as _crud
+                proxy_mode = await _crud.get_config_value(session, "proxyMode", "none")
+                if proxy_mode == "http_socks":
+                    return await _crud.get_config_value(session, "proxyUrl", "") or ""
+                # 兼容旧配置
+                if proxy_mode == "none":
+                    proxy_enabled = await _crud.get_config_value(session, "proxyEnabled", "false")
+                    if str(proxy_enabled).lower() == "true":
+                        return await _crud.get_config_value(session, "proxyUrl", "") or ""
+        except Exception as e:
+            logger.warning(f"读取代理配置失败: {e}")
+        return ""
+
     async def initialize(self):
         """从数据库加载所有启用的渠道实例"""
         async with self._session_factory() as session:
             all_channels = await crud.get_all_notification_channels(session)
 
+        # 预读全局代理 URL
+        proxy_url = await self._get_proxy_url()
+
         for ch_data in all_channels:
             if ch_data.get("isEnabled"):
-                await self._load_channel(ch_data)
+                await self._load_channel(ch_data, proxy_url=proxy_url)
 
         # 汇总输出
         _P = "  - "
@@ -66,7 +86,7 @@ class NotificationManager:
                 log_lines.append(f"{_P}[可用] {cls.display_name}")
         logger.info("\n".join(log_lines))
 
-    async def _load_channel(self, ch_data: dict):
+    async def _load_channel(self, ch_data: dict, proxy_url: str = ""):
         """加载单个渠道实例"""
         channel_type = ch_data["channelType"]
         channel_id = ch_data["id"]
@@ -78,6 +98,12 @@ class NotificationManager:
         config = ch_data.get("config", {})
         # 将 eventsConfig 也放入 config 供渠道内部使用
         config["__events_config"] = ch_data.get("eventsConfig", {})
+        # 注入代理配置：若渠道开启了 useProxy 开关且全局代理 URL 有值，则注入
+        use_proxy = ch_data.get("useProxy", False)
+        if use_proxy and proxy_url:
+            config["__proxy_url"] = proxy_url
+        else:
+            config.pop("__proxy_url", None)
 
         try:
             instance = cls(
@@ -123,7 +149,9 @@ class NotificationManager:
         if not ch_data or not ch_data.get("isEnabled"):
             return
 
-        await self._load_channel(ch_data)
+        # 预读全局代理 URL
+        proxy_url = await self._get_proxy_url()
+        await self._load_channel(ch_data, proxy_url=proxy_url)
         new_instance = self.channels.get(channel_id)
         if new_instance:
             try:
