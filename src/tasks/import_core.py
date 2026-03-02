@@ -264,14 +264,81 @@ async def generic_import_task(
         selected_set = {idx for idx in selectedEpisodes if idx is not None}
         original_count = len(episodes)
         if selected_set:
-            episodes = [ep for ep in episodes if ep.episodeIndex in selected_set]
+            filtered = [ep for ep in episodes if ep.episodeIndex in selected_set]
         else:
-            episodes = []
-        logger.info(
-            f"媒体库整季导入: 按选择的分集筛选, 源共有 {original_count} 集, 保留 {len(episodes)} 集: {sorted(selected_set) if selected_set else []}"
-        )
-        if not episodes:
-            raise TaskSuccess("源中没有媒体库选择的任一分集，未导入新的弹幕。")
+            filtered = []
+
+        if filtered:
+            # 按集号精确匹配成功（弹幕源集号与 Emby 季内集号一致）
+            episodes = filtered
+            logger.info(
+                f"媒体库整季导入: 按选择的分集筛选(精确匹配), 源共有 {original_count} 集, 保留 {len(episodes)} 集: {sorted(selected_set)}"
+            )
+        else:
+            # 精确匹配失败：尝试通过 TMDB 剧集组等价映射将 Emby 季内集号翻译为弹幕源绝对集号
+            translated_set = set()
+            if selected_set and season:
+                try:
+                    # 先通过 tmdbId 查 anime 的 group_id
+                    group_id_for_mapping = None
+                    if tmdbId:
+                        # 查 anime_metadata 找关联的剧集组
+                        from src.db.orm_models import AnimeMetadata as _AnimeMetadata
+                        _meta_stmt = (
+                            select(_AnimeMetadata.animeId, _AnimeMetadata.tmdbEpisodeGroupId)
+                            .where(
+                                _AnimeMetadata.tmdbId == str(tmdbId),
+                                _AnimeMetadata.tmdbEpisodeGroupId.isnot(None),
+                            )
+                            .limit(1)
+                        )
+                        _meta_res = await session.execute(_meta_stmt)
+                        _meta_row = _meta_res.first()
+                        if _meta_row:
+                            group_id_for_mapping = _meta_row.tmdbEpisodeGroupId
+
+                    if group_id_for_mapping:
+                        ep_translation = await crud.get_episode_equivalence_batch(
+                            session, group_id_for_mapping, season, list(selected_set)
+                        )
+                        if ep_translation:
+                            translated_set = set(ep_translation.values())
+                            logger.info(
+                                f"媒体库整季导入: 剧集组等价映射翻译成功 (groupId={group_id_for_mapping}), "
+                                f"Emby相对集号 {sorted(selected_set)} → 弹幕源绝对集号 {sorted(translated_set)}"
+                            )
+                        else:
+                            logger.info(
+                                f"媒体库整季导入: 剧集组等价映射无结果 (groupId={group_id_for_mapping}, season={season}), 将降级为数量截取"
+                            )
+                    else:
+                        logger.info("媒体库整季导入: 未找到关联的TMDB剧集组，将降级为数量截取")
+                except Exception as _eq_err:
+                    logger.warning(f"媒体库整季导入: 剧集组等价映射查询异常: {_eq_err}，将降级为数量截取")
+
+            if translated_set:
+                filtered2 = [ep for ep in episodes if ep.episodeIndex in translated_set]
+                if filtered2:
+                    episodes = filtered2
+                    logger.info(
+                        f"媒体库整季导入: 按翻译后绝对集号筛选, 源共有 {original_count} 集, 保留 {len(episodes)} 集: {sorted(translated_set)}"
+                    )
+                else:
+                    # 翻译后仍无法匹配，降级为数量截取
+                    limit = len(selected_set)
+                    episodes = episodes[:limit]
+                    logger.info(
+                        f"媒体库整季导入: 翻译后集号仍无匹配(翻译集号={sorted(translated_set)})，降级为按数量截取前 {limit} 集"
+                    )
+            else:
+                # 无法翻译，降级为按数量截取前 N 集
+                limit = len(selected_set) if selected_set else original_count
+                episodes = episodes[:limit]
+                logger.info(
+                    f"媒体库整季导入: 无法翻译集号，降级为按数量截取前 {limit} 集, 源共有 {original_count} 集, 保留 {len(episodes)} 集"
+                )
+            if not episodes:
+                raise TaskSuccess("源中没有任何分集，未导入新的弹幕。")
         # 新增: 媒体库整季导入时, 在下载任何弹幕后先检查数据库中已有的分集
         indices_to_check = [ep.episodeIndex for ep in episodes if ep.episodeIndex is not None]
         existing_indices = []

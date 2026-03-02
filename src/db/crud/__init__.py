@@ -245,6 +245,8 @@ from .tmdb import (
     list_episode_groups,
     delete_episode_group_mappings,
     get_episode_equivalence,
+    get_episode_equivalence_batch,
+    get_episode_group_id_by_anime_id,
     get_associated_anime_ids,
 )
 
@@ -481,6 +483,8 @@ __all__ = [
     'save_tmdb_episode_group_mappings',
     'get_episode_group_mappings',
     'get_episode_equivalence',
+    'get_episode_equivalence_batch',
+    'get_episode_group_id_by_anime_id',
     'get_associated_anime_ids',
     # RateLimit
     'get_or_create_rate_limit_state',
