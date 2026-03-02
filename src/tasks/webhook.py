@@ -395,10 +395,10 @@ async def webhook_search_and_dispatch_task(
         ordered_settings = await crud.get_all_scraper_settings(session)
         provider_order = {s['providerName']: s['displayOrder'] for s in ordered_settings}
 
-        # 添加调试日志
-        logger.info(f"Webhook 任务: 排序前的媒体类型: media_type='{mediaType}', 共 {len(all_search_results)} 个结果")
-        for i, item in enumerate(all_search_results[:5]):
-            logger.info(f"  {i+1}. '{item.title}' (Provider: {item.provider}, Type: {item.type})")
+        # 添加调试日志（合并为一条）
+        _pre_sort_lines = [f"Webhook 任务: 排序前 media_type='{mediaType}', 共 {len(all_search_results)} 个结果:"] + \
+            [f"  {i+1}. '{item.title}' ({item.provider}, {item.type})" for i, item in enumerate(all_search_results[:5])]
+        logger.info("\n".join(_pre_sort_lines))
 
         # 🔧 查询库内已有源：搜索结果中哪些 provider+mediaId 已存在于 AnimeSource 表中
         existing_source_keys = set()
@@ -488,8 +488,8 @@ async def webhook_search_and_dispatch_task(
 
         all_search_results.sort(key=_compute_webhook_score, reverse=True)
 
-        # 添加排序后的调试日志（显示总分和库内已有状态）
-        logger.info(f"Webhook 任务: 排序后的前5个结果 (effective_year={effective_year}, match_title='{match_title}'):")
+        # 添加排序后的调试日志（合并为一条，显示总分和库内已有状态）
+        _sort_lines = [f"Webhook 任务: 排序后共 {len(all_search_results)} 个结果 (effective_year={effective_year}, match_title='{match_title}'):"]
         for i, item in enumerate(all_search_results[:5]):
             item_score = _compute_webhook_score(item)
             title_match = "✓" if item.title.strip() == match_title.strip() else "✗"
@@ -506,17 +506,15 @@ async def webhook_search_and_dispatch_task(
             similarity = fuzz.token_set_ratio(match_title, item.title)
             year_info = f"年份: {item.year}" if item.year else "年份: 未知"
             src_order = provider_order.get(item.provider, 999)
-            logger.info(f"  {i+1}. [{item_score}分] '{item.title}' (Provider: {item.provider}[#{src_order}], Type: {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}{in_library}")
-
-        # 评估所有候选项 (不限制数量)
-        logger.info(f"Webhook 任务: 共有 {len(all_search_results)} 个搜索结果")
+            _sort_lines.append(f"  {i+1}. [{item_score}分] '{item.title}' ({item.provider}[#{src_order}], {item.type}, {year_info}, 年份匹配: {year_match}, 标题匹配: {title_match}, 相似度: {similarity}%) {long_running_mark}{in_library}")
+        logger.info("\n".join(_sort_lines))
 
         # 使用AIMatcherManager进行AI匹配
         best_match = None
         ai_selected_index = None
 
         if await ai_matcher_manager.is_enabled():
-            logger.info("Webhook 任务: AI匹配已启用")
+            logger.info("Webhook 任务: AI匹配已启用，开始匹配...")
             try:
                 # 构建查询信息（使用 effective_year 而不是 webhook 的 year）
                 # 🔧 使用 match_title（名称转换后的标题）进行 AI 匹配
