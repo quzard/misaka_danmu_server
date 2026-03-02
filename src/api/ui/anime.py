@@ -52,11 +52,16 @@ async def get_library(
     type: Optional[str] = Query(None, description="类型过滤: movie=电影, tv=TV/OVA"),
     page: int = Query(1, ge=1, description="页码"),
     pageSize: int = Query(10, ge=1, description="每页数量"),
+    sortBy: str = Query("anime_created", description="排序字段: anime_created=媒体库入库时间, episode_fetched=分集入库时间"),
+    sortOrder: str = Query("desc", description="排序方向: asc=升序, desc=降序"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
     """获取数据库中所有已收录的番剧信息，支持搜索、类型过滤和分页。"""
-    paginated_result = await crud.get_library_anime(session, keyword=keyword, anime_type=type, page=page, page_size=pageSize)
+    paginated_result = await crud.get_library_anime(
+        session, keyword=keyword, anime_type=type, page=page, page_size=pageSize,
+        sort_by=sortBy, sort_order=sortOrder,
+    )
     return models.LibraryResponse(
         total=paginated_result["total"],
         list=[models.LibraryAnimeInfo.model_validate(item) for item in paginated_result["list"]]

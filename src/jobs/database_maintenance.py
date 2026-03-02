@@ -57,13 +57,21 @@ async def _clean_orphaned_images(session: AsyncSession) -> str:
 async def _optimize_database(session: AsyncSession, db_type: str) -> str:
     """根据数据库类型执行表优化。"""
     tables_to_optimize = ["comment", "task_history", "token_access_logs", "external_api_logs"]
-    
+
     if db_type == "mysql":
         logger.info("检测到 MySQL，正在执行 OPTIMIZE TABLE...")
-        await session.execute(text(f"OPTIMIZE TABLE {', '.join(tables_to_optimize)};"))
-        # 提交由调用方（任务）处理
-        return "OPTIMIZE TABLE 执行成功。"
-    
+        # OPTIMIZE TABLE 会导致 MySQL 服务器端强制断开已有连接，
+        # 与 PostgreSQL VACUUM 一样，用独立的 AUTOCOMMIT engine 执行，
+        # 执行完 dispose() 丢弃临时连接，避免污染主连接池。
+        db_url_obj = _get_db_url()
+        auto_commit_engine = create_async_engine(db_url_obj, isolation_level="AUTOCOMMIT")
+        try:
+            async with auto_commit_engine.connect() as connection:
+                await connection.execute(text(f"OPTIMIZE TABLE {', '.join(tables_to_optimize)};"))
+            return "OPTIMIZE TABLE 执行成功。"
+        finally:
+            await auto_commit_engine.dispose()
+
     elif db_type == "postgresql":
         logger.info("检测到 PostgreSQL，正在执行 VACUUM...")
         # VACUUM 不能在事务块内运行。我们创建一个具有自动提交功能的新引擎来执行此特定操作。

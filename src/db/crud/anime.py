@@ -23,7 +23,15 @@ from ..database import sync_postgres_sequence
 logger = logging.getLogger(__name__)
 
 
-async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None, anime_type: Optional[str] = None, page: int = 1, page_size: int = -1) -> Dict[str, Any]:
+async def get_library_anime(
+    session: AsyncSession,
+    keyword: Optional[str] = None,
+    anime_type: Optional[str] = None,
+    page: int = 1,
+    page_size: int = -1,
+    sort_by: str = "anime_created",
+    sort_order: str = "desc",
+) -> Dict[str, Any]:
     """
     【优化版 v3 】获取媒体库中的所有番剧及其关联信息（如分集数），支持搜索、类型过滤和分页。
 
@@ -38,6 +46,8 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
         anime_type: 类型过滤 ('movie' 或 'tv'，其中 'tv' 包含 tv_series 和 ova)
         page: 页码
         page_size: 每页数量，-1 表示不分页
+        sort_by: 排序字段，'anime_created'（媒体库入库时间）或 'episode_fetched'（分集入库时间）
+        sort_order: 排序方向，'asc' 或 'desc'
 
     Returns:
         包含 total 和 list 的字典
@@ -106,13 +116,39 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
     # ============================================================
     # 步骤 3: 阶段1 - 获取当前页的 anime_id 列表（极快）
     # ============================================================
-    id_stmt = select(Anime.id)
+    # 根据排序方式决定是否需要 JOIN Episode
+    if sort_by == "episode_fetched":
+        # 按分集入库时间排序：LEFT JOIN 取每个 anime 的最新 fetchedAt
+        # 无分集时 COALESCE 回退到 Anime.createdAt，保证所有番剧都参与排序
+        episode_latest_subq = (
+            select(
+                AnimeSource.animeId.label("animeId"),
+                func.max(Episode.fetchedAt).label("latestFetchedAt"),
+            )
+            .join(Episode, AnimeSource.id == Episode.sourceId)
+            .group_by(AnimeSource.animeId)
+        ).subquery()
+
+        sort_key = func.coalesce(
+            episode_latest_subq.c.latestFetchedAt,
+            Anime.createdAt,
+        )
+        id_stmt = (
+            select(Anime.id)
+            .outerjoin(episode_latest_subq, Anime.id == episode_latest_subq.c.animeId)
+        )
+    else:
+        # 默认按媒体库入库时间（Anime.createdAt）
+        sort_key = Anime.createdAt
+        id_stmt = select(Anime.id)
+
     if base_conditions:
         id_stmt = id_stmt.where(and_(*base_conditions))
     if keyword_condition is not None:
         id_stmt = id_stmt.where(keyword_condition)
 
-    id_stmt = id_stmt.order_by(Anime.createdAt.desc())
+    order_expr = sort_key.asc() if sort_order == "asc" else sort_key.desc()
+    id_stmt = id_stmt.order_by(order_expr)
     if page_size > 0:
         offset = (page - 1) * page_size
         id_stmt = id_stmt.offset(offset).limit(page_size)
@@ -149,6 +185,23 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
         .group_by(AnimeSource.animeId)
     ).subquery()
 
+    # 子查询3（仅 episode_fetched 排序时）: 每个 anime 的最新分集 fetchedAt
+    if sort_by == "episode_fetched":
+        episode_sort_subq = (
+            select(
+                AnimeSource.animeId.label("animeId"),
+                func.max(Episode.fetchedAt).label("latestFetchedAt"),
+            )
+            .join(Episode, AnimeSource.id == Episode.sourceId)
+            .where(AnimeSource.animeId.in_(anime_ids))
+            .group_by(AnimeSource.animeId)
+        ).subquery()
+        data_order_key = func.coalesce(episode_sort_subq.c.latestFetchedAt, Anime.createdAt)
+        data_order_expr = data_order_key.asc() if sort_order == "asc" else data_order_key.desc()
+    else:
+        episode_sort_subq = None
+        data_order_expr = order_expr
+
     # 主查询：只查当前页的 anime
     data_stmt = (
         select(
@@ -171,8 +224,10 @@ async def get_library_anime(session: AsyncSession, keyword: Optional[str] = None
         .where(Anime.id.in_(anime_ids))
         .outerjoin(source_count_subquery, Anime.id == source_count_subquery.c.animeId)
         .outerjoin(episode_count_subquery, Anime.id == episode_count_subquery.c.animeId)
-        .order_by(Anime.createdAt.desc())
     )
+    if episode_sort_subq is not None:
+        data_stmt = data_stmt.outerjoin(episode_sort_subq, Anime.id == episode_sort_subq.c.animeId)
+    data_stmt = data_stmt.order_by(data_order_expr)
 
     result = await session.execute(data_stmt)
     items = [dict(row) for row in result.mappings()]

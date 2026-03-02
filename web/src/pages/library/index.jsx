@@ -92,6 +92,8 @@ export const Library = () => {
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
   const [keyword, setKeyword] = useState('')
+  const [sortBy, setSortBy] = useState('anime_created')
+  const [sortOrder, setSortOrder] = useState('desc')
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
@@ -152,6 +154,8 @@ export const Library = () => {
         keyword: keyword,
         page: pagination.current,
         pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
       })
       setList(res.data?.list || [])
       setPagination(prev => ({
@@ -186,7 +190,7 @@ export const Library = () => {
 
   useEffect(() => {
     getList()
-  }, [keyword, pagination.current, pagination.pageSize])
+  }, [keyword, pagination.current, pagination.pageSize, sortBy, sortOrder])
 
   useEffect(() => {
     setSearchInputValue(keyword)
@@ -1080,6 +1084,48 @@ export const Library = () => {
     }
   }
 
+  // 排序选项配置（每个维度只有一项，点击同一项切换升降序）
+  const SORT_OPTIONS = [
+    { key: 'anime_created',   label: '媒体库入库时间' },
+    { key: 'episode_fetched', label: '分集入库时间'   },
+  ]
+  const currentSortLabel = SORT_OPTIONS.find(o => o.key === sortBy)?.label || '排序'
+
+  const sortDropdownItems = {
+    items: SORT_OPTIONS.map(opt => {
+      const isActive = opt.key === sortBy
+      // 激活项显示当前实际方向箭头；非激活项显示降序箭头（默认方向预览）
+      const arrowIcon = isActive
+        ? (sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-')
+        : 'xiajiantou-'
+      return {
+        key: opt.key,
+        label: (
+          <span className="flex items-center gap-2">
+            <span style={{ fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ant-color-primary)' : undefined }}>
+              {opt.label}
+            </span>
+            <MyIcon
+              icon={arrowIcon}
+              size={13}
+              style={{ color: isActive ? 'var(--ant-color-primary)' : undefined }}
+            />
+          </span>
+        ),
+      }
+    }),
+    onClick: ({ key }) => {
+      if (key === sortBy) {
+        // 同一维度：切换升降序
+        setSortOrder(o => o === 'desc' ? 'asc' : 'desc')
+      } else {
+        // 切换维度：保持当前升降序方向
+        setSortBy(key)
+      }
+      setPagination(n => ({ ...n, current: 1 }))
+    },
+  }
+
   return (
     <div className="my-6">
       <Card
@@ -1102,6 +1148,14 @@ export const Library = () => {
                   重置
                 </Button>
               )}
+              <Dropdown menu={sortDropdownItems}>
+                <Button>
+                  <span className="flex items-center gap-1">
+                    {currentSortLabel}
+                    <MyIcon icon={sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-'} size={14} />
+                  </span>
+                </Button>
+              </Dropdown>
               <Button onClick={() => setIsScanDuplicatesOpen(true)}>
                 扫描重复项
               </Button>
@@ -1169,14 +1223,24 @@ export const Library = () => {
                   批量管理
                 </Button>
               </div>
-              <Button
-                type="primary"
-                block
-                size="large"
-                onClick={() => setIsCreateModalOpen(true)}
-              >
-                自定义影视条目
-              </Button>
+              <div className="flex gap-2">
+                <Dropdown menu={sortDropdownItems}>
+                  <Button block size="large">
+                    <span className="flex items-center justify-center gap-1">
+                      {currentSortLabel}
+                      <MyIcon icon={sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-'} size={15} />
+                    </span>
+                  </Button>
+                </Dropdown>
+                <Button
+                  type="primary"
+                  block
+                  size="large"
+                  onClick={() => setIsCreateModalOpen(true)}
+                >
+                  自定义影视条目
+                </Button>
+              </div>
             </div>
           </div>
         )}
