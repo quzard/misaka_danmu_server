@@ -941,7 +941,7 @@ class TaskManager:
         try:
             if task_type == "generic_import":
                 # 动态导入以避免循环依赖
-                from . import tasks
+                from src import tasks
 
                 return lambda session, callback: tasks.generic_import_task(
                     provider=task_parameters.get("provider"),
@@ -969,7 +969,7 @@ class TaskManager:
                 )
 
             elif task_type == "webhook_search":
-                from .tasks import webhook as webhook_tasks
+                from src.tasks import webhook as webhook_tasks
 
                 return lambda session, callback: webhook_tasks.webhook_search_and_dispatch_task(
                     animeTitle=task_parameters.get("animeTitle"),
@@ -997,7 +997,7 @@ class TaskManager:
                 )
 
             elif task_type == "full_refresh":
-                from . import tasks as all_tasks
+                from src import tasks as all_tasks
                 source_id = task_parameters.get("sourceId")
                 if not source_id:
                     return None
@@ -1007,7 +1007,7 @@ class TaskManager:
                 )
 
             elif task_type == "incremental_refresh":
-                from . import tasks as all_tasks
+                from src import tasks as all_tasks
                 source_id = task_parameters.get("sourceId")
                 next_ep = task_parameters.get("nextEpisodeIndex")
                 if not source_id or next_ep is None:
@@ -1028,7 +1028,7 @@ class TaskManager:
                 )
 
             elif task_type == "auto_import":
-                from . import tasks as all_tasks
+                from src import tasks as all_tasks
                 from src.api.control.models import (
                     ControlAutoImportRequest, AutoImportSearchType, AutoImportMediaType,
                 )
