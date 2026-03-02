@@ -2437,6 +2437,16 @@ export const Scrapers = () => {
                   <Input.TextArea rows={isMobile ? 6 : 8} />
                 </Form.Item>
               )}
+
+              <Form.Item
+                name="dandanplayEpisodeIndexNormalize"
+                label="分集序号归一化（多季自动偏移）"
+                valuePropName="checked"
+                className="mb-4"
+                tooltip="开启后，当弹弹play返回的分集序号不以1开头（如多季连续编号的第29~34集）时，自动将其偏移为从第1集开始（第1~6集）。适用于弹弹play中跨季连续编号的番剧。"
+              >
+                <Switch />
+              </Form.Item>
             </>
           )}
 
