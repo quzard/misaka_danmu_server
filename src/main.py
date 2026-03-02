@@ -106,12 +106,9 @@ async def lifespan(app: FastAPI):
         os._exit(1)
     session_factory = app.state.db_session_factory
 
-    # 新增：在启动时清理任何未完成的任务
-    async with session_factory() as session:
-        interrupted_count = await crud.mark_interrupted_tasks_as_failed(session)
-        if interrupted_count > 0:
-            logging.getLogger(__name__).info(f"已将 {interrupted_count} 个中断的任务标记为失败。")
-
+    # 注意：中断任务的处理已移至 TaskManager._handle_interrupted_tasks()
+    # 该方法会在 task_manager.start() 时自动执行，尝试恢复可恢复的任务，
+    # 并将无法恢复的任务标记为失败。不要在此处提前标记，否则会导致任务无法恢复。
 
     # 新增:PostgreSQL序列自动修复(防止主键冲突)
     if get_db_type() == "postgresql":
