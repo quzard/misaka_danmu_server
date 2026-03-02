@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import crud, orm_models, models, sync_postgres_sequence, ConfigManager
 from src.services import ScraperManager, TaskManager, TaskSuccess, TaskPauseForRateLimit, MetadataSourceManager, TitleRecognitionManager
+from src.services.import_existence_checker import check_anime_existence
 from src.rate_limiter import RateLimiter, RateLimitExceededError
 from src.utils import download_image
 
@@ -39,24 +40,42 @@ async def _get_or_create_anime_with_deduplication(
     local_image_path: Optional[str],
     year: Optional[int],
     title_recognition_manager,
+    tmdb_id: Optional[str] = None,
+    tvdb_id: Optional[str] = None,
+    imdb_id: Optional[str] = None,
 ) -> int:
     """
     智能查找或创建anime，避免条目分裂。
 
-    优先级：
+    优先级（三段式）：
     1. 数据源检查（provider + mediaId）- 最精确
-    2. 标题匹配（现有逻辑）- 兜底方案
+    2. 元数据ID检查（tmdbId/tvdbId/imdbId + season）- 跨源防分裂
+    3. 标题匹配（现有逻辑）- 兜底方案
 
     返回 anime_id
     """
-    # 第1层：检查数据源是否已存在
-    existing_anime_id = await crud.get_anime_id_by_source_media_id(session, provider, mediaId)
-    if existing_anime_id:
-        logger.info(f"✓ 数据源已存在: provider={provider}, mediaId={mediaId}, 复用anime_id={existing_anime_id}")
-        return existing_anime_id
+    # 使用独立的三段式检查工具
+    result = await check_anime_existence(
+        session,
+        provider=provider,
+        media_id=mediaId,
+        title=title,
+        season=season,
+        year=year,
+        tmdb_id=tmdb_id,
+        tvdb_id=tvdb_id,
+        imdb_id=imdb_id,
+        title_recognition_manager=title_recognition_manager,
+    )
 
-    # 第2层：使用标题匹配（现有逻辑）
-    logger.info(f"○ 数据源未找到匹配，使用标题匹配: title='{title}', season={season}")
+    if result["found"]:
+        stage = result["stage"]
+        anime_id = result["anime_id"]
+        logger.info(f"✓ 三段式检查命中({stage}): {result['reason']}, 复用anime_id={anime_id}")
+        return anime_id
+
+    # 三段式全部未命中 → 使用现有 get_or_create_anime 创建新条目
+    logger.info(f"○ 三段式检查未命中，创建新条目: title='{title}', season={season}")
     anime_id = await crud.get_or_create_anime(
         session, title, mediaType, season, imageUrl, local_image_path, year, title_recognition_manager, provider
     )
@@ -369,7 +388,7 @@ async def generic_import_task(
                 else:
                     logger.info(f"anime条目已存在: ID={anime_id}, 标题='{existing_anime.title}'")
             else:
-                # 使用智能去重逻辑：优先检查数据源
+                # 使用智能去重逻辑：三段式检查
                 anime_id = await _get_or_create_anime_with_deduplication(
                     session=session,
                     provider=provider,
@@ -381,6 +400,9 @@ async def generic_import_task(
                     local_image_path=local_image_path,
                     year=year,
                     title_recognition_manager=title_recognition_manager,
+                    tmdb_id=tmdbId,
+                    tvdb_id=tvdbId,
+                    imdb_id=imdbId,
                 )
 
             # 更新元数据（如果anime是新创建的或字段为空）

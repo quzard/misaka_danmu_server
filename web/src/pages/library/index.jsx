@@ -44,6 +44,8 @@ import {
   toggleSourceIncremental,
   toggleSourceFinished,
   downloadPosterToLocal,
+  getConfig,
+  setConfig,
 } from '../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
@@ -92,8 +94,9 @@ export const Library = () => {
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
   const [keyword, setKeyword] = useState('')
-  const [sortBy, setSortBy] = useState('anime_created')
-  const [sortOrder, setSortOrder] = useState('desc')
+  // null 表示未从 DB 初始化，防止初始化前触发 getList
+  const [sortBy, setSortBy] = useState(null)
+  const [sortOrder, setSortOrder] = useState(null)
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
@@ -189,8 +192,25 @@ export const Library = () => {
   }, [keyword])
 
   useEffect(() => {
+    // sortBy/sortOrder 未从 DB 初始化完成时不触发
+    if (sortBy === null || sortOrder === null) return
     getList()
   }, [keyword, pagination.current, pagination.pageSize, sortBy, sortOrder])
+
+  // mount 时从 DB 读取上次保存的排序配置，读完后才触发 getList
+  useEffect(() => {
+    Promise.all([
+      getConfig('librarySortBy'),
+      getConfig('librarySortOrder'),
+    ]).then(([byRes, orderRes]) => {
+      setSortBy(byRes.data?.value || 'anime_created')
+      setSortOrder(orderRes.data?.value || 'desc')
+    }).catch(() => {
+      // 读取失败则使用默认值
+      setSortBy('anime_created')
+      setSortOrder('desc')
+    })
+  }, [])
 
   useEffect(() => {
     setSearchInputValue(keyword)
@@ -255,13 +275,9 @@ export const Library = () => {
       dataIndex: 'title',
       key: 'title',
       width: 220,
-      render: (text, record) => {
-        const allFinished = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
+      render: (text) => {
         return (
-          <Space size={4}>
-            <span>{text}</span>
-            {allFinished && <Tag color="default" style={{ marginInlineEnd: 0 }}>已完结</Tag>}
-          </Space>
+          <span>{text}</span>
         )
       },
     },
@@ -314,9 +330,9 @@ export const Library = () => {
       width: 150,
       fixed: 'right',
       render: (_, record) => {
-        // 判断是否有已标记或已追更的源
         const hasFavorited = record.sources?.some(s => s.isFavorited)
         const hasIncremental = record.sources?.some(s => s.incrementalRefreshEnabled)
+        const allFinished = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
         return (
           <Space>
             <Tooltip title="编辑影视信息">
@@ -339,23 +355,35 @@ export const Library = () => {
               </span>
             </Tooltip>
 
-            <Tooltip title={hasFavorited ? "已标记（点击管理）" : "标记精确源"}>
-              <span
-                className={`cursor-pointer hover:text-primary ${hasFavorited ? 'text-yellow-500' : ''}`}
-                onClick={() => handleFavorite(record)}
-              >
-                <MyIcon icon={hasFavorited ? "favorites-fill" : "favorites"} size={20}></MyIcon>
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: 'favorite',
+                    label: hasFavorited ? '取消标记' : '标记',
+                    icon: <MyIcon icon={hasFavorited ? 'favorites-fill' : 'favorites'} size={16} className={hasFavorited ? 'text-yellow-400' : ''} />,
+                    onClick: () => handleFavorite(record),
+                  },
+                  {
+                    key: 'incremental',
+                    label: hasIncremental ? '取消追更' : '追更',
+                    icon: <MyIcon icon={hasIncremental ? 'zengliang' : 'clock'} size={16} className={hasIncremental ? 'text-green-500' : ''} />,
+                    onClick: () => handleIncremental(record),
+                  },
+                  {
+                    key: 'finished',
+                    label: allFinished ? '取消完结' : '完结',
+                    icon: <MyIcon icon={allFinished ? 'wanjie1' : 'wanjie'} size={16} className={allFinished ? 'text-blue-500' : 'text-gray-400'} />,
+                    onClick: () => handleFinished(record),
+                  },
+                ],
+              }}
+              trigger={['click']}
+            >
+              <span className="cursor-pointer hover:text-primary">
+                <MenuOutlined style={{ fontSize: 18 }} />
               </span>
-            </Tooltip>
-
-            <Tooltip title={hasIncremental ? "追更中（点击管理）" : "开启追更"}>
-              <span
-                className={`cursor-pointer hover:text-primary ${hasIncremental ? 'text-green-500' : ''}`}
-                onClick={() => handleIncremental(record)}
-              >
-                <MyIcon icon={hasIncremental ? "zengliang" : "clock"} size={20}></MyIcon>
-              </span>
-            </Tooltip>
+            </Dropdown>
 
             <Tooltip title="详情">
               <span
@@ -1117,10 +1145,13 @@ export const Library = () => {
     onClick: ({ key }) => {
       if (key === sortBy) {
         // 同一维度：切换升降序
-        setSortOrder(o => o === 'desc' ? 'asc' : 'desc')
+        const newOrder = sortOrder === 'desc' ? 'asc' : 'desc'
+        setSortOrder(newOrder)
+        setConfig('librarySortOrder', newOrder)
       } else {
         // 切换维度：保持当前升降序方向
         setSortBy(key)
+        setConfig('librarySortBy', key)
       }
       setPagination(n => ({ ...n, current: 1 }))
     },
@@ -1289,7 +1320,6 @@ export const Library = () => {
                     <Tag color="blue">{DANDAN_TYPE_DESC_MAPPING[record.type]}</Tag>
                     {record.season && <Tag>第{record.season}季</Tag>}
                     {record.year && <Tag>{record.year}年</Tag>}
-                    {record.sources?.length > 0 && record.sources.every(s => s.isFinished) && <Tag color="default">已完结</Tag>}
                   </div>
                   <div className="text-sm text-gray-600 dark:text-gray-400">
                     <span>集数: {record.episodeCount || 0}</span>
@@ -1325,19 +1355,19 @@ export const Library = () => {
                       {
                         key: 'favorite',
                         label: record.sources?.some(s => s.isFavorited) ? '取消标记' : '标记',
-                        icon: <MyIcon icon={record.sources?.some(s => s.isFavorited) ? 'favorites-fill' : 'favorites'} size={16} />,
+                        icon: <MyIcon icon={record.sources?.some(s => s.isFavorited) ? 'favorites-fill' : 'favorites'} size={16} className={record.sources?.some(s => s.isFavorited) ? 'text-yellow-400' : ''} />,
                         onClick: () => handleFavorite(record),
                       },
                       {
                         key: 'incremental',
                         label: record.sources?.some(s => s.incrementalRefreshEnabled) ? '取消追更' : '追更',
-                        icon: <MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'zengliang' : 'clock'} size={16} />,
+                        icon: <MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'zengliang' : 'clock'} size={16} className={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'text-green-500' : ''} />,
                         onClick: () => handleIncremental(record),
                       },
                       {
                         key: 'finished',
                         label: record.sources?.every(s => s.isFinished) ? '取消完结' : '完结',
-                        icon: <MyIcon icon="wanjie" size={16} />,
+                        icon: <MyIcon icon={record.sources?.every(s => s.isFinished) ? 'wanjie1' : 'wanjie'} size={16} className={record.sources?.every(s => s.isFinished) ? 'text-blue-500' : 'text-gray-400'} />,
                         onClick: () => handleFinished(record),
                       },
                     ],
