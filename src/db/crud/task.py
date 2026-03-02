@@ -704,14 +704,17 @@ async def clear_task_state_cache(session: AsyncSession, task_id: str):
 
 
 async def get_all_running_task_states(session: AsyncSession) -> List[Dict[str, Any]]:
-    """获取所有正在运行的任务状态缓存,用于服务重启后的任务恢复"""
+    """获取所有运行中或已暂停的任务状态缓存，用于服务重启后的任务恢复。
+
+    同时查询「运行中」和「已暂停」的任务，因为两者在程序重启后都需要被恢复或标记失败。
+    """
     # 使用CAST强制字符集一致,解决字符集冲突问题
     result = await session.execute(
         select(TaskStateCache, TaskHistory)
         .join(TaskHistory,
               func.cast(TaskStateCache.taskId, String) ==
               func.cast(TaskHistory.taskId, String))
-        .where(TaskHistory.status == "运行中")
+        .where(TaskHistory.status.in_(["运行中", "已暂停"]))
     )
 
     task_states = []

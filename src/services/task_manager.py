@@ -790,21 +790,30 @@ class TaskManager:
         return new_task_id
 
     async def _handle_interrupted_tasks(self):
-        """处理服务重启时中断的任务（包括运行中和排队中的任务）"""
+        """处理服务重启时中断的任务（运行中、已暂停、排队中）"""
         try:
             async with self._session_factory() as session:
-                # 1. 处理运行中的任务（这些任务有 TaskStateCache 记录）
-                running_tasks = await crud.get_all_running_task_states(session)
+                # 1. 处理运行中 + 已暂停的任务（这些任务有 TaskStateCache 记录）
+                #    两种状态在重启后都需要重新提交到队列执行
+                active_tasks = await crud.get_all_running_task_states(session)
 
-                if running_tasks:
-                    self.logger.info(f"发现 {len(running_tasks)} 个运行中被中断的任务，正在处理...")
-                    for task_info in running_tasks:
-                        await self._try_recover_task(task_info, is_running=True)
-                    # 将运行中的任务标记为失败
+                if active_tasks:
+                    running_count = sum(1 for t in active_tasks if t.get("historyStatus") == "运行中")
+                    paused_count = sum(1 for t in active_tasks if t.get("historyStatus") == "已暂停")
+                    self.logger.info(
+                        f"发现 {len(active_tasks)} 个中断任务（运行中: {running_count} 个, 已暂停: {paused_count} 个），正在尝试恢复..."
+                    )
+                    active_recovered = 0
+                    for task_info in active_tasks:
+                        if await self._try_recover_task(task_info):
+                            active_recovered += 1
+
+                    # 将原来的中断任务（运行中/已暂停）全部标记为失败
+                    # 恢复成功的任务已创建了新的任务ID，原记录可以安全标记为失败
                     await crud.mark_interrupted_tasks_as_failed(session)
-                    self.logger.info("已处理所有运行中被中断的任务")
+                    self.logger.info(f"中断任务处理完成: {active_recovered} 个已恢复重新入队，{len(active_tasks) - active_recovered} 个无法恢复（原记录已标记为失败）")
 
-                # 2. 处理排队中的任务（这些任务直接从 TaskHistory 表恢复）
+                # 2. 处理排队中的任务（这些任务直接从 TaskHistory 表恢复，无需 TaskStateCache）
                 pending_tasks = await crud.get_pending_recoverable_tasks(session)
 
                 if pending_tasks:
@@ -813,7 +822,7 @@ class TaskManager:
                     failed_count = 0
 
                     for task_info in pending_tasks:
-                        if await self._try_recover_task(task_info, is_running=False):
+                        if await self._try_recover_task(task_info):
                             recovered_count += 1
                         else:
                             failed_count += 1
@@ -830,18 +839,17 @@ class TaskManager:
                 if unrecoverable_count > 0:
                     self.logger.info(f"已将 {unrecoverable_count} 个无法恢复的排队中任务标记为失败（缺少任务类型信息）")
 
-                if not running_tasks and not pending_tasks and not unrecoverable_count:
+                if not active_tasks and not pending_tasks and not unrecoverable_count:
                     self.logger.info("没有发现需要处理的中断任务")
 
         except Exception as e:
             self.logger.error(f"处理中断任务时发生错误: {e}", exc_info=True)
 
-    async def _try_recover_task(self, task_info: Dict, is_running: bool = True) -> bool:
-        """尝试恢复单个任务
+    async def _try_recover_task(self, task_info: Dict) -> bool:
+        """尝试恢复单个中断任务（运行中、已暂停或排队中）
 
         Args:
-            task_info: 任务信息字典
-            is_running: True表示是运行中被中断的任务，False表示是排队中的任务
+            task_info: 任务信息字典，包含 taskId、taskType、taskParameters 等
 
         Returns:
             bool: 恢复成功返回True，失败返回False
@@ -851,6 +859,7 @@ class TaskManager:
         task_title = task_info.get("taskTitle", "未知任务")
         unique_key = task_info.get("uniqueKey")
         queue_type = task_info.get("queueType", "download")
+        history_status = task_info.get("historyStatus", "未知")
 
         # 如果没有任务类型或参数，无法恢复
         if not task_type or not task_info.get("taskParameters"):
@@ -866,15 +875,10 @@ class TaskManager:
                 self.logger.warning(f"任务恢复依赖未设置，无法恢复任务 '{task_title}' (ID: {task_id})")
                 return False
 
-            # 对于运行中的任务，只记录日志（可能已部分完成，不安全重启）
-            if is_running:
-                self.logger.info(f"运行中的任务 '{task_title}' (ID: {task_id}) 因服务中断而失败，类型: {task_type}")
-                return False
-
-            # 对于排队中的任务，尝试重建协程工厂并重新提交
+            # 统一尝试重建协程工厂并重新提交（运行中、已暂停、排队中均使用相同恢复逻辑）
             coro_factory = await self._rebuild_coro_factory(task_type, task_parameters)
             if not coro_factory:
-                self.logger.warning(f"无法为任务类型 '{task_type}' 重建协程工厂，任务 '{task_title}' (ID: {task_id}) 恢复失败")
+                self.logger.warning(f"无法为任务类型 '{task_type}' 重建协程工厂，任务 '{task_title}' (ID: {task_id}) [{history_status}] 恢复失败")
                 return False
 
             # 重新提交任务到队列（使用新的任务ID，保留原有标题）
@@ -886,7 +890,7 @@ class TaskManager:
                 task_parameters=task_parameters,
                 queue_type=queue_type
             )
-            self.logger.info(f"成功恢复任务 '{task_title}'，新任务ID: {new_task_id}")
+            self.logger.info(f"成功恢复任务 '{task_title}' [{history_status}]，新任务ID: {new_task_id}")
             return True
 
         except HTTPException as e:
