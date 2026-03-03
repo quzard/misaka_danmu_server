@@ -118,6 +118,8 @@ class WeChatChannel(BaseNotificationChannel):
         self._token_expires_at: float = 0.0
         self._crypt: Optional[_WXCrypt] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # 按钮编号→callback_data 映射（用于数字选择降级交互）
+        self._button_mappings: Dict[str, list] = {}
 
     def get_capabilities(self) -> ChannelCapabilities:
         return self._CAPABILITIES
@@ -364,6 +366,27 @@ class WeChatChannel(BaseNotificationChannel):
             await self._render_result(user_id, result)
 
     async def _handle_text(self, user_id: str, text: str):
+        # 数字选择：检查是否有保存的按钮映射
+        if text.isdigit():
+            mapping = self._button_mappings.get(user_id)
+            if mapping:
+                idx = int(text) - 1  # 用户输入从1开始
+                if 0 <= idx < len(mapping):
+                    callback_data = mapping[idx]
+                    self.logger.info(f"数字选择 [{text}] → 回调: {callback_data}")
+                    # 清除映射，防止重复触发
+                    self._button_mappings.pop(user_id, None)
+                    result = await self.service.handle_callback(
+                        callback_data, user_id, self, chat_id=user_id, message_id=0
+                    )
+                    if result and result.text:
+                        await self._render_result(user_id, result)
+                    return
+                else:
+                    await self._send_text_to(user_id, f"⚠️ 无效编号，请输入 1-{len(mapping)} 之间的数字。")
+                    return
+
+        # 普通文本 → 对话状态机
         result: CommandResult = await self.service.handle_text_input(
             text, user_id, self, chat_id=user_id
         )
@@ -372,10 +395,37 @@ class WeChatChannel(BaseNotificationChannel):
 
     async def _render_result(self, user_id: str, result: CommandResult):
         """渲染响应 — 企业微信无内联按钮，降级为编号文本列表"""
+        if not result:
+            return
         text = result.text
+
+        # answer_callback_text 降级为普通文本
+        if not text and result.answer_callback_text:
+            text = result.answer_callback_text
+
+        if not text:
+            return
+
+        # 按钮降级为纯文本列表，并保存编号→callback_data 映射
         if result.reply_markup:
             from src.services.notification_service import NotificationService
             text = NotificationService._buttons_to_text_fallback(text, result.reply_markup)
+            # 提取 callback_data 列表，顺序与编号一致
+            mapping = []
+            for row in result.reply_markup:
+                for btn in row:
+                    cb = btn.get("callback_data", "")
+                    if cb:
+                        mapping.append(cb)
+            if mapping:
+                self._button_mappings[user_id] = mapping
+                text += f"\n\n💡 回复数字 1-{len(mapping)} 选择操作"
+            else:
+                self._button_mappings.pop(user_id, None)
+        else:
+            # 没有按钮时清除旧映射，避免误触
+            self._button_mappings.pop(user_id, None)
+
         await self._send_text_to(user_id, text)
 
     async def test_connection(self) -> Dict[str, Any]:

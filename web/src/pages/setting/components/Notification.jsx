@@ -296,7 +296,8 @@ export const Notification = () => {
       title: '模式', key: 'mode',
       render: (_, r) => {
         const mode = r.config?.mode
-        return mode === 'webhook' ? <Tag color="blue">Webhook</Tag> : <Tag>轮询</Tag>
+        const isWebhook = mode === 'webhook' || r.channelType === 'wechat'
+        return isWebhook ? <Tag color="blue">Webhook</Tag> : <Tag>轮询</Tag>
       },
     },
     {
@@ -328,7 +329,7 @@ export const Notification = () => {
         </div>
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
           <Tag>{typeInfo?.displayName || record.channelType}</Tag>
-          {mode === 'webhook' ? <Tag color="blue">Webhook</Tag> : <Tag>轮询</Tag>}
+          {(mode === 'webhook' || record.channelType === 'wechat') ? <Tag color="blue">Webhook</Tag> : <Tag>轮询</Tag>}
           {record.useProxy && <Tag color="orange">代理</Tag>}
         </div>
         <Space size="small" wrap>
