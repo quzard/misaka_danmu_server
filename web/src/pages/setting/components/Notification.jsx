@@ -438,15 +438,16 @@ export const Notification = () => {
             const webhookUrl = `${(configValues?.server_url || configValues?.webhook_base_url || window.location.origin).replace(/\/$/, '')}/api/notification/channels/${editingChannel.id}/webhook?api_key=${webhookApiKey}`
             return (
               <Form.Item label="Webhook 回调地址">
-                <Input.Search
-                  readOnly
-                  value={webhookUrl}
-                  enterButton={<CopyOutlined />}
-                  onSearch={() => {
-                    navigator.clipboard.writeText(webhookUrl)
-                    message.success('已复制到剪贴板')
-                  }}
-                />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  <Input readOnly value={webhookUrl} style={{ flex: 1 }} />
+                  <Button
+                    icon={<CopyOutlined />}
+                    onClick={() => {
+                      navigator.clipboard.writeText(webhookUrl)
+                      message.success('已复制到剪贴板')
+                    }}
+                  />
+                </div>
               </Form.Item>
             )
           })()}
