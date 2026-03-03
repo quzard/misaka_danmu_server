@@ -8,7 +8,7 @@ import { useState, useCallback } from 'react'
 import { Input, Modal, Tag, Tooltip, Space, Table, Dropdown, theme, Button } from 'antd'
 import { FolderOutlined, RightOutlined, DownOutlined, MenuOutlined } from '@ant-design/icons'
 import {
-  DndContext, DragOverlay, PointerSensor, TouchSensor,
+  DndContext, DragOverlay, TouchSensor, MouseSensor,
   useSensor, useSensors, closestCenter,
   useDraggable, useDroppable,
 } from '@dnd-kit/core'
@@ -186,7 +186,7 @@ const DraggableCard = ({ record, ...handlers }) => {
     data: { type: 'anime', animeId: record.animeId, groupId: record.groupId ?? null },
   })
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} style={{ cursor: 'grab', touchAction: 'none' }}>
+    <div ref={setNodeRef} {...listeners} {...attributes} style={{ cursor: 'grab' }}>
       <AnimeCard record={record} isDragging={isDragging} {...handlers} />
     </div>
   )
@@ -222,7 +222,7 @@ const MobileLibraryCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, o
   return (
     <div ref={setNodeRef} {...listeners} {...attributes}
       className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 mb-2 bg-white dark:bg-gray-800"
-      style={{ opacity: isDragging ? 0.45 : 1, touchAction: 'none', userSelect: 'none' }}>
+      style={{ opacity: isDragging ? 0.45 : 1, userSelect: 'none' }}>
       <div className="flex gap-3">
         {/* 海报（点击进入详情） */}
         <div className="flex-shrink-0 w-20 h-28 rounded overflow-hidden bg-gray-100 dark:bg-gray-700 cursor-pointer hover:opacity-80 transition-opacity"
@@ -545,9 +545,14 @@ const LibraryGroupView = ({
   const [pendingInfo, setPendingInfo] = useState(null)
   const [newGroupName, setNewGroupName] = useState('')
 
+  // 鼠标：移动 8px 触发；触摸：长按 400ms 且移动容差 8px 才触发，避免轻扫误触
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 400, tolerance: 8 },
+    }),
   )
 
   const handleDragStart = ({ active }) => {

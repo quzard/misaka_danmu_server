@@ -120,6 +120,7 @@ TEMPLATE_VARIABLES = [
     {"name": "${animeId}", "desc": "作品ID", "example": "234"},
     {"name": "${episodeId}", "desc": "分集ID", "example": "25000234010001"},
     {"name": "${sourceId}", "desc": "数据源ID", "example": "1"},
+    {"name": "${tmdbId}", "desc": "TMDB ID（未关联时为空）", "example": "209867"},
 ]
 
 
