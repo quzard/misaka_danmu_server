@@ -13,7 +13,7 @@ from ..orm_models import (
     Anime, AnimeSource, Episode, AnimeAlias, AnimeMetadata,
     Scraper, CacheData, ApiToken, TokenAccessLog, UaRule,
     TmdbEpisodeMapping, RateLimitState, ExternalApiLog,
-    WebhookTask, TaskHistory, ScheduledTask, MetadataSource
+    WebhookTask, TaskHistory, ScheduledTask, MetadataSource, AnimeGroup
 )
 from .. import models
 from src.core.timezone import get_now
@@ -213,6 +213,8 @@ async def get_library_anime(
             Anime.season,
             Anime.year,
             Anime.createdAt.label("createdAt"),
+            Anime.groupId.label("groupId"),
+            AnimeGroup.name.label("groupName"),
             # 电影固定为1集，否则使用实际最大集数
             case(
                 (Anime.type == 'movie', 1),
@@ -224,6 +226,7 @@ async def get_library_anime(
         .where(Anime.id.in_(anime_ids))
         .outerjoin(source_count_subquery, Anime.id == source_count_subquery.c.animeId)
         .outerjoin(episode_count_subquery, Anime.id == episode_count_subquery.c.animeId)
+        .outerjoin(AnimeGroup, Anime.groupId == AnimeGroup.id)
     )
     if episode_sort_subq is not None:
         data_stmt = data_stmt.outerjoin(episode_sort_subq, Anime.id == episode_sort_subq.c.animeId)
