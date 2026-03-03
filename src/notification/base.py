@@ -18,7 +18,7 @@ import time
 
 class ChannelCapability(Enum):
     """渠道能力枚举 — 声明渠道支持的交互特性"""
-    INLINE_BUTTONS = "inline_buttons"       # 支持内联按钮（InlineKeyboard）
+    INLINE_BUTTONS = "inline_buttons"        # 支持内联按钮（InlineKeyboard）
     MENU_COMMANDS = "menu_commands"          # 支持菜单命令（BotCommand）
     MESSAGE_EDITING = "message_editing"      # 支持编辑已发送的消息
     MESSAGE_DELETION = "message_deletion"    # 支持删除消息
@@ -114,6 +114,8 @@ class BaseNotificationChannel(ABC):
         self.config = config
         self.service = notification_service  # 唯一依赖：NotificationService
         self.logger = logging.getLogger(f"{self.__class__.__name__}[{channel_id}]")
+        # 从注入的特殊字段读取代理 URL（由 NotificationManager 在加载时注入）
+        self.proxy_url: str = config.get("__proxy_url", "")
 
     def get_capabilities(self) -> ChannelCapabilities:
         """返回渠道能力配置。子类应覆写此方法声明自身能力。

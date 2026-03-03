@@ -9,6 +9,7 @@ import {
   List,
   message,
   Modal,
+  Pagination,
   Radio,
   Select,
   Space,
@@ -21,7 +22,7 @@ import {
   Dropdown,
   Image,
 } from 'antd'
-import { QuestionCircleOutlined, MenuOutlined, FolderOpenOutlined, SearchOutlined, LinkOutlined, EyeOutlined } from '@ant-design/icons'
+import { QuestionCircleOutlined, MenuOutlined, FolderOpenOutlined, SearchOutlined, LinkOutlined, EyeOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import {
   createAnimeEntry,
   deleteAnime,
@@ -44,7 +45,15 @@ import {
   toggleSourceIncremental,
   toggleSourceFinished,
   downloadPosterToLocal,
+  getConfig,
+  setConfig,
+  getAnimeGroups,
+  createAnimeGroup,
+  renameAnimeGroup,
+  deleteAnimeGroup,
+  setAnimeGroupMembership,
 } from '../../apis'
+import LibraryGroupView from './LibraryGroupView'
 import { MyIcon } from '@/components/MyIcon'
 import { DANDAN_TYPE_DESC_MAPPING, DANDAN_TYPE_MAPPING } from '../../configs'
 import dayjs from 'dayjs'
@@ -53,10 +62,8 @@ import { CreateAnimeModal } from '../../components/CreateAnimeModal'
 import { IncrementalRefreshModal } from '../../components/IncrementalRefreshModal'
 import { ScanDuplicatesModal } from '../../components/ScanDuplicatesModal'
 import { RoutePaths } from '../../general/RoutePaths'
-import { padStart } from 'lodash'
 import { useModal } from '../../ModalContext'
 import { useMessage } from '../../MessageContext'
-import { ResponsiveTable } from '@/components/ResponsiveTable'
 import DirectoryBrowser from '../media-fetch/components/DirectoryBrowser'
 import PosterSearchModal from '../media-fetch/components/PosterSearchModal'
 import { useAtomValue } from 'jotai'
@@ -92,6 +99,9 @@ export const Library = () => {
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
   const [keyword, setKeyword] = useState('')
+  // null 表示未从 DB 初始化，防止初始化前触发 getList
+  const [sortBy, setSortBy] = useState(null)
+  const [sortOrder, setSortOrder] = useState(null)
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
@@ -99,6 +109,95 @@ export const Library = () => {
     pageSize: defaultPageSize,
     total: 0,
   })
+
+  // 视图模式：'list' | 'card'
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = localStorage.getItem('libraryViewMode')
+    // 兼容旧值 'group'，降级为 'list'
+    return saved === 'card' ? 'card' : 'list'
+  })
+
+  // 分组数据
+  const [groups, setGroups] = useState([])
+
+  const switchViewMode = (mode) => {
+    setViewMode(mode)
+    localStorage.setItem('libraryViewMode', mode)
+  }
+
+  // 加载所有分组
+  const loadGroups = async () => {
+    try {
+      const res = await getAnimeGroups()
+      setGroups(res.data || [])
+    } catch (e) {
+      // 静默失败
+    }
+  }
+
+  // 分组操作
+  const handleCreateGroup = async (name, animeIds) => {
+    try {
+      const res = await createAnimeGroup({ name })
+      const newGroupId = res.data?.id
+      if (newGroupId && animeIds?.length > 0) {
+        await Promise.all(animeIds.map(id => setAnimeGroupMembership(id, { groupId: newGroupId })))
+      }
+      await loadGroups()
+      getList()
+      messageApi.success(`分组「${name}」已创建`)
+    } catch (e) {
+      messageApi.error(`创建分组失败: ${e?.message || '未知错误'}`)
+    }
+  }
+
+  const handleRenameGroup = async (groupId, name) => {
+    try {
+      await renameAnimeGroup(groupId, { name })
+      await loadGroups()
+      messageApi.success('分组已重命名')
+    } catch (e) {
+      messageApi.error(`重命名失败: ${e?.message || '未知错误'}`)
+    }
+  }
+
+  const handleDeleteGroup = (group) => {
+    modalApi.confirm({
+      title: `解散分组「${group.name}」？`,
+      content: '组内条目将变为未分组，不会被删除。',
+      okText: '解散',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await deleteAnimeGroup(group.id)
+          await loadGroups()
+          getList()
+          messageApi.success('分组已解散')
+        } catch (e) {
+          messageApi.error(`删除分组失败: ${e?.message || '未知错误'}`)
+        }
+      },
+    })
+  }
+
+  // 静默删除分组（不弹确认框，用于"拆分最后一个条目"自动清除空分组）
+  const handleDeleteGroupSilent = async (group) => {
+    try {
+      await deleteAnimeGroup(group.id)
+      await loadGroups()
+    } catch (e) {
+      messageApi.error(`删除分组失败: ${e?.message || '未知错误'}`)
+    }
+  }
+
+  const handleSetGroup = async (animeId, groupId) => {
+    try {
+      await setAnimeGroupMembership(animeId, { groupId: groupId ?? null })
+      getList()
+    } catch (e) {
+      messageApi.error(`设置分组失败: ${e?.message || '未知错误'}`)
+    }
+  }
 
   // 当默认分页大小加载完成后，更新 pagination
   useEffect(() => {
@@ -152,6 +251,8 @@ export const Library = () => {
         keyword: keyword,
         page: pagination.current,
         pageSize: pagination.pageSize,
+        sortBy,
+        sortOrder,
       })
       setList(res.data?.list || [])
       setPagination(prev => ({
@@ -185,8 +286,27 @@ export const Library = () => {
   }, [keyword])
 
   useEffect(() => {
+    // sortBy/sortOrder 未从 DB 初始化完成时不触发
+    if (sortBy === null || sortOrder === null) return
     getList()
-  }, [keyword, pagination.current, pagination.pageSize])
+  }, [keyword, pagination.current, pagination.pageSize, sortBy, sortOrder])
+
+  // mount 时从 DB 读取上次保存的排序配置，读完后才触发 getList
+  useEffect(() => {
+    Promise.all([
+      getConfig('librarySortBy'),
+      getConfig('librarySortOrder'),
+    ]).then(([byRes, orderRes]) => {
+      setSortBy(byRes.data?.value || 'anime_created')
+      setSortOrder(orderRes.data?.value || 'desc')
+    }).catch(() => {
+      // 读取失败则使用默认值
+      setSortBy('anime_created')
+      setSortOrder('desc')
+    })
+    // 初始化加载分组数据
+    loadGroups()
+  }, [])
 
   useEffect(() => {
     setSearchInputValue(keyword)
@@ -230,151 +350,93 @@ export const Library = () => {
     }
   }, [fetchedMetadata, form])
 
+
+  // antd Table columns 定义（传给 LibraryGroupView 用于拖拽表格）
   const columns = [
     {
       title: '海报',
       dataIndex: 'imageUrl',
       key: 'imageUrl',
-      width: 100,
+      width: 96,
       render: (_, record) => {
         let imageSrc = record.localImagePath || record.imageUrl
-        // 兼容旧的、错误的缓存路径
-        if (imageSrc && imageSrc.startsWith('/images/')) {
-          imageSrc = imageSrc.replace('/images/', '/data/images/')
-        }
-        // 如果两个地址都为空，则不渲染img标签，避免出现损坏的图片图标
-        return imageSrc ? <img src={imageSrc} className="w-12 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => navigate(`/anime/${record.animeId}`)} /> : null
+        if (imageSrc?.startsWith('/images/')) imageSrc = imageSrc.replace('/images/', '/data/images/')
+        return imageSrc ? (
+          <img src={imageSrc} style={{ width: 56, height: 80, objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
+            onClick={() => navigate(`/anime/${record.animeId}`)} alt={record.title} />
+        ) : null
       },
     },
     {
       title: '影视名称',
       dataIndex: 'title',
       key: 'title',
-      width: 220,
-      render: (text, record) => {
-        const allFinished = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
-        return (
-          <Space size={4}>
-            <span>{text}</span>
-            {allFinished && <Tag color="default" style={{ marginInlineEnd: 0 }}>已完结</Tag>}
-          </Space>
-        )
-      },
     },
     {
       title: '类型',
-      width: 100,
       dataIndex: 'type',
       key: 'type',
-      render: (_, record) => {
-        return <span>{DANDAN_TYPE_DESC_MAPPING[record.type]}</span>
-      },
+      width: 90,
+      render: (_, record) => <span>{DANDAN_TYPE_DESC_MAPPING[record.type]}</span>,
     },
-    {
-      title: '季',
-      dataIndex: 'season',
-      key: 'season',
-      width: 50,
-    },
-    {
-      title: '年份',
-      dataIndex: 'year',
-      key: 'year',
-      width: 70,
-    },
-    {
-      title: '集数',
-      dataIndex: 'episodeCount',
-      key: 'episodeCount',
-      width: 70,
-    },
-    {
-      title: '源数量',
-      dataIndex: 'sourceCount',
-      key: 'sourceCount',
-      width: 80,
-    },
+    { title: '季', dataIndex: 'season', key: 'season', width: 50 },
+    { title: '年份', dataIndex: 'year', key: 'year', width: 70 },
+    { title: '集数', dataIndex: 'episodeCount', key: 'episodeCount', width: 60 },
+    { title: '源数量', dataIndex: 'sourceCount', key: 'sourceCount', width: 70 },
     {
       title: '收录时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
       width: 150,
-      render: (_, record) => {
-        return (
-          <div>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm:ss')}</div>
-        )
-      },
+      render: (_, record) => <span>{dayjs(record.createdAt).format('YYYY-MM-DD HH:mm')}</span>,
     },
     {
       title: '操作',
-      width: 150,
+      width: 140,
       fixed: 'right',
       render: (_, record) => {
-        // 判断是否有已标记或已追更的源
         const hasFavorited = record.sources?.some(s => s.isFavorited)
         const hasIncremental = record.sources?.some(s => s.incrementalRefreshEnabled)
+        const allFinished = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
         return (
           <Space>
-            <Tooltip title="编辑影视信息">
-              <span
-                className="cursor-pointer hover:text-primary"
-                onClick={async () => {
-                  const res = await getAnimeDetail({
-                    animeId: record.animeId,
-                  })
+            <Tooltip title="编辑">
+              <span className="cursor-pointer hover:text-primary"
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  const res = await getAnimeDetail({ animeId: record.animeId })
                   form.resetFields()
-                  form.setFieldsValue({
-                    ...(res.data || {}),
-                    animeId: record.animeId,
-                  })
+                  form.setFieldsValue({ ...(res.data || {}), animeId: record.animeId })
                   setLocalImagePath(res.data?.localImagePath || null)
                   setEditOpen(true)
-                }}
-              >
-                <MyIcon icon="edit" size={20}></MyIcon>
+                }}>
+                <MyIcon icon="edit" size={20} />
               </span>
             </Tooltip>
-
-            <Tooltip title={hasFavorited ? "已标记（点击管理）" : "标记精确源"}>
-              <span
-                className={`cursor-pointer hover:text-primary ${hasFavorited ? 'text-yellow-500' : ''}`}
-                onClick={() => handleFavorite(record)}
-              >
-                <MyIcon icon={hasFavorited ? "favorites-fill" : "favorites"} size={20}></MyIcon>
+            <Dropdown
+              menu={{
+                items: [
+                  { key: 'fav', label: hasFavorited ? '取消标记' : '标记', icon: <MyIcon icon={hasFavorited ? 'favorites-fill' : 'favorites'} size={16} className={hasFavorited ? 'text-yellow-400' : ''} />, onClick: (e) => { e.domEvent?.stopPropagation?.(); handleFavorite(record) } },
+                  { key: 'inc', label: hasIncremental ? '取消追更' : '追更', icon: <MyIcon icon={hasIncremental ? 'zengliang' : 'clock'} size={16} className={hasIncremental ? 'text-green-500' : ''} />, onClick: (e) => { e.domEvent?.stopPropagation?.(); handleIncremental(record) } },
+                  { key: 'fin', label: allFinished ? '取消完结' : '完结', icon: <MyIcon icon={allFinished ? 'wanjie1' : 'wanjie'} size={16} className={allFinished ? 'text-blue-500' : 'text-gray-400'} />, onClick: (e) => { e.domEvent?.stopPropagation?.(); handleFinished(record) } },
+                ],
+              }}
+              trigger={['click']}
+            >
+              <span className="cursor-pointer hover:text-primary" onClick={e => e.stopPropagation()}>
+                <MenuOutlined style={{ fontSize: 18 }} />
               </span>
-            </Tooltip>
-
-            <Tooltip title={hasIncremental ? "追更中（点击管理）" : "开启追更"}>
-              <span
-                className={`cursor-pointer hover:text-primary ${hasIncremental ? 'text-green-500' : ''}`}
-                onClick={() => handleIncremental(record)}
-              >
-                <MyIcon icon={hasIncremental ? "zengliang" : "clock"} size={20}></MyIcon>
-              </span>
-            </Tooltip>
-
+            </Dropdown>
             <Tooltip title="详情">
-              <span
-                className="cursor-pointer hover:text-primary"
-                onClick={() => {
-                  if (!record.animeId || record.animeId === 0) {
-                    messageApi.error('无效的作品ID')
-                    return
-                  }
-                  navigate(`/anime/${record.animeId}`)
-                }}
-              >
-                <MyIcon icon="book" size={20}></MyIcon>
+              <span className="cursor-pointer hover:text-primary"
+                onClick={(e) => { e.stopPropagation(); if (record.animeId) navigate(`/anime/${record.animeId}`) }}>
+                <MyIcon icon="book" size={20} />
               </span>
             </Tooltip>
             <Tooltip title="删除">
-              <span
-                className="cursor-pointer hover:text-primary"
-                onClick={() => {
-                  handleDelete(record)
-                }}
-              >
-                <MyIcon icon="delete" size={20}></MyIcon>
+              <span className="cursor-pointer hover:text-primary"
+                onClick={(e) => { e.stopPropagation(); handleDelete(record) }}>
+                <MyIcon icon="delete" size={20} />
               </span>
             </Tooltip>
           </Space>
@@ -1080,6 +1142,51 @@ export const Library = () => {
     }
   }
 
+  // 排序选项配置（每个维度只有一项，点击同一项切换升降序）
+  const SORT_OPTIONS = [
+    { key: 'anime_created',   label: '媒体库入库时间' },
+    { key: 'episode_fetched', label: '分集入库时间'   },
+  ]
+  const currentSortLabel = SORT_OPTIONS.find(o => o.key === sortBy)?.label || '排序'
+
+  const sortDropdownItems = {
+    items: SORT_OPTIONS.map(opt => {
+      const isActive = opt.key === sortBy
+      // 激活项显示当前实际方向箭头；非激活项显示降序箭头（默认方向预览）
+      const arrowIcon = isActive
+        ? (sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-')
+        : 'xiajiantou-'
+      return {
+        key: opt.key,
+        label: (
+          <span className="flex items-center gap-2">
+            <span style={{ fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ant-color-primary)' : undefined }}>
+              {opt.label}
+            </span>
+            <MyIcon
+              icon={arrowIcon}
+              size={13}
+              style={{ color: isActive ? 'var(--ant-color-primary)' : undefined }}
+            />
+          </span>
+        ),
+      }
+    }),
+    onClick: ({ key }) => {
+      if (key === sortBy) {
+        // 同一维度：切换升降序
+        const newOrder = sortOrder === 'desc' ? 'asc' : 'desc'
+        setSortOrder(newOrder)
+        setConfig('librarySortOrder', newOrder)
+      } else {
+        // 切换维度：保持当前升降序方向
+        setSortBy(key)
+        setConfig('librarySortBy', key)
+      }
+      setPagination(n => ({ ...n, current: 1 }))
+    },
+  }
+
   return (
     <div className="my-6">
       <Card
@@ -1102,6 +1209,31 @@ export const Library = () => {
                   重置
                 </Button>
               )}
+              {/* 视图切换 */}
+              <Space.Compact>
+                <Tooltip title="列表视图">
+                  <Button
+                    type={viewMode === 'list' ? 'primary' : 'default'}
+                    icon={<UnorderedListOutlined />}
+                    onClick={() => switchViewMode('list')}
+                  />
+                </Tooltip>
+                <Tooltip title="卡片视图">
+                  <Button
+                    type={viewMode === 'card' ? 'primary' : 'default'}
+                    icon={<AppstoreOutlined />}
+                    onClick={() => switchViewMode('card')}
+                  />
+                </Tooltip>
+              </Space.Compact>
+              <Dropdown menu={sortDropdownItems}>
+                <Button>
+                  <span className="flex items-center gap-1">
+                    {currentSortLabel}
+                    <MyIcon icon={sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-'} size={14} />
+                  </span>
+                </Button>
+              </Dropdown>
               <Button onClick={() => setIsScanDuplicatesOpen(true)}>
                 扫描重复项
               </Button>
@@ -1169,146 +1301,92 @@ export const Library = () => {
                   批量管理
                 </Button>
               </div>
-              <Button
-                type="primary"
-                block
-                size="large"
-                onClick={() => setIsCreateModalOpen(true)}
-              >
-                自定义影视条目
-              </Button>
+              <div className="flex gap-2">
+                <Dropdown menu={sortDropdownItems}>
+                  <Button block size="large">
+                    <span className="flex items-center justify-center gap-1">
+                      {currentSortLabel}
+                      <MyIcon icon={sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-'} size={15} />
+                    </span>
+                  </Button>
+                </Dropdown>
+                <Button
+                  type="primary"
+                  block
+                  size="large"
+                  onClick={() => setIsCreateModalOpen(true)}
+                >
+                  自定义影视条目
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  block
+                  size="large"
+                  type={viewMode === 'list' ? 'primary' : 'default'}
+                  icon={<UnorderedListOutlined />}
+                  onClick={() => switchViewMode('list')}
+                >
+                  列表视图
+                </Button>
+                <Button
+                  block
+                  size="large"
+                  type={viewMode === 'card' ? 'primary' : 'default'}
+                  icon={<AppstoreOutlined />}
+                  onClick={() => switchViewMode('card')}
+                >
+                  卡片视图
+                </Button>
+              </div>
             </div>
           </div>
         )}
-        <ResponsiveTable
-          dataSource={list}
-          columns={columns}
+        {/* ===== 统一渲染区：LibraryGroupView 包裹列表/卡片，行/卡可拖拽分组 ===== */}
+        <LibraryGroupView
+          list={list}
+          groups={groups}
           loading={loading}
-          rowKey="animeId"
-          pagination={{
-            ...pagination,
-            showTotal: total => `共 ${total} 条数据`,
-            onChange: (page, pageSize) => {
-              setPagination(n => ({
-                ...n,
-                current: page,
-                pageSize,
-              }))
-            },
-            onShowSizeChange: (_, size) => {
-              setPagination(n => ({
-                ...n,
-                pageSize: size,
-              }))
-            },
-            hideOnSinglePage: true,
+          viewMode={viewMode}
+          columns={columns}
+          onEdit={async (record) => {
+            const res = await getAnimeDetail({ animeId: record.animeId })
+            form.resetFields()
+            form.setFieldsValue({ ...(res.data || {}), animeId: record.animeId })
+            setLocalImagePath(res.data?.localImagePath || null)
+            setEditOpen(true)
           }}
-          renderCard={(record) => (
-            <div className="space-y-3">
-              <div className="flex gap-3">
-                {(() => {
-                  let imageSrc = record.localImagePath || record.imageUrl
-                  if (imageSrc && imageSrc.startsWith('/images/')) {
-                    imageSrc = imageSrc.replace('/images/', '/data/images/')
-                  }
-                  return imageSrc ? (
-                    <img src={imageSrc} className="w-20 h-28 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity" alt={record.title} onClick={() => navigate(`/anime/${record.animeId}`)} />
-                  ) : (
-                    <div className="w-20 h-28 bg-gray-200 dark:bg-gray-700 rounded flex items-center justify-center cursor-pointer hover:opacity-70 transition-opacity" onClick={() => navigate(`/anime/${record.animeId}`)}>
-                      <MyIcon icon="image" size={32} />
-                    </div>
-                  )
-                })()}
-                <div className="flex-1 space-y-2">
-                  <div className="font-bold text-lg line-clamp-2">{record.title}</div>
-                  <div className="flex flex-wrap gap-2">
-                    <Tag color="blue">{DANDAN_TYPE_DESC_MAPPING[record.type]}</Tag>
-                    {record.season && <Tag>第{record.season}季</Tag>}
-                    {record.year && <Tag>{record.year}年</Tag>}
-                    {record.sources?.length > 0 && record.sources.every(s => s.isFinished) && <Tag color="default">已完结</Tag>}
-                  </div>
-                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                    <span>集数: {record.episodeCount || 0}</span>
-                    <span className="mx-2">·</span>
-                    <span>源: {record.sourceCount || 0}</span>
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">
-                    {dayjs(record.createdAt).format('YYYY-MM-DD HH:mm')}
-                  </div>
-                </div>
-              </div>
-              <div className="flex justify-center gap-2 pt-2 border-t border-gray-200 dark:border-gray-700 flex-wrap items-center">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon="edit" size={16} />}
-                  onClick={async () => {
-                    const res = await getAnimeDetail({ animeId: record.animeId })
-                    form.resetFields()
-                    form.setFieldsValue({
-                      ...(res.data || {}),
-                      animeId: record.animeId,
-                    })
-                    setLocalImagePath(res.data?.localImagePath || null)
-                    setEditOpen(true)
-                  }}
-                >
-                  编辑
-                </Button>
-                <Dropdown
-                  menu={{
-                    items: [
-                      {
-                        key: 'favorite',
-                        label: record.sources?.some(s => s.isFavorited) ? '取消标记' : '标记',
-                        icon: <MyIcon icon={record.sources?.some(s => s.isFavorited) ? 'favorites-fill' : 'favorites'} size={16} />,
-                        onClick: () => handleFavorite(record),
-                      },
-                      {
-                        key: 'incremental',
-                        label: record.sources?.some(s => s.incrementalRefreshEnabled) ? '取消追更' : '追更',
-                        icon: <MyIcon icon={record.sources?.some(s => s.incrementalRefreshEnabled) ? 'zengliang' : 'clock'} size={16} />,
-                        onClick: () => handleIncremental(record),
-                      },
-                      {
-                        key: 'finished',
-                        label: record.sources?.every(s => s.isFinished) ? '取消完结' : '完结',
-                        icon: <MyIcon icon="wanjie" size={16} />,
-                        onClick: () => handleFinished(record),
-                      },
-                    ],
-                  }}
-                  trigger={['click']}
-                >
-                  <Button size="small" type="text" icon={<MenuOutlined />}>操作</Button>
-                </Dropdown>
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<MyIcon icon="book" size={16} />}
-                  onClick={() => {
-                    if (!record.animeId || record.animeId === 0) {
-                      messageApi.error('无效的作品ID')
-                      return
-                    }
-                    navigate(`/anime/${record.animeId}`)
-                  }}
-                >
-                  详情
-                </Button>
-                <Button
-                  size="small"
-                  type="text"
-                  danger
-                  icon={<MyIcon icon="delete" size={16} />}
-                  onClick={() => handleDelete(record)}
-                >
-                  删除
-                </Button>
-              </div>
-            </div>
-          )}
+          onDelete={handleDelete}
+          onNavigate={(record) => navigate(`/anime/${record.animeId}`)}
+          onFavorite={(record) => handleFavorite(record)}
+          onIncremental={(record) => handleIncremental(record)}
+          onFinished={(record) => handleFinished(record)}
+          onSetGroup={handleSetGroup}
+          onCreateGroup={handleCreateGroup}
+          onRenameGroup={handleRenameGroup}
+          onDeleteGroup={handleDeleteGroup}
+          onDeleteGroupSilent={handleDeleteGroupSilent}
         />
+
+        {/* 分页器：在 LibraryGroupView 外部统一显示 */}
+        {pagination.total > 0 && (
+          <div className="mt-4 flex justify-end">
+            <Pagination
+              current={pagination.current}
+              pageSize={pagination.pageSize}
+              total={pagination.total}
+              showTotal={total => `共 ${total} 条数据`}
+              showSizeChanger
+              hideOnSinglePage
+              onChange={(page, pageSize) => {
+                setPagination(n => ({ ...n, current: page, pageSize }))
+              }}
+              onShowSizeChange={(_, size) => {
+                setPagination(n => ({ ...n, pageSize: size }))
+              }}
+            />
+          </div>
+        )}
       </Card>
       <CreateAnimeModal
         open={isCreateModalOpen}

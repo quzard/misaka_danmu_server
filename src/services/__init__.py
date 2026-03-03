@@ -53,6 +53,9 @@ from .alias_service import (
 from .notification_service import NotificationService
 from .notification_manager import NotificationManager
 
+# 入库存在性检查
+from .import_existence_checker import check_anime_existence, check_episode_existence
+
 __all__ = [
     # 任务管理
     'TaskManager',
@@ -96,5 +99,8 @@ __all__ = [
     # 通知服务
     'NotificationService',
     'NotificationManager',
+    # 入库存在性检查
+    'check_anime_existence',
+    'check_episode_existence',
 ]
 

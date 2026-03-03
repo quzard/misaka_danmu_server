@@ -1022,3 +1022,23 @@ export const downloadPosterToLocal = (data) => api.post('/api/ui/poster/download
 
 /** 从 Fanart.tv 搜索海报 */
 export const searchFanartPosters = (params) => api.get('/api/ui/poster/fanart', params)
+
+// ========== 弹幕库分组 ==========
+
+/** 获取所有分组 */
+export const getAnimeGroups = () => api.get('/api/ui/anime/groups')
+
+/** 创建分组 */
+export const createAnimeGroup = (data) => api.post('/api/ui/anime/groups', data)
+
+/** 重命名分组 */
+export const renameAnimeGroup = (groupId, data) => api.patch(`/api/ui/anime/groups/${groupId}`, data)
+
+/** 删除分组（关联条目自动脱离分组） */
+export const deleteAnimeGroup = (groupId) => api.delete(`/api/ui/anime/groups/${groupId}`)
+
+/** 批量更新分组排序 */
+export const reorderAnimeGroups = (data) => api.patch('/api/ui/anime/groups/reorder', data)
+
+/** 设置或清除条目所属分组（groupId=null 则移出分组） */
+export const setAnimeGroupMembership = (animeId, data) => api.patch(`/api/ui/anime/${animeId}/group`, data)

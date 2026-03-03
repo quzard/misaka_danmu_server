@@ -160,6 +160,15 @@ class TelegramChannel(BaseNotificationChannel):
         self._loop = asyncio.get_running_loop()
 
         telebot = _get_telebot()
+
+        # 配置代理（如果开启了代理开关且有代理 URL）
+        if self.proxy_url:
+            telebot.apihelper.proxy = {"https": self.proxy_url}
+            self.logger.info(f"Telegram Bot 已启用代理: {self.proxy_url}")
+        else:
+            # 确保清除可能被其他实例设置过的代理
+            telebot.apihelper.proxy = None
+
         self._bot = telebot.TeleBot(bot_token, threaded=False)
         self._register_handlers()
 
@@ -429,6 +438,11 @@ class TelegramChannel(BaseNotificationChannel):
             return {"success": False, "message": "Bot Token 未配置"}
         try:
             telebot = _get_telebot()
+            # 测试时同样应用代理配置
+            if self.proxy_url:
+                telebot.apihelper.proxy = {"https": self.proxy_url}
+            else:
+                telebot.apihelper.proxy = None
             bot = telebot.TeleBot(bot_token, threaded=False)
             info = bot.get_me()
             # 发送测试消息到配置的 chat_id

@@ -105,6 +105,17 @@ from .metadata_source import (
     get_enabled_failover_sources,
 )
 
+# AnimeGroup模块
+from .anime_group import (
+    get_all_groups,
+    create_group,
+    rename_group,
+    delete_group,
+    set_anime_group,
+    reorder_groups,
+    get_group_by_id,
+)
+
 # Anime模块
 from .anime import (
     get_library_anime,
@@ -245,6 +256,8 @@ from .tmdb import (
     list_episode_groups,
     delete_episode_group_mappings,
     get_episode_equivalence,
+    get_episode_equivalence_batch,
+    get_episode_group_id_by_anime_id,
     get_associated_anime_ids,
 )
 
@@ -374,6 +387,14 @@ __all__ = [
     'update_metadata_source_specific_settings',
     'get_enabled_aux_metadata_sources',
     'get_enabled_failover_sources',
+    # AnimeGroup
+    'get_all_groups',
+    'create_group',
+    'rename_group',
+    'delete_group',
+    'set_anime_group',
+    'reorder_groups',
+    'get_group_by_id',
     # Anime
     'get_library_anime',
     'get_library_anime_by_id',
@@ -481,6 +502,8 @@ __all__ = [
     'save_tmdb_episode_group_mappings',
     'get_episode_group_mappings',
     'get_episode_equivalence',
+    'get_episode_equivalence_batch',
+    'get_episode_group_id_by_anime_id',
     'get_associated_anime_ids',
     # RateLimit
     'get_or_create_rate_limit_state',

@@ -241,6 +241,8 @@ class LibraryAnimeInfo(BaseModel):
     episodeCount: int
     sourceCount: int
     createdAt: datetime
+    groupId: Optional[int] = None
+    groupName: Optional[str] = None
     sources: List[LibrarySourceBrief] = []  # 简化的源列表，用于快速操作
 
 

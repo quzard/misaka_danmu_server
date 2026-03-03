@@ -17,8 +17,12 @@ DEFAULT_RANDOM_COLOR_PALETTE: List[int] = [
 # - white_to_random: 仅将白色弹幕随机换色
 # - all_random: 所有弹幕随机换色
 # - all_white: 所有弹幕变白色
+# - highlight_only: 仅对点赞弹幕（含 ❤️/🔥）上色，重复弹幕由 apply_repeat_highlight 统一处理
 DEFAULT_RANDOM_COLOR_MODE = "off"
-VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random", "all_white"}
+VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random", "all_white", "highlight_only"}
+
+# 识别点赞弹幕的关键词（handle_danmaku_likes 会把 ❤️/🔥 追加到 m 字段）
+_LIKE_KEYWORDS = ("❤️", "🔥")
 
 # 重复弹幕高亮：最小重复次数为 3（颜色从随机色板中随机取，与普通弹幕行为一致）
 DEFAULT_REPEAT_HIGHLIGHT_MIN_COUNT: int = 3
@@ -156,9 +160,29 @@ def apply_random_color(
     - white_to_random: 仅将白色弹幕随机换色
     - all_random: 所有弹幕随机换色
     - all_white: 所有弹幕变白色
+    - highlight_only: 仅对点赞弹幕（含 ❤️/🔥）上色，重复弹幕由 apply_repeat_highlight 处理
     """
     if mode not in VALID_RANDOM_COLOR_MODES or mode == "off":
         return comments
+
+    # highlight_only 模式：只对点赞弹幕上色
+    if mode == "highlight_only":
+        palette_list = list(palette)
+        if not palette_list:
+            palette_list = DEFAULT_RANDOM_COLOR_PALETTE
+        processed = []
+        for item in comments:
+            m = item.get("m", "")
+            is_like = any(kw in m for kw in _LIKE_KEYWORDS)
+            if is_like:
+                p_attr = item.get("p", "")
+                if p_attr:
+                    parts = p_attr.split(",")
+                    _set_color_in_p(parts, random.choice(palette_list))
+                    processed.append({**item, "p": ",".join(parts)})
+                    continue
+            processed.append(item)
+        return processed
 
     # all_white 模式：将所有弹幕颜色设为白色
     if mode == "all_white":
