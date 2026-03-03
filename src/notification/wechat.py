@@ -125,13 +125,13 @@ class WeChatChannel(BaseNotificationChannel):
         return self._CAPABILITIES
 
     def _api_base(self) -> str:
-        """返回企业微信 API Base URL（固定使用官方地址）"""
-        return WECOM_API_BASE
+        """返回企业微信 API Base URL（支持自定义反向代理地址，对齐 MP 的 WECHAT_PROXY 设计）"""
+        proxy = self.config.get("wecom_proxy", "").strip().rstrip("/")
+        return f"{proxy}/cgi-bin" if proxy else WECOM_API_BASE
 
     def _wecom_proxy(self) -> Optional[str]:
-        """返回企业微信 API HTTP 代理（用于主动调 gettoken/message/send 等）"""
-        p = self.config.get("wecom_proxy", "").strip()
-        return p if p else None
+        """企业微信不使用 httpx 代理，API 请求走 _api_base() 的反代地址"""
+        return None
 
     def _is_log_raw(self) -> bool:
         return str(self.config.get("log_raw", "false")).lower() == "true"
@@ -182,8 +182,7 @@ class WeChatChannel(BaseNotificationChannel):
         if not corp_id or not corp_secret:
             return None
         try:
-            proxy = self._wecom_proxy()
-            async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
                     f"{self._api_base()}/gettoken",
                     params={"corpid": corp_id, "corpsecret": corp_secret},
@@ -203,12 +202,11 @@ class WeChatChannel(BaseNotificationChannel):
         token = await self._get_access_token()
         if not token:
             return None
-        proxy = self._wecom_proxy()
         params = {"access_token": token}
         if extra_params:
             params.update(extra_params)
         try:
-            async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(f"{self._api_base()}/{path}", params=params, json=payload)
                 return resp.json()
         except Exception as e:
@@ -495,10 +493,10 @@ class WeChatChannel(BaseNotificationChannel):
             },
             {
                 "key": "wecom_proxy",
-                "label": "回调消息代理地址",
+                "label": "API 反向代理地址",
                 "type": "string",
-                "description": "用于接收回调消息的代理地址。",
-                "placeholder": "http://proxy.example.com:7890 部署方法可参考 https://t.me/areyouok32 ",
+                "description": "企业微信 API 反向代理地址（对齐 MP 的 WECHAT_PROXY 设计）。填写后所有 API 请求（gettoken/消息发送）打到此地址，适合用 nginx 反代 qyapi.weixin.qq.com 的场景。留空则直连官方地址",
+                "placeholder": "https://qyapi.weixin.qq.com",
             },
             {
                 "key": "server_url",

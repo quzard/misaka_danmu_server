@@ -7,6 +7,7 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined, ApiOutlined,
   ReloadOutlined, CopyOutlined,
 } from '@ant-design/icons'
+import copy from 'copy-to-clipboard'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../../store/index.js'
 import { ResponsiveTable } from '../../../components/ResponsiveTable'
@@ -438,16 +439,14 @@ export const Notification = () => {
             const webhookUrl = `${(configValues?.server_url || configValues?.webhook_base_url || window.location.origin).replace(/\/$/, '')}/api/notification/channels/${editingChannel.id}/webhook?api_key=${webhookApiKey}`
             return (
               <Form.Item label="Webhook 回调地址">
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <Input readOnly value={webhookUrl} style={{ flex: 1 }} />
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input readOnly value={webhookUrl} />
                   <Button
+                    type="primary"
                     icon={<CopyOutlined />}
-                    onClick={() => {
-                      navigator.clipboard.writeText(webhookUrl)
-                      message.success('已复制到剪贴板')
-                    }}
+                    onClick={() => { copy(webhookUrl); message.success('已复制到剪贴板') }}
                   />
-                </div>
+                </Space.Compact>
               </Form.Item>
             )
           })()}
