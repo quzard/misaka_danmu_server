@@ -201,8 +201,16 @@ async def channel_webhook_verify(
     api_key: str = Query(..., description="Webhook API Key"),
     session: AsyncSession = Depends(get_db_session),
 ):
-    """企业微信等渠道首次接入时的 GET 验证请求（需携带 ?api_key=）"""
+    """
+    企业微信等渠道首次接入时的 GET 验证请求（需携带 ?api_key=）。
+    - 有 echostr 参数：走企业微信签名验证，成功则返回明文 echostr
+    - 无 echostr 参数：连通性探测，直接返回 200 OK（说明路由可达、api_key 有效）
+    """
     await _verify_webhook_api_key(api_key, session)
+
+    # 无 echostr：连通性探测，直接告知路由可达
+    if not request.query_params.get("echostr"):
+        return {"ok": True, "detail": "Webhook 路由可达，api_key 有效"}
 
     manager = _get_notification_manager(request)
     channel = manager.get_channel(channel_id)
@@ -214,7 +222,7 @@ async def channel_webhook_verify(
     if result and result is not True:
         # 返回明文 echostr（企业微信要求纯文本响应）
         return PlainTextResponse(content=str(result))
-    raise HTTPException(status_code=403, detail="URL 验证失败")
+    raise HTTPException(status_code=403, detail="URL 验证失败：签名校验未通过，请检查 msg_token / encoding_aes_key 配置")
 
 
 @webhook_router.post("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook 回调", include_in_schema=False)

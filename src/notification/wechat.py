@@ -495,7 +495,7 @@ class WeChatChannel(BaseNotificationChannel):
                 "key": "wecom_proxy",
                 "label": "API 反向代理地址",
                 "type": "string",
-                "description": "企业微信 API 反向代理地址（对齐 MP 的 WECHAT_PROXY 设计）。填写后所有 API 请求（gettoken/消息发送）打到此地址，适合用 nginx 反代 qyapi.weixin.qq.com 的场景。留空则直连官方地址",
+                "description": "企业微信 API 反向代理地址（对齐 MP 的 WECHAT_PROXY 设计）。留空则直连官方地址 代理搭建：https://t.me/areyouok32/90 ",
                 "placeholder": "https://qyapi.weixin.qq.com",
             },
             {

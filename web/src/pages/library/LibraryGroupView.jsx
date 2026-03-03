@@ -545,13 +545,13 @@ const LibraryGroupView = ({
   const [pendingInfo, setPendingInfo] = useState(null)
   const [newGroupName, setNewGroupName] = useState('')
 
-  // 鼠标：移动 8px 触发；触摸：长按 200ms 且移动容差 8px 才触发，避免轻扫误触
+  // 鼠标：移动 8px 触发；触摸：长按 400ms 且移动容差 8px 才触发，避免轻扫误触
   const sensors = useSensors(
     useSensor(MouseSensor, {
       activationConstraint: { distance: 8 },
     }),
     useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 8 },
+      activationConstraint: { delay: 400, tolerance: 8 },
     }),
   )
 
