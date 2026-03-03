@@ -15,6 +15,7 @@ import {
   getNotificationChannelTypes, getNotificationChannels,
   createNotificationChannel, updateNotificationChannel,
   deleteNotificationChannel, testNotificationChannel,
+  getWebhookApikey,
 } from '../../../apis'
 
 // 事件分组定义（MoviePilot 风格）
@@ -88,6 +89,7 @@ export const Notification = () => {
   const [editingChannel, setEditingChannel] = useState(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState({})
+  const [webhookApiKey, setWebhookApiKey] = useState('')
   const [form] = Form.useForm()
 
   // 监听 channelType 和 config 变化以实现 visibleWhen
@@ -97,12 +99,14 @@ export const Notification = () => {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [typesRes, channelsRes] = await Promise.all([
+      const [typesRes, channelsRes, apiKeyRes] = await Promise.all([
         getNotificationChannelTypes(),
         getNotificationChannels(),
+        getWebhookApikey(),
       ])
       setChannelTypes(typesRes.data || [])
       setChannels(channelsRes.data || [])
+      setWebhookApiKey(apiKeyRes.data?.value || '')
     } catch (e) {
       message.error('加载通知渠道数据失败')
     } finally {
@@ -115,6 +119,11 @@ export const Notification = () => {
   const getSchemaForType = (type) => {
     const found = channelTypes.find(t => t.channelType === type)
     return found?.configSchema || []
+  }
+
+  const getHideProxyForType = (type) => {
+    const found = channelTypes.find(t => t.channelType === type)
+    return found?.hideProxy || false
   }
 
   // 根据渠道类型自动生成名称：第一个 "Telegram"，第二个 "Telegram 1"，以此类推
@@ -268,6 +277,7 @@ export const Notification = () => {
   }
 
   const currentSchema = getSchemaForType(selectedType)
+  const currentHideProxy = getHideProxyForType(selectedType)
 
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
@@ -397,16 +407,18 @@ export const Notification = () => {
             </Select>
           </Form.Item>
           <Row gutter={24}>
-            <Col span={currentSchema.some(f => f.key === 'log_raw') ? 8 : 12}>
+            <Col span={currentSchema.some(f => f.key === 'log_raw') ? 8 : (currentHideProxy ? 24 : 12)}>
               <Form.Item label="启用" name="isEnabled" valuePropName="checked">
                 <Switch />
               </Form.Item>
             </Col>
-            <Col span={currentSchema.some(f => f.key === 'log_raw') ? 8 : 12}>
-              <Form.Item label="使用代理" name="useProxy" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
+            {!currentHideProxy && (
+              <Col span={currentSchema.some(f => f.key === 'log_raw') ? 8 : 12}>
+                <Form.Item label="使用代理" name="useProxy" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+              </Col>
+            )}
             {currentSchema.some(f => f.key === 'log_raw') && (
               <Col span={8}>
                 <Form.Item label="记录交互" name={['config', 'log_raw']}
@@ -421,11 +433,11 @@ export const Notification = () => {
           {currentSchema.filter(f => f.key !== 'log_raw').map(field => renderConfigField(field))}
 
           {/* 编辑已有渠道 + webhook 模式时，展示完整回调地址 */}
-          {editingChannel?.id && configValues?.mode === 'webhook' && (
+          {editingChannel?.id && (configValues?.mode === 'webhook' || selectedType === 'wechat') && (
             <Form.Item label="Webhook 回调地址">
               <Input.Search
                 readOnly
-                value={`${window.location.origin}/api/ui/notification/channels/${editingChannel.id}/webhook`}
+                value={`${(configValues?.server_url || configValues?.webhook_base_url || window.location.origin).replace(/\/$/, '')}/api/ui/notification/channels/${editingChannel.id}/webhook?api_key=${webhookApiKey}`}
                 enterButton={<CopyOutlined />}
                 onSearch={(value) => {
                   navigator.clipboard.writeText(value)

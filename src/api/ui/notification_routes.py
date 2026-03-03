@@ -3,9 +3,11 @@
 """
 
 import logging
+import secrets
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,6 +45,13 @@ def _get_notification_manager(request: Request):
     if not manager:
         raise HTTPException(status_code=503, detail="通知服务未初始化")
     return manager
+
+
+async def _verify_webhook_api_key(api_key: str, session: AsyncSession):
+    """验证 Webhook API Key，与 /api/webhook/* 端点保持一致"""
+    stored_key = await crud.get_config_value(session, "webhookApiKey", "")
+    if not stored_key or not secrets.compare_digest(api_key, stored_key):
+        raise HTTPException(status_code=401, detail="无效的 API Key")
 
 
 # ==================== Routes ====================
@@ -182,16 +191,59 @@ async def test_channel(
     return result
 
 
-@router.post("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook 回调", include_in_schema=False)
-async def channel_webhook(channel_id: int, request: Request):
-    """通用 Webhook 回调入口，按 channel_id 路由到对应渠道实例"""
+
+@router.get("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook URL 验证", include_in_schema=False)
+async def channel_webhook_verify(
+    channel_id: int,
+    request: Request,
+    api_key: str = Query(..., description="Webhook API Key"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """企业微信等渠道首次接入时的 GET 验证请求（需携带 ?api_key=）"""
+    await _verify_webhook_api_key(api_key, session)
+
     manager = _get_notification_manager(request)
     channel = manager.get_channel(channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="渠道不存在或未启用")
 
-    update_json = await request.json()
-    handled = channel.process_webhook_update(update_json)
+    params = dict(request.query_params)
+    result = channel.process_webhook_update({"method": "GET", "params": params})
+    if result and result is not True:
+        # 返回明文 echostr（企业微信要求纯文本响应）
+        return PlainTextResponse(content=str(result))
+    raise HTTPException(status_code=403, detail="URL 验证失败")
+
+
+@router.post("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook 回调", include_in_schema=False)
+async def channel_webhook(
+    channel_id: int,
+    request: Request,
+    api_key: str = Query(..., description="Webhook API Key"),
+    session: AsyncSession = Depends(get_db_session),
+):
+    """通用 Webhook 回调入口，按 channel_id 路由到对应渠道实例（需携带 ?api_key=）"""
+    await _verify_webhook_api_key(api_key, session)
+
+    manager = _get_notification_manager(request)
+    channel = manager.get_channel(channel_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="渠道不存在或未启用")
+
+    params = dict(request.query_params)
+    try:
+        body = await request.body()
+        body_str = body.decode("utf-8")
+    except Exception:
+        body_str = ""
+
+    # 尝试 JSON 解析（Telegram 等），否则传原始字符串（企业微信 XML）
+    try:
+        update_json = await request.json()
+        handled = channel.process_webhook_update(update_json)
+    except Exception:
+        handled = channel.process_webhook_update({"method": "POST", "params": params, "body": body_str})
+
     if handled:
         return {"ok": True}
     return {"ok": False, "detail": "该渠道不支持 Webhook 回调或未启用 Webhook 模式"}

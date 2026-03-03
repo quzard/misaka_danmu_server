@@ -461,7 +461,8 @@ const DanmakuStorage = () => {
       episode: '1',
       year: '2022',
       provider: 'bilibili',
-      sourceId: '192'
+      sourceId: '192',
+      tmdbId: '1022789',
     };
 
     // 电视示例数据
@@ -474,7 +475,8 @@ const DanmakuStorage = () => {
       episode: '1',
       year: '2023',
       provider: 'bilibili',
-      sourceId: '192'
+      sourceId: '192',
+      tmdbId: '209867',
     };
 
     // 生成电影预览

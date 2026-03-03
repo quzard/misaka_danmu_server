@@ -176,7 +176,10 @@ class TelegramChannel(BaseNotificationChannel):
         if mode == "webhook":
             base_url = self.config.get("webhook_base_url", "").rstrip("/")
             if base_url:
+                api_key = self.config.get("__webhook_api_key", "")
                 full_url = f"{base_url}/api/ui/notification/channels/{self.channel_id}/webhook"
+                if api_key:
+                    full_url += f"?api_key={api_key}"
                 try:
                     self._bot.remove_webhook()
                     self._bot.set_webhook(url=full_url)

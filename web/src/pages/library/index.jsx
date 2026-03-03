@@ -98,14 +98,16 @@ export const Library = () => {
 
   const [loading, setLoading] = useState(true)
   const [list, setList] = useState([])
-  const [keyword, setKeyword] = useState('')
+  // 从 sessionStorage 恢复上次的搜索关键词
+  const [keyword, setKeyword] = useState(() => sessionStorage.getItem('lib_keyword') || '')
   // null 表示未从 DB 初始化，防止初始化前触发 getList
   const [sortBy, setSortBy] = useState(null)
   const [sortOrder, setSortOrder] = useState(null)
   const navigate = useNavigate()
   const isMobile = useAtomValue(isMobileAtom)
   const [pagination, setPagination] = useState({
-    current: 1,
+    // 从 sessionStorage 恢复上次的页码
+    current: Number(sessionStorage.getItem('lib_page') || '1'),
     pageSize: defaultPageSize,
     total: 0,
   })
@@ -292,17 +294,22 @@ export const Library = () => {
   }, [keyword, pagination.current, pagination.pageSize, sortBy, sortOrder])
 
   // mount 时从 DB 读取上次保存的排序配置，读完后才触发 getList
+  // sessionStorage 中若有缓存的排序状态，优先使用（返回弹幕库时恢复）
   useEffect(() => {
     Promise.all([
       getConfig('librarySortBy'),
       getConfig('librarySortOrder'),
     ]).then(([byRes, orderRes]) => {
-      setSortBy(byRes.data?.value || 'anime_created')
-      setSortOrder(orderRes.data?.value || 'desc')
+      const cachedSortBy = sessionStorage.getItem('lib_sortBy')
+      const cachedSortOrder = sessionStorage.getItem('lib_sortOrder')
+      setSortBy(cachedSortBy || byRes.data?.value || 'anime_created')
+      setSortOrder(cachedSortOrder || orderRes.data?.value || 'desc')
     }).catch(() => {
-      // 读取失败则使用默认值
-      setSortBy('anime_created')
-      setSortOrder('desc')
+      const cachedSortBy = sessionStorage.getItem('lib_sortBy')
+      const cachedSortOrder = sessionStorage.getItem('lib_sortOrder')
+      // 读取失败则使用缓存值或默认值
+      setSortBy(cachedSortBy || 'anime_created')
+      setSortOrder(cachedSortOrder || 'desc')
     })
     // 初始化加载分组数据
     loadGroups()
@@ -310,7 +317,21 @@ export const Library = () => {
 
   useEffect(() => {
     setSearchInputValue(keyword)
+    // 同步搜索关键词到 sessionStorage，下次返回弹幕库时可恢复
+    sessionStorage.setItem('lib_keyword', keyword)
   }, [keyword])
+
+  // 同步分页状态到 sessionStorage
+  useEffect(() => {
+    sessionStorage.setItem('lib_page', String(pagination.current))
+    sessionStorage.setItem('lib_pageSize', String(pagination.pageSize))
+  }, [pagination.current, pagination.pageSize])
+
+  // 同步排序状态到 sessionStorage
+  useEffect(() => {
+    if (sortBy) sessionStorage.setItem('lib_sortBy', sortBy)
+    if (sortOrder) sessionStorage.setItem('lib_sortOrder', sortOrder)
+  }, [sortBy, sortOrder])
 
   useEffect(() => {
     if (!fetchedMetadata) return
@@ -1108,7 +1129,8 @@ export const Library = () => {
     }
   }
 
-  const [searchInputValue, setSearchInputValue] = useState('')
+  // 搜索框受控值（跟随 keyword 同步，初始值也从 sessionStorage 恢复）
+  const [searchInputValue, setSearchInputValue] = useState(() => sessionStorage.getItem('lib_keyword') || '')
 
   const handleSearch = () => {
     setKeyword(searchInputValue)
