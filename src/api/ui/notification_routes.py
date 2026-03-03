@@ -16,6 +16,8 @@ from src import security
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+# webhook 端点单独注册，不带 /ui 前缀（企业微信/腾讯服务器回调不需要登录态）
+webhook_router = APIRouter()
 
 
 # ==================== Pydantic Models ====================
@@ -192,7 +194,7 @@ async def test_channel(
 
 
 
-@router.get("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook URL 验证", include_in_schema=False)
+@webhook_router.get("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook URL 验证", include_in_schema=False)
 async def channel_webhook_verify(
     channel_id: int,
     request: Request,
@@ -215,7 +217,7 @@ async def channel_webhook_verify(
     raise HTTPException(status_code=403, detail="URL 验证失败")
 
 
-@router.post("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook 回调", include_in_schema=False)
+@webhook_router.post("/notification/channels/{channel_id}/webhook", summary="通知渠道 Webhook 回调", include_in_schema=False)
 async def channel_webhook(
     channel_id: int,
     request: Request,

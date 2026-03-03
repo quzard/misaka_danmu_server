@@ -434,19 +434,22 @@ export const Notification = () => {
           {currentSchema.filter(f => f.key !== 'log_raw').map(field => renderConfigField(field))}
 
           {/* 编辑已有渠道 + webhook 模式时，展示完整回调地址 */}
-          {editingChannel?.id && (configValues?.mode === 'webhook' || selectedType === 'wechat') && (
-            <Form.Item label="Webhook 回调地址">
-              <Input.Search
-                readOnly
-                value={`${(configValues?.server_url || configValues?.webhook_base_url || window.location.origin).replace(/\/$/, '')}/api/ui/notification/channels/${editingChannel.id}/webhook?api_key=${webhookApiKey}`}
-                enterButton={<CopyOutlined />}
-                onSearch={(value) => {
-                  navigator.clipboard.writeText(value)
-                  message.success('已复制到剪贴板')
-                }}
-              />
-            </Form.Item>
-          )}
+          {editingChannel?.id && (configValues?.mode === 'webhook' || selectedType === 'wechat') && (() => {
+            const webhookUrl = `${(configValues?.server_url || configValues?.webhook_base_url || window.location.origin).replace(/\/$/, '')}/api/notification/channels/${editingChannel.id}/webhook?api_key=${webhookApiKey}`
+            return (
+              <Form.Item label="Webhook 回调地址">
+                <Input.Search
+                  readOnly
+                  value={webhookUrl}
+                  enterButton={<CopyOutlined />}
+                  onSearch={() => {
+                    navigator.clipboard.writeText(webhookUrl)
+                    message.success('已复制到剪贴板')
+                  }}
+                />
+              </Form.Item>
+            )
+          })()}
 
           <Form.Item label="事件订阅" name="eventsConfig">
             <Select
