@@ -176,8 +176,8 @@ class WeChatChannel(BaseNotificationChannel):
         if not corp_id or not corp_secret:
             return None
         try:
-            proxies = {"https://": self.proxy_url} if self.proxy_url else None
-            async with httpx.AsyncClient(timeout=15.0, proxies=proxies) as client:
+            proxy = self.proxy_url if self.proxy_url else None
+            async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
                 resp = await client.get(
                     f"{self._api_base()}/gettoken",
                     params={"corpid": corp_id, "corpsecret": corp_secret},
@@ -197,12 +197,12 @@ class WeChatChannel(BaseNotificationChannel):
         token = await self._get_access_token()
         if not token:
             return None
-        proxies = {"https://": self.proxy_url} if self.proxy_url else None
+        proxy = self.proxy_url if self.proxy_url else None
         params = {"access_token": token}
         if extra_params:
             params.update(extra_params)
         try:
-            async with httpx.AsyncClient(timeout=15.0, proxies=proxies) as client:
+            async with httpx.AsyncClient(timeout=15.0, proxy=proxy) as client:
                 resp = await client.post(f"{self._api_base()}/{path}", params=params, json=payload)
                 return resp.json()
         except Exception as e:
