@@ -104,7 +104,6 @@ async def lifespan(app: FastAPI):
     try:
         await init_db_tables(app)
     except DatabaseStartupError:
-        import os
         os._exit(1)
     session_factory = app.state.db_session_factory
 
