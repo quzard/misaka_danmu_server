@@ -13,6 +13,26 @@ import {
   useDraggable, useDroppable,
 } from '@dnd-kit/core'
 import { MyIcon } from '@/components/MyIcon'
+
+// 自定义 modifier：让 DragOverlay 跟随光标（以激活点为基准），而非原始元素左上角
+const snapToCursorModifier = ({ activatorEvent, activeNodeRect, transform }) => {
+  if (activatorEvent && activeNodeRect) {
+    const isTouch = 'touches' in activatorEvent || 'changedTouches' in activatorEvent
+    const clientX = isTouch
+      ? (activatorEvent.touches?.[0]?.clientX ?? activatorEvent.changedTouches?.[0]?.clientX ?? 0)
+      : activatorEvent.clientX
+    const clientY = isTouch
+      ? (activatorEvent.touches?.[0]?.clientY ?? activatorEvent.changedTouches?.[0]?.clientY ?? 0)
+      : activatorEvent.clientY
+    // 让 overlay 左上角对准激活点，再由 CSS transform 将其居中
+    return {
+      ...transform,
+      x: transform.x + (clientX - activeNodeRect.left),
+      y: transform.y + (clientY - activeNodeRect.top),
+    }
+  }
+  return transform
+}
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store/index.js'
 import dayjs from 'dayjs'
@@ -174,11 +194,11 @@ const AnimeCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, onIncreme
             : 'bg-black/0 group-hover:bg-black/20 opacity-0 group-hover:opacity-100'
         }`}>
           <Space size={isMobile ? 6 : 4} onClick={e => e.stopPropagation()}>
-            <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white`} onClick={() => onEdit?.(record)}><MyIcon icon="edit" size={isMobile ? 16 : 12} /></span>
+            <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500`} onClick={() => onEdit?.(record)}><MyIcon icon="edit" size={isMobile ? 16 : 12} /></span>
             <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-              <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white`}><MenuOutlined style={{ fontSize: isMobile ? 15 : 11 }} /></span>
+              <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500`}><MenuOutlined style={{ fontSize: isMobile ? 15 : 11 }} /></span>
             </Dropdown>
-            <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white hover:text-red-500`} onClick={() => onDelete?.(record)}><MyIcon icon="delete" size={isMobile ? 16 : 12} /></span>
+            <span className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'} bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500 hover:text-red-500`} onClick={() => onDelete?.(record)}><MyIcon icon="delete" size={isMobile ? 16 : 12} /></span>
           </Space>
         </div>
       </div>
@@ -523,14 +543,14 @@ const CollapsedGroupCard = ({ group, items, onClick, onDelete }) => {
         {/* 拖拽悬停提示层 */}
         {isOver && (
           <div className="absolute inset-0 bg-blue-500/20 flex items-center justify-center z-10 pointer-events-none">
-            <span className="text-xs text-blue-600 font-medium bg-white/90 px-2 py-1 rounded">加入此分组</span>
+            <span className="text-xs text-blue-600 dark:text-blue-400 font-medium bg-white/90 dark:bg-gray-600/90 px-2 py-1 rounded">加入此分组</span>
           </div>
         )}
         {/* 悬浮操作层 */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-200 flex items-end justify-end p-2 opacity-0 group-hover:opacity-100">
           <Space size={6} onClick={e => e.stopPropagation()}>
             <Tooltip title="解散分组">
-              <span className="w-7 h-7 bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white hover:text-red-500"
+              <span className="w-7 h-7 bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500 hover:text-red-500"
                 onClick={onDelete}>
                 <MyIcon icon="delete" size={14} />
               </span>
@@ -807,8 +827,8 @@ const LibraryGroupView = ({
 
       return (
         <div>
-          {/* 面包屑导航（带拆分 dropzone）*/}
-          <UngroupDropzone visible={isDraggingFromGroup}>
+          {/* 面包屑导航：移动端用顶部固定投放区，桌面端用面包屑 dropzone */}
+          {isMobile ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, padding: '8px 0', minHeight: 44, width: '100%' }}>
               <span
                 className="cursor-pointer hover:text-primary text-gray-500 text-sm"
@@ -821,27 +841,34 @@ const LibraryGroupView = ({
               <span style={{ fontWeight: 600, fontSize: 14 }}>{viewingGroup?.name || '分组'}</span>
               <Tag color="orange" style={{ marginLeft: 2 }}>{groupItems.length}</Tag>
               <div style={{ flex: 1 }} />
-              {/* 返回按钮 */}
-              <Button
-                size="small"
-                onClick={() => setViewingGroupId(null)}
-              >
-                返回
-              </Button>
-              {/* 解散分组按钮 */}
-              <Button
-                size="small"
-                danger
-                icon={<MyIcon icon="delete" size={14} />}
-                onClick={() => {
-                  onDeleteGroup(viewingGroup)
-                  setViewingGroupId(null)
-                }}
-              >
+              <Button size="small" onClick={() => setViewingGroupId(null)}>返回</Button>
+              <Button size="small" danger icon={<MyIcon icon="delete" size={14} />}
+                onClick={() => { onDeleteGroup(viewingGroup); setViewingGroupId(null) }}>
                 解散分组
               </Button>
             </div>
-          </UngroupDropzone>
+          ) : (
+            <UngroupDropzone visible={isDraggingFromGroup}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, padding: '8px 0', minHeight: 44, width: '100%' }}>
+                <span
+                  className="cursor-pointer hover:text-primary text-gray-500 text-sm"
+                  onClick={() => setViewingGroupId(null)}
+                >
+                  弹幕库
+                </span>
+                <span className="text-gray-300 text-sm">/</span>
+                <FolderOutlined style={{ color: '#faad14', fontSize: 13 }} />
+                <span style={{ fontWeight: 600, fontSize: 14 }}>{viewingGroup?.name || '分组'}</span>
+                <Tag color="orange" style={{ marginLeft: 2 }}>{groupItems.length}</Tag>
+                <div style={{ flex: 1 }} />
+                <Button size="small" onClick={() => setViewingGroupId(null)}>返回</Button>
+                <Button size="small" danger icon={<MyIcon icon="delete" size={14} />}
+                  onClick={() => { onDeleteGroup(viewingGroup); setViewingGroupId(null) }}>
+                  解散分组
+                </Button>
+              </div>
+            </UngroupDropzone>
+          )}
           {/* 组内卡片网格 */}
           {renderItems(groupItems)}
         </div>
@@ -915,10 +942,11 @@ const LibraryGroupView = ({
       {/* 移动端：拖拽分组内条目时，固定悬浮在顶部控制区域上方的拆分投放区 */}
       {isMobile && <MobileUngroupOverlay visible={isDraggingFromGroup} />}
 
-      <DragOverlay>
+      <DragOverlay modifiers={[snapToCursorModifier]}>
         {activeItem && (
-          <div style={{ background: '#fff', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 6, padding: '6px 14px', border: '1px solid #e6f4ff' }}>
-            <span style={{ fontSize: 13, fontWeight: 500 }}>{activeItem.title}</span>
+          <div className="bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-md px-3 py-1.5 border border-blue-100 dark:border-gray-600"
+            style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: 13, fontWeight: 500, transform: 'translate(-50%, -50%)' }}>
+            {activeItem.title}
           </div>
         )}
       </DragOverlay>
