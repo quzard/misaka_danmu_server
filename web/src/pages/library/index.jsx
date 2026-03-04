@@ -41,9 +41,10 @@ import {
   getTvdbSearch,
   refreshPoster,
   setAnimeDetail,
-  toggleSourceFavorite,
   toggleSourceIncremental,
   toggleSourceFinished,
+  batchSetFavorite,
+  batchUnsetFavorite,
   downloadPosterToLocal,
   getConfig,
   setConfig,
@@ -382,10 +383,28 @@ export const Library = () => {
       render: (_, record) => {
         let imageSrc = record.localImagePath || record.imageUrl
         if (imageSrc?.startsWith('/images/')) imageSrc = imageSrc.replace('/images/', '/data/images/')
-        return imageSrc ? (
-          <img src={imageSrc} style={{ width: 56, height: 80, objectFit: 'cover', borderRadius: 4, cursor: 'pointer' }}
-            onClick={() => navigate(`/anime/${record.animeId}`)} alt={record.title} />
-        ) : null
+        const hasFav = record.sources?.some(s => s.isFavorited)
+        const hasInc = record.sources?.some(s => s.incrementalRefreshEnabled)
+        const allFin = record.sources?.length > 0 && record.sources.every(s => s.isFinished)
+        return (
+          <div className="inline-flex flex-col items-center gap-0.5" style={{ width: 56 }}>
+            {imageSrc ? (
+              <img src={imageSrc} style={{ width: 56, height: 80, objectFit: 'cover', borderRadius: 4, cursor: 'pointer', display: 'block' }}
+                onClick={() => navigate(`/anime/${record.animeId}`)} alt={record.title} />
+            ) : (
+              <div style={{ width: 56, height: 80, borderRadius: 4, background: '#f0f0f0', cursor: 'pointer' }}
+                onClick={() => navigate(`/anime/${record.animeId}`)} />
+            )}
+            {/* 海报下方状态图标 */}
+            {(hasFav || hasInc || allFin) && (
+              <div className="flex items-center justify-center gap-0.5">
+                {allFin && <MyIcon icon="wanjie1" size={13} color="#60a5fa" />}
+                {hasInc && <MyIcon icon="zengliang" size={13} color="#4ade80" />}
+                {hasFav && <MyIcon icon="favorites-fill" size={13} color="#facc15" />}
+              </div>
+            )}
+          </div>
+        )
       },
     },
     {
@@ -473,22 +492,35 @@ export const Library = () => {
       messageApi.warning('该作品没有数据源')
       return
     }
-    if (sources.length === 1) {
-      // 只有一个源，直接切换
+    const hasFav = sources.some(s => s.isFavorited)
+    if (hasFav) {
+      // 当前有标记 → 取消该作品所有源的标记
       try {
-        await toggleSourceFavorite({ sourceId: sources[0].sourceId })
-        messageApi.success('标记状态已更新')
+        await batchUnsetFavorite({ sourceIds: sources.map(s => s.sourceId) })
+        messageApi.success('已取消标记')
         getList()
       } catch (error) {
         messageApi.error('操作失败')
       }
     } else {
-      // 多个源，弹窗选择
-      setSourceSelectAction('favorite')
-      setSourceSelectSources(sources)
-      setSourceSelectTitle(record.title)
-      setSelectedSourceId(sources.find(s => s.isFavorited)?.sourceId || sources[0].sourceId)
-      setSourceSelectOpen(true)
+      // 当前无标记 → 需要选择一个源来标记
+      if (sources.length === 1) {
+        // 只有一个源，直接设为标记
+        try {
+          await batchSetFavorite({ sourceIds: [sources[0].sourceId] })
+          messageApi.success('标记状态已更新')
+          getList()
+        } catch (error) {
+          messageApi.error('操作失败')
+        }
+      } else {
+        // 多个源，弹窗选择
+        setSourceSelectAction('favorite')
+        setSourceSelectSources(sources)
+        setSourceSelectTitle(record.title)
+        setSelectedSourceId(sources[0].sourceId)
+        setSourceSelectOpen(true)
+      }
     }
   }
 
@@ -550,7 +582,8 @@ export const Library = () => {
     }
     try {
       if (sourceSelectAction === 'favorite') {
-        await toggleSourceFavorite({ sourceId: selectedSourceId })
+        // 使用 batchSetFavorite 直接设为标记（而非 toggle，避免误取消）
+        await batchSetFavorite({ sourceIds: [selectedSourceId] })
         messageApi.success('标记状态已更新')
       } else if (sourceSelectAction === 'incremental') {
         await toggleSourceIncremental({ sourceId: selectedSourceId })

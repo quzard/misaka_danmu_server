@@ -67,6 +67,24 @@ const AnimeCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, onIncreme
         <div className="absolute top-1 left-1 bg-black/60 rounded px-1 py-0.5">
           <MyIcon icon={typeIconMap[record.type] || 'tv'} size={16} color="#fff" />
         </div>
+        {/* 右上角状态标记（追更/完结/标记，从右到左） */}
+        <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
+          {allFinished && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="wanjie1" size={14} color="#60a5fa" />
+            </div>
+          )}
+          {hasIncremental && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="zengliang" size={14} color="#4ade80" />
+            </div>
+          )}
+          {hasFavorited && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="favorites-fill" size={14} color="#facc15" />
+            </div>
+          )}
+        </div>
         {/* 悬浮操作层 */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-200 flex items-end justify-end p-2 opacity-0 group-hover:opacity-100">
           <Space size={6} onClick={e => e.stopPropagation()}>

@@ -203,6 +203,7 @@ class SourceInfo(BaseModel):
     mediaId: str
     isFavorited: bool
     incrementalRefreshEnabled: bool
+    isFinished: bool = False
     episodeCount: int
     createdAt: datetime
 

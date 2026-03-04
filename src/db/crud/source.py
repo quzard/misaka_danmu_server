@@ -126,6 +126,7 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
             AnimeSource.mediaId.label("mediaId"),
             AnimeSource.isFavorited.label("isFavorited"),
             AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
+            AnimeSource.isFinished.label("isFinished"),
             AnimeSource.createdAt.label("createdAt"),
             # 使用 coalesce 确保即使没有分集的源也返回 0 而不是 NULL
             func.coalesce(episode_count_subquery.c.episode_count, 0).label("episodeCount")
@@ -305,9 +306,12 @@ async def get_incremental_refresh_sources_grouped(
     page: int = 1,
     page_size: int = 20,
     keyword: str = "",
-    favorite_filter: str = "all",  # all / favorited / unfavorited
-    refresh_filter: str = "all",   # all / enabled / disabled
-    type_filter: str = "all",      # all / movie / tv
+    favorite_filter: str = "all",   # all / favorited / unfavorited
+    refresh_filter: str = "all",    # all / enabled / disabled
+    type_filter: str = "all",       # all / movie / tv_series
+    finished_filter: str = "all",   # all / finished / unfinished
+    sort_by: str = "created",       # created / title
+    sort_order: str = "desc",       # asc / desc
 ) -> Dict[str, Any]:
     """
     获取所有源（包括启用和未启用追更的），按番剧分组返回，支持分页和过滤。
@@ -318,7 +322,9 @@ async def get_incremental_refresh_sources_grouped(
         keyword: 搜索关键词（匹配番剧名称或源名称）
         favorite_filter: 标记过滤 (all/favorited/unfavorited)
         refresh_filter: 追更过滤 (all/enabled/disabled)
-        type_filter: 类型过滤 (all/movie/tv)
+        type_filter: 类型过滤 (all/movie/tv_series)
+        finished_filter: 完结过滤 (all/finished/unfinished)
+        sort_by: 排序字段 (created=按入库时间降序, title=按标题升序)
 
     返回格式: {
         "total": 100,  # 总番剧数
@@ -386,12 +392,20 @@ async def get_incremental_refresh_sources_grouped(
         conditions.append(Anime.type == "movie")
     elif type_filter == "tv_series":
         conditions.append(Anime.type == "tv_series")
+    if finished_filter == "finished":
+        conditions.append(AnimeSource.isFinished == True)
+    elif finished_filter == "unfinished":
+        conditions.append(AnimeSource.isFinished == False)
 
     if conditions:
         base_stmt = base_stmt.where(and_(*conditions))
 
     # 排序
-    base_stmt = base_stmt.order_by(Anime.title, AnimeSource.providerName)
+    if sort_by == "created":
+        col = Anime.createdAt.desc() if sort_order == "desc" else Anime.createdAt.asc()
+    else:
+        col = Anime.title.asc() if sort_order == "asc" else Anime.title.desc()
+    base_stmt = base_stmt.order_by(col, AnimeSource.providerName)
 
     # 执行查询
     result = await session.execute(base_stmt)

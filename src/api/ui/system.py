@@ -469,7 +469,9 @@ async def clear_all_caches(
         backend = get_cache_backend()
         if backend is not None:
             backend_type = type(backend).__name__
-            backend_count = await backend.clear() or 0
+            backend_count = await backend.clear()
+            if backend_count is None:
+                backend_count = 0
     except Exception as e:
         logger.warning(f"清除缓存后端失败: {e}")
 

@@ -149,6 +149,24 @@ const AnimeCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, onIncreme
         <div className="absolute top-1 left-1 bg-black/60 rounded px-1.5 py-1 pointer-events-none">
           <MyIcon icon={typeIconMap[record.type] || 'tv'} size={isMobile ? 20 : 14} color="#fff" />
         </div>
+        {/* 右上角状态标记（完结/追更/标记，从右到左） */}
+        <div className="absolute top-1 right-1 flex items-center gap-0.5 pointer-events-none">
+          {allFin && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="wanjie1" size={isMobile ? 16 : 12} color="#60a5fa" />
+            </div>
+          )}
+          {hasInc && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="zengliang" size={isMobile ? 16 : 12} color="#4ade80" />
+            </div>
+          )}
+          {hasFav && (
+            <div className="bg-black/60 rounded px-1 py-0.5">
+              <MyIcon icon="favorites-fill" size={isMobile ? 16 : 12} color="#facc15" />
+            </div>
+          )}
+        </div>
         {/* 悬浮操作层 — 移动端常驻，PC端hover显示 */}
         <div className={`absolute inset-0 transition-all duration-200 flex items-end justify-end p-1 ${
           isMobile
@@ -225,7 +243,7 @@ const MobileLibraryCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, o
       style={{ opacity: isDragging ? 0.45 : 1, userSelect: 'none' }}>
       <div className="flex gap-3">
         {/* 海报（点击进入详情） */}
-        <div className="flex-shrink-0 w-20 h-28 rounded overflow-hidden bg-gray-100 dark:bg-gray-700 cursor-pointer hover:opacity-80 transition-opacity"
+        <div className="relative flex-shrink-0 w-20 h-28 rounded overflow-hidden bg-gray-100 dark:bg-gray-700 cursor-pointer hover:opacity-80 transition-opacity"
           onClick={e => { e.stopPropagation(); onNavigate?.(record) }}>
           {imageSrc
             ? <img src={imageSrc} className="w-full h-full object-cover" alt={record.title} />
@@ -236,14 +254,23 @@ const MobileLibraryCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, o
         <div className="flex-1 space-y-2 min-w-0">
           <div className="font-bold text-base line-clamp-2">{record.title}</div>
           <div className="flex flex-wrap gap-1">
-            <Tag color="blue" style={{ fontSize: 12 }}>{typeIconMap[record.type] === 'movie' ? '电影' : record.type === 'tv_series' ? '电视剧' : record.type === 'ova' ? 'OVA' : '其他'}</Tag>
-            {record.season && <Tag style={{ fontSize: 12 }}>第{record.season}季</Tag>}
+            <Tag color="blue" style={{ fontSize: 12 }}>{typeIconMap[record.type] === 'movie' ? '电影/剧场版' : record.type === 'tv_series' ? '电视节目' : record.type === 'ova' ? 'OVA' : '其他'}</Tag>
+            {record.type !== 'movie' && record.season > 1 && <Tag style={{ fontSize: 12 }}>第{record.season}季</Tag>}
             {record.year && <Tag style={{ fontSize: 12 }}>{record.year}年</Tag>}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
+          <div className="flex items-center text-sm text-gray-500 dark:text-gray-400 gap-1">
             <span>集数: {record.episodeCount || 0}</span>
-            <span className="mx-2">·</span>
+            <span className="mx-1">·</span>
             <span>源: {record.sourceCount || 0}</span>
+            {/* 状态图标：放在源数量右边 */}
+            {(hasFav || hasInc || allFin) && (
+              <>
+                <span className="mx-1">·</span>
+                {allFin && <MyIcon icon="wanjie1" size={13} color="#60a5fa" />}
+                {hasInc && <MyIcon icon="zengliang" size={13} color="#4ade80" />}
+                {hasFav && <MyIcon icon="favorites-fill" size={13} color="#facc15" />}
+              </>
+            )}
           </div>
         </div>
       </div>

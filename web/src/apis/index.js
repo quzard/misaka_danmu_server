@@ -883,14 +883,17 @@ export const getTemplateVariables = () => api.get('/api/ui/danmaku-storage/templ
 // --- 追更与标记管理 ---
 
 /** 获取所有源（按番剧分组）用于批量管理，支持分页和过滤 */
-export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all', typeFilter = 'all' } = {}) => {
+export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all', typeFilter = 'all', finishedFilter = 'all', sortBy = 'created', sortOrder = 'desc' } = {}) => {
   const queryParams = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
     keyword,
     favoriteFilter,
     refreshFilter,
-    typeFilter
+    typeFilter,
+    finishedFilter,
+    sortBy,
+    sortOrder,
   })
   return api.get(`/api/ui/library/incremental-refresh/sources?${queryParams.toString()}`)
 }

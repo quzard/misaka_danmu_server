@@ -1192,9 +1192,11 @@ export const SearchResult = () => {
                               <Tag color="volcano">
                                 年份：{item.year ?? '未知'}
                               </Tag>
-                              <Tag color="orange">
-                                季度：{item.season ?? '未知'}
-                              </Tag>
+                              {item.type !== 'movie' && (
+                                <Tag color="orange">
+                                  季度：{item.season ?? '未知'}
+                                </Tag>
+                              )}
                               <Tag color="gold">
                                 总集数：{item.episodeCount ?? 0}
                               </Tag>
