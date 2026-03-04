@@ -278,8 +278,13 @@ class RedisBackend(AsyncCacheBackend):
     async def clear(self, region: Optional[str] = None) -> int:
         client = await self._get_client()
         if region is None:
+            # 先获取当前 key 数量，再 flushdb，以便返回准确的清除条数
+            try:
+                count = await client.dbsize()
+            except Exception:
+                count = -1
             await client.flushdb()
-            return -1  # flushdb 不返回具体数量
+            return count
         pattern = f"{region}:*"
         count = 0
         async for key in client.scan_iter(match=pattern, count=100):

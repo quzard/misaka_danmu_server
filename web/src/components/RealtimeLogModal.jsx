@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { Modal, Drawer, Button, Tooltip, message, Empty, Switch, Card, Segmented } from 'antd'
-import { CopyOutlined, ExportOutlined, ClearOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Modal, Drawer, Button, Tooltip, message, Empty, Switch, Card, Segmented, Input } from 'antd'
+import { CopyOutlined, ExportOutlined, ClearOutlined, VerticalAlignBottomOutlined, SearchOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import Cookies from 'js-cookie'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
@@ -12,6 +12,7 @@ export default function RealtimeLogModal({ open, onClose }) {
   const [connected, setConnected] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
   const [logLevel, setLogLevel] = useState('INFO')
+  const [searchText, setSearchText] = useState('')
   const abortRef = useRef(null)
   const containerRef = useRef(null)
   const [messageApi, contextHolder] = message.useMessage()
@@ -116,6 +117,13 @@ export default function RealtimeLogModal({ open, onClose }) {
     return contentLines.length > 0 ? filtered.join('\n') : null
   }
 
+  // 关键词过滤（在级别过滤之上叠加）
+  const filteredLogs = useMemo(() => {
+    if (!searchText.trim()) return logs
+    const kw = searchText.toLowerCase()
+    return logs.filter(line => line.toLowerCase().includes(kw))
+  }, [logs, searchText])
+
   const titleNode = (
     <div className="flex items-center gap-2">
       <span>实时日志</span>
@@ -129,6 +137,15 @@ export default function RealtimeLogModal({ open, onClose }) {
             options={['INFO', 'WARN', 'DEBUG']}
             value={logLevel}
             onChange={setLogLevel}
+          />
+          <Input
+            size="small"
+            placeholder="搜索日志..."
+            prefix={<SearchOutlined className="text-gray-400" />}
+            allowClear
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            style={{ width: 180 }}
           />
         </>
       )}
@@ -170,13 +187,21 @@ export default function RealtimeLogModal({ open, onClose }) {
   const logContent = (
     <div className={isMobile ? 'flex-1 overflow-hidden flex flex-col gap-2' : 'flex flex-col gap-2'}>
       {isMobile && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">-</span>
+        <div className="flex items-center gap-2 flex-wrap">
           <Segmented
             size="small"
             options={['INFO', 'WARN', 'DEBUG']}
             value={logLevel}
             onChange={setLogLevel}
+          />
+          <Input
+            size="small"
+            placeholder="搜索日志..."
+            prefix={<SearchOutlined className="text-gray-400" />}
+            allowClear
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            style={{ flex: 1, minWidth: 120 }}
           />
         </div>
       )}
@@ -185,12 +210,12 @@ export default function RealtimeLogModal({ open, onClose }) {
           ref={containerRef}
           className={`${isMobile ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'max-h-[60vh] overflow-y-auto overflow-x-hidden'}`}
         >
-          {logs.length === 0 ? (
+          {filteredLogs.length === 0 ? (
             <div className="flex items-center justify-center" style={{ height: isMobile ? '40vh' : '40vh' }}>
-              <Empty description={<span className="text-gray-400">等待日志...</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description={<span className="text-gray-400">{logs.length === 0 ? '等待日志...' : '无匹配日志'}</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
-            logs.map((line, i) => {
+            filteredLogs.map((line, i) => {
               const filtered = filterLog(line)
               if (!filtered) return null
               return (

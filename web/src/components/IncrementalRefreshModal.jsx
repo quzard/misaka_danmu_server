@@ -18,6 +18,7 @@ import {
 } from '../apis'
 import dayjs from 'dayjs'
 import { useDefaultPageSize } from '../hooks/useDefaultPageSize'
+import { MyIcon } from '@/components/MyIcon'
 
 /**
  * 追更与标记管理弹窗组件
@@ -40,6 +41,9 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
   const [favoriteFilter, setFavoriteFilter] = useState('all')
   const [refreshFilter, setRefreshFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [finishedFilter, setFinishedFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('created')
+  const [sortOrder, setSortOrder] = useState('desc')
   const [stats, setStats] = useState({ total: 0, totalSources: 0, refreshEnabled: 0, favorited: 0, maxFailures: 10 })
 
   // 批量删除确认弹窗状态
@@ -65,6 +69,9 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           favoriteFilter: params.favoriteFilter ?? favoriteFilter,
           refreshFilter: params.refreshFilter ?? refreshFilter,
           typeFilter: params.typeFilter ?? typeFilter,
+          finishedFilter: params.finishedFilter ?? finishedFilter,
+          sortBy: params.sortBy ?? sortBy,
+          sortOrder: params.sortOrder ?? sortOrder,
         }),
         getIncrementalRefreshTaskStatus(),
       ])
@@ -83,7 +90,7 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, searchKeyword, favoriteFilter, refreshFilter, typeFilter])
+  }, [page, pageSize, searchKeyword, favoriteFilter, refreshFilter, typeFilter, finishedFilter, sortBy, sortOrder])
 
   useEffect(() => {
     if (open) {
@@ -91,9 +98,12 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
       setFavoriteFilter('all')
       setRefreshFilter('all')
       setTypeFilter('all')
+      setFinishedFilter('all')
+      setSortBy('created')
+      setSortOrder('desc')
       setSearchKeyword('')
       setSelectedSourceIds([])
-      fetchData({ page: 1, keyword: '', favoriteFilter: 'all', refreshFilter: 'all', typeFilter: 'all' })
+      fetchData({ page: 1, keyword: '', favoriteFilter: 'all', refreshFilter: 'all', typeFilter: 'all', finishedFilter: 'all', sortBy: 'created', sortOrder: 'desc' })
     }
   }, [open])
 
@@ -121,6 +131,51 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
     setTypeFilter(filter)
     setPage(1)
     fetchData({ page: 1, typeFilter: filter })
+  }
+
+  const handleFinishedFilterChange = (filter) => {
+    setFinishedFilter(filter)
+    setPage(1)
+    fetchData({ page: 1, finishedFilter: filter })
+  }
+
+  // 排序选项配置（与弹幕库风格一致）
+  const SORT_OPTIONS = [
+    { key: 'created', label: '入库时间' },
+    { key: 'title',   label: '标题排序' },
+  ]
+  const currentSortLabel = SORT_OPTIONS.find(o => o.key === sortBy)?.label || '排序'
+
+  const sortDropdownItems = {
+    items: SORT_OPTIONS.map(opt => {
+      const isActive = opt.key === sortBy
+      const arrowIcon = isActive
+        ? (sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-')
+        : 'xiajiantou-'
+      return {
+        key: opt.key,
+        label: (
+          <span className="flex items-center gap-2">
+            <span style={{ fontWeight: isActive ? 600 : 400, color: isActive ? 'var(--ant-color-primary)' : undefined }}>
+              {opt.label}
+            </span>
+            <MyIcon icon={arrowIcon} size={13} style={{ color: isActive ? 'var(--ant-color-primary)' : undefined }} />
+          </span>
+        ),
+      }
+    }),
+    onClick: ({ key }) => {
+      if (key === sortBy) {
+        const newOrder = sortOrder === 'desc' ? 'asc' : 'desc'
+        setSortOrder(newOrder)
+        setPage(1)
+        fetchData({ page: 1, sortOrder: newOrder })
+      } else {
+        setSortBy(key)
+        setPage(1)
+        fetchData({ page: 1, sortBy: key })
+      }
+    },
   }
 
   // 分页变更
@@ -577,6 +632,30 @@ export const IncrementalRefreshModal = ({ open, onCancel, onSuccess }) => {
           >
             <Button size="small">
               标记: {favoriteFilter === 'all' ? '全部' : favoriteFilter === 'favorited' ? '已标记' : '未标记'} <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown
+            menu={{
+              items: [
+                { key: 'all', label: '全部' },
+                { key: 'finished', label: '已完结' },
+                { key: 'unfinished', label: '未完结' },
+              ],
+              selectedKeys: [finishedFilter],
+              onClick: ({ key }) => handleFinishedFilterChange(key),
+            }}
+            trigger={['click']}
+          >
+            <Button size="small">
+              完结: {finishedFilter === 'all' ? '全部' : finishedFilter === 'finished' ? '已完结' : '未完结'} <DownOutlined />
+            </Button>
+          </Dropdown>
+          <Dropdown menu={sortDropdownItems} trigger={['click']}>
+            <Button size="small">
+              <span className="flex items-center gap-1">
+                {currentSortLabel}
+                <MyIcon icon={sortOrder === 'asc' ? 'arrowTop-fill' : 'xiajiantou-'} size={13} />
+              </span>
             </Button>
           </Dropdown>
           {!isMobile && (

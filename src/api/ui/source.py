@@ -377,6 +377,9 @@ async def get_incremental_refresh_sources(
     favoriteFilter: str = Query("all", pattern="^(all|favorited|unfavorited)$", description="标记过滤"),
     refreshFilter: str = Query("all", pattern="^(all|enabled|disabled)$", description="追更过滤"),
     typeFilter: str = Query("all", pattern="^(all|movie|tv_series)$", description="类型过滤"),
+    finishedFilter: str = Query("all", pattern="^(all|finished|unfinished)$", description="完结过滤"),
+    sortBy: str = Query("created", pattern="^(created|title)$", description="排序字段: created=按入库时间, title=按标题"),
+    sortOrder: str = Query("desc", pattern="^(asc|desc)$", description="排序方向: asc=升序, desc=降序"),
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session),
 ):
@@ -389,6 +392,9 @@ async def get_incremental_refresh_sources(
         favorite_filter=favoriteFilter,
         refresh_filter=refreshFilter,
         type_filter=typeFilter,
+        finished_filter=finishedFilter,
+        sort_by=sortBy,
+        sort_order=sortOrder,
     )
     # 获取最大失败次数配置
     max_failures = int(await crud.get_config_value(session, "incrementalRefreshMaxFailures", "10"))
