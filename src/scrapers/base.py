@@ -362,6 +362,9 @@ class BaseScraper(ABC):
         # 不提供默认值，如果数据库中没有则返回空字符串
         provider_pattern_str = await self.config_manager.get(provider_key, "")
 
+        # 打印实际读取到的过滤规则，便于排查
+        self.logger.info(f"读取到分集黑名单（正则）：{provider_pattern_str if provider_pattern_str else '(空)'}")
+
         if not provider_pattern_str or not provider_pattern_str.strip():
             return None
 

@@ -11,6 +11,7 @@
 - ${animeId}: 作品ID
 - ${episodeId}: 分集ID
 - ${sourceId}: 数据源ID
+- ${tmdbId}: TMDB ID（可能为空）
 
 支持的格式化选项：
 - ${season:02d}: 季度号补零到2位
@@ -160,7 +161,8 @@ class DanmakuPathTemplate:
 def create_danmaku_context(anime_title: str, season: int, episode_index: int,
                           year: Optional[int] = None, provider: Optional[str] = None,
                           anime_id: Optional[int] = None, episode_id: Optional[int] = None,
-                          source_id: Optional[int] = None) -> Dict[str, Any]:
+                          source_id: Optional[int] = None,
+                          tmdb_id: Optional[str] = None) -> Dict[str, Any]:
     """
     创建弹幕路径模板的上下文变量
 
@@ -173,6 +175,7 @@ def create_danmaku_context(anime_title: str, season: int, episode_index: int,
         anime_id: 作品ID
         episode_id: 分集ID
         source_id: 数据源ID
+        tmdb_id: TMDB ID（可能为 None）
 
     Returns:
         上下文字典
@@ -186,7 +189,8 @@ def create_danmaku_context(anime_title: str, season: int, episode_index: int,
         'provider': provider,
         'animeId': anime_id,
         'episodeId': episode_id,
-        'sourceId': source_id
+        'sourceId': source_id,
+        'tmdbId': tmdb_id,
     }
 
 
@@ -245,6 +249,14 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
             # 创建路径模板上下文
             # 注意：season 可能为 0（特别篇/SP），不能使用 or 1 来设置默认值
             season_value = episode.source.anime.season if episode.source.anime.season is not None else 1
+            # 从 metadata 中读取 tmdbId（可能为 None）
+            tmdb_id = None
+            try:
+                metadata = episode.source.anime.metadataRecord
+                if metadata:
+                    tmdb_id = metadata.tmdbId
+            except Exception:
+                pass
             context = create_danmaku_context(
                 anime_title=episode.source.anime.title,
                 season=season_value,
@@ -253,7 +265,8 @@ async def generate_danmaku_path(episode, config_manager=None) -> tuple[str, Path
                 provider=episode.source.providerName,
                 anime_id=anime_id,
                 episode_id=episode_id,
-                source_id=episode.source.id
+                source_id=episode.source.id,
+                tmdb_id=tmdb_id,
             )
 
             # 生成相对路径(不包含.xml后缀)

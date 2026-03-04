@@ -279,6 +279,7 @@ export const OutputManage = () => {
                 { label: '白色弹幕变随机颜色', value: 'white_to_random' },
                 { label: '全部随机上色', value: 'all_random' },
                 { label: '全部变白色', value: 'all_white' },
+                { label: '仅上色点赞/重复弹幕', value: 'highlight_only' },
               ]}
             />
           </div>

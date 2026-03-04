@@ -883,14 +883,17 @@ export const getTemplateVariables = () => api.get('/api/ui/danmaku-storage/templ
 // --- 追更与标记管理 ---
 
 /** 获取所有源（按番剧分组）用于批量管理，支持分页和过滤 */
-export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all', typeFilter = 'all' } = {}) => {
+export const getIncrementalRefreshSources = ({ page = 1, pageSize = 20, keyword = '', favoriteFilter = 'all', refreshFilter = 'all', typeFilter = 'all', finishedFilter = 'all', sortBy = 'created', sortOrder = 'desc' } = {}) => {
   const queryParams = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
     keyword,
     favoriteFilter,
     refreshFilter,
-    typeFilter
+    typeFilter,
+    finishedFilter,
+    sortBy,
+    sortOrder,
   })
   return api.get(`/api/ui/library/incremental-refresh/sources?${queryParams.toString()}`)
 }
@@ -1022,3 +1025,23 @@ export const downloadPosterToLocal = (data) => api.post('/api/ui/poster/download
 
 /** 从 Fanart.tv 搜索海报 */
 export const searchFanartPosters = (params) => api.get('/api/ui/poster/fanart', params)
+
+// ========== 弹幕库分组 ==========
+
+/** 获取所有分组 */
+export const getAnimeGroups = () => api.get('/api/ui/anime/groups')
+
+/** 创建分组 */
+export const createAnimeGroup = (data) => api.post('/api/ui/anime/groups', data)
+
+/** 重命名分组 */
+export const renameAnimeGroup = (groupId, data) => api.patch(`/api/ui/anime/groups/${groupId}`, data)
+
+/** 删除分组（关联条目自动脱离分组） */
+export const deleteAnimeGroup = (groupId) => api.delete(`/api/ui/anime/groups/${groupId}`)
+
+/** 批量更新分组排序 */
+export const reorderAnimeGroups = (data) => api.patch('/api/ui/anime/groups/reorder', data)
+
+/** 设置或清除条目所属分组（groupId=null 则移出分组） */
+export const setAnimeGroupMembership = (animeId, data) => api.patch(`/api/ui/anime/${animeId}/group`, data)

@@ -670,6 +670,54 @@ async def _remove_system_token_reset_task_v1(conn: AsyncConnection):
     logger.info("已删除 system_token_reset 定时任务（已迁移到内部轮询任务）")
 
 
+async def _migrate_anime_group_fk_v1(conn: AsyncConnection, db_type: str):
+    """为 anime.group_id 添加外键约束指向 anime_groups.id（仅已有数据库需要，新库由 create_all 处理）"""
+    # anime_groups 表和 anime.group_id 列由 create_all + db_maintainer 自动创建
+    # 此迁移仅补充外键约束
+    try:
+        if db_type == "mysql":
+            # 检查外键是否已存在
+            check_sql = text("""
+                SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'anime'
+                AND COLUMN_NAME = 'group_id'
+                AND REFERENCED_TABLE_NAME = 'anime_groups'
+            """)
+            count = (await conn.execute(check_sql)).scalar()
+            if count and count > 0:
+                logger.info("  ✅ anime.group_id 外键约束已存在，跳过")
+                return
+            await conn.execute(text(
+                "ALTER TABLE `anime` ADD CONSTRAINT `fk_anime_group_id` "
+                "FOREIGN KEY (`group_id`) REFERENCES `anime_groups` (`id`) ON DELETE SET NULL"
+            ))
+        else:  # postgresql
+            check_sql = text("""
+                SELECT COUNT(*) FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                AND tc.table_name = 'anime'
+                AND kcu.column_name = 'group_id'
+            """)
+            count = (await conn.execute(check_sql)).scalar()
+            if count and count > 0:
+                logger.info("  ✅ anime.group_id 外键约束已存在，跳过")
+                return
+            await conn.execute(text(
+                'ALTER TABLE "anime" ADD CONSTRAINT "fk_anime_group_id" '
+                'FOREIGN KEY ("group_id") REFERENCES "anime_groups" ("id") ON DELETE SET NULL'
+            ))
+        logger.info("  ✅ 已为 anime.group_id 添加外键约束 → anime_groups.id")
+    except Exception as e:
+        if "duplicate" in str(e).lower() or "already exists" in str(e).lower():
+            logger.info("  ✅ anime.group_id 外键约束已存在（捕获重复异常），跳过")
+        else:
+            logger.warning(f"  ⚠️  添加 anime.group_id 外键约束失败: {e}")
+
+
 # 所有迁移任务的 ID 列表（新增迁移时需同步更新此列表）
 ALL_MIGRATION_IDS = [
     "migrate_clear_rate_limit_state_v1",
@@ -680,6 +728,7 @@ ALL_MIGRATION_IDS = [
     "migrate_docker_image_name_v1",
     "drop_force_scrape_column_v1",
     "remove_system_token_reset_task_v1",
+    "migrate_anime_group_fk_v1",
 ]
 
 
@@ -716,6 +765,7 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("migrate_docker_image_name_v1", _migrate_docker_image_name_v1, ()),  # 修正 dockerImageName 默认值
         ("drop_force_scrape_column_v1", _drop_force_scrape_column_v1, (db_type,)),  # 删除已废弃的 force_scrape 列
         ("remove_system_token_reset_task_v1", _remove_system_token_reset_task_v1, ()),  # 删除已迁移到内部轮询的 tokenReset 定时任务
+        ("migrate_anime_group_fk_v1", _migrate_anime_group_fk_v1, (db_type,)),  # 为 anime.group_id 添加外键约束
     ]
 
     for migration_id, migration_func, args in migrations:

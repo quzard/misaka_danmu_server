@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.db import crud, orm_models
 from src.rate_limiter import RateLimiter, RateLimitExceededError
 from src.services import TaskStatus
+from src.services.import_existence_checker import check_episode_existence
 from .utils import extract_short_error_message
 
 logger = logging.getLogger(__name__)
@@ -186,45 +187,27 @@ async def _import_episodes_iteratively(
                         episode.title, episode.url, episode.episodeId
                     )
 
-                    # 智能刷新模式：比较弹幕数量
-                    if smart_refresh:
-                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                        episode_result = await session.execute(episode_stmt)
-                        existing_episode = episode_result.scalar_one_or_none()
+                    # 统一分集判重：使用 check_episode_existence 比较弹幕数量
+                    ep_check = await check_episode_existence(
+                        session,
+                        source_id=source_id,
+                        provider_episode_id=episode.episodeId,
+                        episode_index=episode.episodeIndex,
+                        new_comment_count=len(comments),
+                    )
 
-                        if existing_episode and existing_episode.commentCount > 0:
-                            new_count = len(comments)
-                            existing_count = existing_episode.commentCount
+                    if ep_check["action"] == "skip":
+                        logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) {ep_check['reason']}。")
+                        skipped_episodes_indices.append(episode.episodeIndex)
+                        continue
 
-                            if new_count > existing_count:
-                                actual_new_count = new_count - existing_count
-                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
-                                added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                                await session.commit()
-                            elif new_count == existing_count:
-                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                skipped_episodes_indices.append(episode.episodeIndex)
-                                continue
-                            else:
-                                logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                skipped_episodes_indices.append(episode.episodeIndex)
-                                continue
-                        else:
-                            # 没有现有弹幕，直接导入
-                            added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                            await session.commit()
-                    else:
-                        # 普通模式：检查是否已有弹幕，如果有则跳过
-                        episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                        episode_result = await session.execute(episode_stmt)
-                        existing_episode = episode_result.scalar_one_or_none()
-                        if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                            skipped_episodes_indices.append(episode.episodeIndex)  # 记录为跳过
-                            continue
+                    # action == "import" 或 "update" → 写入弹幕
+                    if ep_check["action"] == "update":
+                        actual_new = len(comments) - ep_check["existing_count"]
+                        logger.info(f"[并发模式] 分集 '{episode.title}' 弹幕更新: 新{len(comments)}条 > 旧{ep_check['existing_count']}条，实际新增 {actual_new} 条")
 
-                        added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
-                        await session.commit()
+                    added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
+                    await session.commit()
 
                     total_comments_added += added_count
                     successful_episodes_indices.append(episode.episodeIndex)
@@ -253,24 +236,8 @@ async def _import_episodes_iteratively(
             await progress_callback(base_progress, f"正在处理分集: {episode.title}")
 
             try:
-                # 串行模式下，在真正发起网络请求之前先检查数据库是否已有弹幕，避免重复下载
-                if not smart_refresh and not is_fallback:
-                    # 如果是第一集且已经有预获取的弹幕，则后面会直接复用，这里不再额外检查
-                    if not (i == 0 and first_episode_comments is not None):
-                        episode_stmt = select(orm_models.Episode).where(
-                            orm_models.Episode.sourceId == source_id,
-                            orm_models.Episode.episodeIndex == episode.episodeIndex,
-                            orm_models.Episode.danmakuFilePath.isnot(None),
-                            orm_models.Episode.commentCount > 0,
-                        )
-                        episode_result = await session.execute(episode_stmt)
-                        existing_episode = episode_result.scalar_one_or_none()
-                        if existing_episode:
-                            logger.info(
-                                f"分集 '{episode.title}' (源ID: {source_id}, 集数: {episode.episodeIndex}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过网络请求与导入。"
-                            )
-                            skipped_episodes_indices.append(episode.episodeIndex)
-                            continue
+                # 串行模式下，第一集且已有预获取的弹幕时跳过预检查
+                # 注意：不再"有弹幕就跳过网络请求"，因为需要获取新弹幕后比较数量决定是否更新
 
                 # 如果是第一集且已有预获取的弹幕，直接使用
                 if i == 0 and first_episode_comments is not None:
@@ -317,36 +284,24 @@ async def _import_episodes_iteratively(
                             episode.title, episode.url, episode.episodeId
                         )
 
-                        # 智能刷新模式：比较弹幕数量
-                        if smart_refresh:
-                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                            episode_result = await session.execute(episode_stmt)
-                            existing_episode = episode_result.scalar_one_or_none()
+                        # 统一分集判重：使用 check_episode_existence 比较弹幕数量
+                        ep_check = await check_episode_existence(
+                            session,
+                            source_id=source_id,
+                            provider_episode_id=episode.episodeId,
+                            episode_index=episode.episodeIndex,
+                            new_comment_count=len(comments),
+                        )
 
-                            if existing_episode and existing_episode.commentCount > 0:
-                                new_count = len(comments)
-                                existing_count = existing_episode.commentCount
+                        if ep_check["action"] == "skip":
+                            logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) {ep_check['reason']}。")
+                            skipped_episodes_indices.append(episode.episodeIndex)
+                            continue
 
-                                if new_count > existing_count:
-                                    actual_new_count = new_count - existing_count
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 大于现有数量 ({existing_count})，实际新增 {actual_new_count} 条，更新弹幕。")
-                                elif new_count == existing_count:
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 与现有数量相同，跳过更新。")
-                                    skipped_episodes_indices.append(episode.episodeIndex)
-                                    continue
-                                else:
-                                    logger.info(f"分集 '{episode.title}' 弹幕总数 ({new_count}) 少于现有数量 ({existing_count})，跳过更新。")
-                                    skipped_episodes_indices.append(episode.episodeIndex)
-                                    continue
-                        else:
-                            # 普通模式：检查是否已有弹幕，如果有则跳过
-                            episode_stmt = select(orm_models.Episode).where(orm_models.Episode.id == episode_db_id)
-                            episode_result = await session.execute(episode_stmt)
-                            existing_episode = episode_result.scalar_one_or_none()
-                            if existing_episode and existing_episode.danmakuFilePath and existing_episode.commentCount > 0:
-                                logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 已存在弹幕 ({existing_episode.commentCount} 条)，跳过导入。")
-                                skipped_episodes_indices.append(episode.episodeIndex)  # 记录为跳过
-                                continue
+                        # action == "import" 或 "update" → 写入弹幕
+                        if ep_check["action"] == "update":
+                            actual_new = len(comments) - ep_check["existing_count"]
+                            logger.info(f"分集 '{episode.title}' 弹幕更新: 新{len(comments)}条 > 旧{ep_check['existing_count']}条，实际新增 {actual_new} 条")
 
                         added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                         await session.commit()

@@ -227,6 +227,52 @@ async def get_episode_equivalence(
     return None
 
 
+async def get_episode_equivalence_batch(
+    session: AsyncSession,
+    group_id: str,
+    season: int,
+    episode_numbers: List[int],
+) -> Dict[int, int]:
+    """
+    批量将 custom 季集号（Emby 相对集号）翻译为 absoluteEpisodeNumber（弹幕源绝对集号）。
+
+    参数:
+        group_id: TMDB 剧集组 ID
+        season:   custom 季号（如 2 表示第二季）
+        episode_numbers: custom 集号列表（如 [1,2,3,4,5,6]）
+
+    返回:
+        {custom_episode: absolute_episode_number} 映射字典
+        若无法翻译则返回空字典
+    """
+    if not episode_numbers:
+        return {}
+    stmt = (
+        select(
+            TmdbEpisodeMapping.customEpisodeNumber,
+            TmdbEpisodeMapping.absoluteEpisodeNumber,
+        )
+        .where(
+            TmdbEpisodeMapping.tmdbEpisodeGroupId == group_id,
+            TmdbEpisodeMapping.customSeasonNumber == season,
+            TmdbEpisodeMapping.customEpisodeNumber.in_(episode_numbers),
+        )
+    )
+    result = await session.execute(stmt)
+    rows = result.all()
+    return {row.customEpisodeNumber: row.absoluteEpisodeNumber for row in rows if row.absoluteEpisodeNumber is not None}
+
+
+async def get_episode_group_id_by_anime_id(
+    session: AsyncSession,
+    anime_id: int,
+) -> Optional[str]:
+    """通过 anime_id 查询关联的 tmdbEpisodeGroupId。"""
+    stmt = select(AnimeMetadata.tmdbEpisodeGroupId).where(AnimeMetadata.animeId == anime_id)
+    result = await session.execute(stmt)
+    return result.scalars().first()
+
+
 async def get_associated_anime_ids(session: AsyncSession, group_id: str) -> List[int]:
     """查询关联了指定剧集组的所有条目ID。"""
     stmt = select(AnimeMetadata.animeId).where(AnimeMetadata.tmdbEpisodeGroupId == group_id)

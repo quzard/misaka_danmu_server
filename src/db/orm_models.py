@@ -35,6 +35,18 @@ class NaiveDateTime(TypeDecorator):
 class Base(DeclarativeBase):
     pass
 
+
+class AnimeGroup(Base):
+    """弹幕库条目分组表"""
+    __tablename__ = "anime_groups"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    sortOrder: Mapped[int] = mapped_column("sort_order", Integer, default=0, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now, nullable=False)
+
+    animes: Mapped[List["Anime"]] = relationship(back_populates="group")
+
+
 class Anime(Base):
     __tablename__ = "anime"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -46,10 +58,12 @@ class Anime(Base):
     episodeCount: Mapped[Optional[int]] = mapped_column("episode_count", Integer)
     year: Mapped[Optional[int]] = mapped_column("year", Integer)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now, nullable=False)
+    groupId: Mapped[Optional[int]] = mapped_column("group_id", BigInteger, ForeignKey("anime_groups.id", ondelete="SET NULL"), nullable=True)
 
     sources: Mapped[List["AnimeSource"]] = relationship(back_populates="anime", cascade="all, delete-orphan")
     metadataRecord: Mapped["AnimeMetadata"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
     aliases: Mapped["AnimeAlias"] = relationship(back_populates="anime", cascade="all, delete-orphan", uselist=False)
+    group: Mapped[Optional["AnimeGroup"]] = relationship(back_populates="animes")
 
     __table_args__ = (
         Index('idx_title_fulltext', 'title'),
