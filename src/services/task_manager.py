@@ -838,13 +838,13 @@ class TaskManager:
                     for task_info in pending_tasks:
                         if await self._try_recover_task(task_info):
                             recovered_count += 1
+                            # 将原记录标记为"已取消"，防止下次重启再次查到并重复恢复（翻倍）
+                            # 新任务已用新 ID 加入队列，原记录不再需要
+                            await crud.update_task_status(session, task_info["taskId"], "已取消")
                         else:
                             failed_count += 1
                             # 将无法恢复的任务标记为失败
-                            await crud.update_task_in_history(
-                                session, task_info["taskId"], "失败",
-                                description="因服务重启且无法恢复而取消"
-                            )
+                            await crud.update_task_status(session, task_info["taskId"], "失败")
 
                     self.logger.info(f"排队中的任务处理完成: {recovered_count} 个已恢复, {failed_count} 个无法恢复")
 

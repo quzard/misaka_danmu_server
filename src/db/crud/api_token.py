@@ -147,18 +147,30 @@ async def validate_api_token(session: AsyncSession, token: str) -> Optional[Dict
     return {"id": token_info.id, "expiresAt": token_info.expiresAt, "dailyCallLimit": token_info.dailyCallLimit, "dailyCallCount": token_info.dailyCallCount} # type: ignore
 
 
-async def increment_token_call_count(session: AsyncSession, token_id: int):
-    """为指定的Token增加调用计数。"""
-    token = await session.get(ApiToken, token_id)
-    if not token:
-        return
+async def increment_token_call_count(_session: AsyncSession, token_id: int):
+    """
+    后台原子递增 Token 调用计数，使用独立 session 避免主请求锁竞争。
+    使用 UPDATE ... SET count=count+1 原子操作，避免先查后改的竞争条件。
+    """
+    from sqlalchemy import update as sql_update
+    from ..database import get_session_factory
+    import asyncio
 
-    # 修正：简化函数职责，现在只负责增加计数。
-    # 重置逻辑已移至 validate_api_token 中，以避免竞争条件。
-    token.dailyCallCount += 1
-    # 总是更新最后调用时间
-    token.lastCallAt = get_now()
-    # 注意：这里不 commit，由调用方（API端点）来决定何时提交事务
+    async def _bg():
+        try:
+            factory = get_session_factory()
+            async with factory() as bg_session:
+                stmt = (
+                    sql_update(ApiToken)
+                    .where(ApiToken.id == token_id)
+                    .values(dailyCallCount=ApiToken.dailyCallCount + 1, lastCallAt=get_now())
+                )
+                await bg_session.execute(stmt)
+                await bg_session.commit()
+        except Exception as e:
+            logger.warning(f"后台更新 token 调用计数失败（不影响请求）: {e}")
+
+    asyncio.create_task(_bg())
 
 
 async def reset_all_token_daily_counts(session: AsyncSession) -> int:

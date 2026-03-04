@@ -50,7 +50,8 @@ async def get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optional
 
     if backend is not None:
         try:
-            return await backend.get(cache_key, region="default")
+            result = await backend.get(cache_key, region="default")
+            return _fix_bangumi_mapping(result)
         except Exception as e:
             logger.warning(f"缓存后端读取失败，回退到数据库: {cache_key}, 错误: {e}")
 
@@ -58,14 +59,37 @@ async def get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optional
     cached_data = await crud.get_cache(session, cache_key)
     if cached_data:
         if not isinstance(cached_data, str):
-            return cached_data
+            return _fix_bangumi_mapping(cached_data)
         if not cached_data.strip():
             return None
         try:
-            return json.loads(cached_data)
+            return _fix_bangumi_mapping(json.loads(cached_data))
         except (json.JSONDecodeError, TypeError):
             return cached_data
     return None
+
+
+def _fix_bangumi_mapping(data: Any) -> Any:
+    """
+    修复缓存中 bangumi_mapping 的 value 是 JSON 字符串（double-serialized）的情况。
+    如果 bangumi_mapping 某个 value 是 str，尝试 json.loads 转换为 dict。
+    """
+    if not isinstance(data, dict):
+        return data
+    mapping = data.get("bangumi_mapping")
+    if not isinstance(mapping, dict):
+        return data
+    fixed = False
+    for bid, mi in mapping.items():
+        if isinstance(mi, str):
+            try:
+                mapping[bid] = json.loads(mi)
+                fixed = True
+            except (json.JSONDecodeError, TypeError):
+                pass  # 无法修复的保持原样，调用方再容错
+    if fixed:
+        data["bangumi_mapping"] = mapping
+    return data
 
 
 async def set_db_cache(session: AsyncSession, prefix: str, key: str, value: Any, ttl_seconds: int):

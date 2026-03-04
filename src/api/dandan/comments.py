@@ -672,7 +672,7 @@ async def get_comments_for_dandan(
                             if last_bangumi_id and last_bangumi_id in search_info["bangumi_mapping"]:
                                 mapping_info = search_info["bangumi_mapping"][last_bangumi_id]
                                 # 检查真实animeId是否匹配
-                                if mapping_info.get("real_anime_id") == real_anime_id:
+                                if isinstance(mapping_info, dict) and mapping_info.get("real_anime_id") == real_anime_id:
                                     episode_url = mapping_info["media_id"]
                                     provider = mapping_info["provider"]
                                     logger.info(f"根据用户最后选择找到映射: bangumiId={last_bangumi_id}, provider={provider}")
