@@ -89,18 +89,18 @@ const AnimeCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, onIncreme
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all duration-200 flex items-end justify-end p-2 opacity-0 group-hover:opacity-100">
           <Space size={6} onClick={e => e.stopPropagation()}>
             <Tooltip title="编辑">
-              <span className="w-7 h-7 bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white"
+              <span className="w-7 h-7 bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500"
                 onClick={() => onEdit(record)}>
                 <MyIcon icon="edit" size={14} />
               </span>
             </Tooltip>
             <Dropdown menu={{ items: menuItems }} trigger={['click']}>
-              <span className="w-7 h-7 bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white">
+              <span className="w-7 h-7 bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500">
                 <MenuOutlined style={{ fontSize: 13 }} />
               </span>
             </Dropdown>
             <Tooltip title="删除">
-              <span className="w-7 h-7 bg-white/90 rounded flex items-center justify-center cursor-pointer hover:bg-white hover:text-red-500"
+              <span className="w-7 h-7 bg-white/90 dark:bg-gray-600/90 rounded flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-gray-500 hover:text-red-500"
                 onClick={() => onDelete(record)}>
                 <MyIcon icon="delete" size={14} />
               </span>
@@ -112,7 +112,7 @@ const AnimeCard = ({ record, onEdit, onDelete, onNavigate, onFavorite, onIncreme
       {/* 信息区 */}
       <div className="p-2 flex flex-col gap-1.5">
         <Tooltip title={record.title}>
-          <div className="text-sm font-medium leading-tight line-clamp-2"
+          <div className="text-sm font-medium leading-tight line-clamp-2 text-gray-900 dark:text-gray-100"
             style={{ minHeight: '2.5rem' }}
             onClick={() => onNavigate(record)}>
             {record.title}
