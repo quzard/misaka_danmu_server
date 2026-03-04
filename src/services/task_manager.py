@@ -66,6 +66,8 @@ class TaskManager:
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
         self._paused_tasks: Dict[str, Tuple[Task, float]] = {}  # {task_id: (task, resume_time)}
+        # run_immediately=True 的任务不经过队列 worker，单独注册以支持暂停/终止
+        self._immediate_tasks: Dict[str, Task] = {}  # {task_id: Task}
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -534,7 +536,18 @@ class TaskManager:
 
         if run_immediately:
             self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过队列 [{queue_type}]。")
-            asyncio.create_task(self._run_task_wrapper(task, queue_type=queue_type))
+            # 注册到 _immediate_tasks，使 pause/abort/resume 能找到该任务
+            async with self._lock:
+                self._immediate_tasks[task_id] = task
+
+            async def _run_and_cleanup():
+                try:
+                    await self._run_task_wrapper(task, queue_type=queue_type)
+                finally:
+                    async with self._lock:
+                        self._immediate_tasks.pop(task_id, None)
+
+            asyncio.create_task(_run_and_cleanup())
         else:
             # 根据队列类型选择队列
             if queue_type == "download":
@@ -684,6 +697,14 @@ class TaskManager:
             self._current_fallback_task.running_coro_task.cancel()
             return True
 
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task and imm_task.running_coro_task:
+            self.logger.info(f"正在中止立即执行任务 '{imm_task.title}' (ID: {task_id})")
+            imm_task.pause_event.set()
+            imm_task.running_coro_task.cancel()
+            return True
+
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
@@ -713,6 +734,15 @@ class TaskManager:
                 self.logger.info(f"已暂停后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
                 return True
 
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task:
+            async with self._session_factory() as session:
+                imm_task.pause_event.clear()
+                await crud.update_task_status(session, task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停立即执行任务 '{imm_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
@@ -740,6 +770,15 @@ class TaskManager:
                 self._current_fallback_task.pause_event.set()
                 await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.RUNNING)
                 self.logger.info(f"已恢复后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
+                return True
+
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task:
+            async with self._session_factory() as session:
+                imm_task.pause_event.set()
+                await crud.update_task_status(session, task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复立即执行任务 '{imm_task.title}' (ID: {task_id})。")
                 return True
 
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
