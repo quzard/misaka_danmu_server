@@ -225,7 +225,7 @@ export default function RealtimeLogModal({ open, onClose }) {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
-                      {filtered}
+                      {searchText ? highlightText(filtered, searchText) : filtered}
                     </pre>
                     <Button
                       type="text"
@@ -279,3 +279,13 @@ export default function RealtimeLogModal({ open, onClose }) {
   )
 }
 
+
+
+function highlightText(text, keyword) {
+  if (!keyword) return text
+  const regex = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+  const parts = text.split(regex)
+  return parts.map((part, i) =>
+    regex.test(part) ? <mark key={i} className="bg-yellow-300 dark:bg-yellow-600 px-0.5 rounded">{part}</mark> : part
+  )
+}

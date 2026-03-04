@@ -24,49 +24,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_BACKUP_PATH = "/app/config/sql_backup"
 DEFAULT_RETENTION_COUNT = 5
 
-# 需要备份的表（按依赖顺序排列，被依赖的表在前）
-# 注意：有外键依赖的表必须在被依赖的表之后
-BACKUP_TABLES = [
-    # === 基础表（无外键依赖）===
-    ("users", orm_models.User),
-    ("anime", orm_models.Anime),
-    ("config", orm_models.Config),
-    ("scrapers", orm_models.Scraper),
-    ("metadata_sources", orm_models.MetadataSource),
-    ("scheduled_tasks", orm_models.ScheduledTask),
-    ("media_servers", orm_models.MediaServer),
-    ("title_recognition", orm_models.TitleRecognition),
-    ("rate_limit_state", orm_models.RateLimitState),
 
-    # === 依赖 users 表 ===
-    ("user_sessions", orm_models.UserSession),
-    ("bangumi_auth", orm_models.BangumiAuth),
-    ("oauth_states", orm_models.OauthState),
+def _build_backup_tables() -> List[tuple]:
+    """
+    自动发现所有 ORM 模型并按外键依赖拓扑排序。
+    SQLAlchemy 的 sorted_tables 已处理好依赖顺序（被依赖的表在前），
+    新增 ORM 模型后自动纳入备份，无需手动维护列表。
+    """
+    # tablename -> ORM class 反向映射
+    table_to_class = {
+        mapper.local_table.name: mapper.class_
+        for mapper in orm_models.Base.registry.mappers
+    }
+    # 按拓扑排序遍历（SQLAlchemy 已处理外键依赖顺序）
+    result = []
+    for table in orm_models.Base.metadata.sorted_tables:
+        cls = table_to_class.get(table.name)
+        if cls is not None:
+            result.append((table.name, cls))
+    return result
 
-    # === 依赖 anime 表 ===
-    ("anime_sources", orm_models.AnimeSource),
-    ("episode", orm_models.Episode),
-    ("anime_metadata", orm_models.AnimeMetadata),
-    ("anime_aliases", orm_models.AnimeAlias),
 
-    # === 依赖 media_servers 表 ===
-    ("media_items", orm_models.MediaItem),
-
-    # === 依赖 scheduled_tasks 表 ===
-    ("task_history", orm_models.TaskHistory),
-
-    # === 其他表 ===
-    ("api_tokens", orm_models.ApiToken),
-    ("token_access_logs", orm_models.TokenAccessLog),
-    ("ua_rules", orm_models.UaRule),
-    ("tmdb_episode_mapping", orm_models.TmdbEpisodeMapping),
-    ("webhook_tasks", orm_models.WebhookTask),
-    ("task_state_cache", orm_models.TaskStateCache),
-    ("external_api_logs", orm_models.ExternalApiLog),
-    ("cache_data", orm_models.CacheData),
-    ("local_danmaku_items", orm_models.LocalDanmakuItem),
-    ("ai_metrics_log", orm_models.AIMetricsLog),
-]
+# 动态生成备份表列表（自动包含所有 ORM 模型，按外键依赖正确排序）
+BACKUP_TABLES = _build_backup_tables()
 
 
 def get_column_mapping(model_class) -> Dict[str, str]:
@@ -488,27 +468,18 @@ async def restore_backup(session: AsyncSession, filename: str, progress_callback
     if settings.database.type.lower() == "postgresql":
         from sqlalchemy import text
 
-        # 获取所有有自增主键的表
-        autoincrement_tables = [
-            ("users", "id"),
-            ("anime", "id"),
-            ("anime_sources", "id"),
-            ("episode", "id"),
-            ("anime_metadata", "id"),
-            ("anime_aliases", "id"),
-            ("user_sessions", "id"),
-            ("api_tokens", "id"),
-            ("token_access_logs", "id"),
-            ("ua_rules", "id"),
-            ("tmdb_episode_mapping", "id"),
-            ("webhook_tasks", "id"),
-            ("external_api_logs", "id"),
-            ("title_recognition", "id"),
-            ("media_servers", "id"),
-            ("media_items", "id"),
-            ("local_danmaku_items", "id"),
-            ("ai_metrics_log", "id"),
-        ]
+        # 自动检测所有有整数自增主键的表，无需手动维护
+        autoincrement_tables = []
+        for table_name, model_cls in BACKUP_TABLES:
+            for col in model_cls.__table__.primary_key.columns:
+                if col.autoincrement in (True, 'auto') and hasattr(col.type, 'precision'):
+                    autoincrement_tables.append((table_name, col.name))
+                    break
+                # Integer/BigInteger 没有 precision 属性，用类名判断
+                type_name = type(col.type).__name__
+                if col.autoincrement in (True, 'auto') and type_name in ('Integer', 'BigInteger'):
+                    autoincrement_tables.append((table_name, col.name))
+                    break
 
         for table_name, pk_column in autoincrement_tables:
             try:
