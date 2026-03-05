@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status
 
 from src.db import models, crud, ConfigManager
+from src.rate_limiter import RateLimitExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,23 @@ class TaskManager:
                 # 用户主动取消（abort_current_task 触发）
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
                 await self._safe_finalize_task(task.task_id, TaskStatus.FAILED, "任务已被用户取消")
+        except RateLimitExceededError as e:
+            # 兜底：如果某个任务模块漏掉了 RateLimitExceededError → TaskPauseForRateLimit 的转换
+            # 在此统一处理，确保任务被暂停而非失败
+            self.logger.warning(f"任务 '{task.title}' (ID: {task.task_id}) 触发流控（兜底捕获），暂停任务 {e.retry_after_seconds:.0f} 秒")
+            provider_name = None
+            if task.task_parameters:
+                provider_name = task.task_parameters.get("provider") or task.task_parameters.get("providerName")
+            if provider_name:
+                expire_time = time.time() + e.retry_after_seconds
+                async with self._lock:
+                    self._rate_limited_providers[provider_name] = expire_time
+            await self._safe_update_task_status(
+                task.task_id, TaskStatus.PAUSED, None,
+                f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
+            await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
+            return
         except Exception:
             error_message = f"任务执行失败 - {traceback.format_exc()}"
             await self._safe_finalize_task(
