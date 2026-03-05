@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status
 
 from src.db import models, crud, ConfigManager
-from src.rate_limiter import RateLimitExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +213,8 @@ class TaskManager:
             queue_type: 队列类型 ("download" 或 "management")
         """
         self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id}) [队列: {queue_type}]")
+        # 延迟导入避免循环依赖（rate_limiter → src.services → task_manager）
+        from src.rate_limiter import RateLimitExceededError
         try:
             # This task is now running, remove it from pending titles
             # This is now the single point of responsibility for this cleanup.
