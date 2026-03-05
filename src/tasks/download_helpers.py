@@ -257,10 +257,18 @@ async def _import_episodes_iteratively(
                                 await rate_limiter.check(scraper.provider_name)
                             break  # 通过流控检查，继续下载
                         except RateLimitExceededError as e:
-                            wait_seconds = e.retry_after_seconds
-                            logger.info(f"分集 '{episode.title}' 触发流控，原地等待 {wait_seconds:.0f} 秒后继续...")
-                            await progress_callback(base_progress, f"流控等待中，{wait_seconds:.0f} 秒后继续 ({i+1}/{len(episodes)})...")
-                            await asyncio.sleep(wait_seconds + 1)
+                            error_msg = str(e)
+                            if "全局速率限制" in error_msg:
+                                # 全局配额已满，整个队列都需要等待，原地等待合理
+                                wait_seconds = e.retry_after_seconds
+                                logger.info(f"分集 '{episode.title}' 触发全局流控，原地等待 {wait_seconds:.0f} 秒后继续...")
+                                await progress_callback(base_progress, f"全局流控等待中，{wait_seconds:.0f} 秒后继续 ({i+1}/{len(episodes)})...")
+                                await asyncio.sleep(wait_seconds + 1)
+                            else:
+                                # 单源配额已满（全局仍有余量），不原地等待
+                                # 向上抛出让任务暂停，释放 worker 给其他源的任务执行
+                                logger.info(f"分集 '{episode.title}' 触发单源流控，暂停任务释放 worker 给其他源 (等待 {e.retry_after_seconds:.0f} 秒)...")
+                                raise
 
                     async def sub_progress_callback(p, msg):
                         await progress_callback(
@@ -325,6 +333,10 @@ async def _import_episodes_iteratively(
                     else:
                         failed_episodes_details[episode.episodeIndex] = "获取弹幕为空"
                         logger.warning(f"分集 '{episode.title}' 获取弹幕为空（0条），不创建分集记录。")
+
+            except RateLimitExceededError:
+                # 单源流控满，不在此处吞掉，向上传播由 manual_import.py 转为 TaskPauseForRateLimit
+                raise
 
             except RuntimeError as e:
                 # 配置错误（如速率限制配置验证失败），跳过当前分集
