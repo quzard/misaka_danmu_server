@@ -163,6 +163,35 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"发射通知事件 {event_type} 失败: {e}")
 
+    async def _safe_finalize_task(self, task_id: str, status, message: str):
+        """安全地写入任务最终状态。
+
+        DB 暂时不可用时只记录 WARNING，不向上传播异常，
+        避免在 except/finally 清理路径中引发二次异常。
+        """
+        try:
+            async with self._session_factory() as session:
+                await crud.finalize_task_in_history(session, task_id, status, message)
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ 任务 {task_id} 最终状态（{status}）未能写入DB"
+                f"（DB 可能暂时不可用，重启后将由中断恢复机制处理）: {e}"
+            )
+
+    async def _safe_update_task_status(self, task_id: str, status, progress, message: str):
+        """安全地更新任务进度状态。
+
+        DB 暂时不可用时只记录 WARNING，不向上传播异常。
+        """
+        try:
+            async with self._session_factory() as session:
+                await crud.update_task_progress_in_history(session, task_id, status, progress, message)
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ 任务 {task_id} 进度状态（{status}）未能写入DB"
+                f"（DB 可能暂时不可用）: {e}"
+            )
+
     def start(self):
         """启动后台工作协程来处理任务队列。"""
         if self._download_worker_task is None:
@@ -229,12 +258,11 @@ class TaskManager:
                     self._rate_limited_providers[provider_name] = expire_time
                 self.logger.info(f"源 '{provider_name}' 已标记为受限，将在 {e.retry_after_seconds:.0f} 秒后自动清除")
 
-            async with self._session_factory() as final_session:
-                await crud.update_task_progress_in_history(
-                    final_session, task.task_id, TaskStatus.PAUSED,
-                    None,  # 保持当前进度
-                    e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
-                )
+            await self._safe_update_task_status(
+                task.task_id, TaskStatus.PAUSED,
+                None,  # 保持当前进度
+                e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
             # 将任务放入暂停列表
             await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
             # 不设置 done_event，因为任务还会继续
@@ -242,10 +270,7 @@ class TaskManager:
         except TaskSuccess as e:
             self.logger.debug(f"捕获到 TaskSuccess 异常: {e}")
             final_message = str(e) if str(e) else "任务成功完成"
-            async with self._session_factory() as final_session:
-                await crud.finalize_task_in_history(
-                    final_session, task.task_id, TaskStatus.COMPLETED, final_message
-                )
+            await self._safe_finalize_task(task.task_id, TaskStatus.COMPLETED, final_message)
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
             await self._emit_task_event(task, True, final_message)
         except asyncio.CancelledError:
@@ -258,16 +283,12 @@ class TaskManager:
             else:
                 # 用户主动取消（abort_current_task 触发）
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
-                async with self._session_factory() as final_session:
-                    await crud.finalize_task_in_history(
-                        final_session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
-                    )
+                await self._safe_finalize_task(task.task_id, TaskStatus.FAILED, "任务已被用户取消")
         except Exception:
             error_message = f"任务执行失败 - {traceback.format_exc()}"
-            async with self._session_factory() as final_session:
-                await crud.finalize_task_in_history(
-                    final_session, task.task_id, TaskStatus.FAILED, error_message.splitlines()[-1]
-                )
+            await self._safe_finalize_task(
+                task.task_id, TaskStatus.FAILED, error_message.splitlines()[-1]
+            )
             self.logger.error(f"任务 '{task.title}' (ID: {task.task_id}) 执行失败: {traceback.format_exc()}")
             await self._emit_task_event(task, False, error_message.splitlines()[-1])
         finally:
