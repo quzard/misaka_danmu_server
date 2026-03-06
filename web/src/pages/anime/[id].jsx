@@ -5,6 +5,7 @@ import {
   checkReassociationConflicts,
   deleteAnimeSource,
   deleteAnimeSourceSingle,
+  fillMissingEpisodes,
   fullSourceUpdate,
   getAnimeDetail,
   getAnimeLibrary,
@@ -38,6 +39,7 @@ import { DANDAN_TYPE_DESC_MAPPING } from '../../configs'
 import { RoutePaths } from '../../general/RoutePaths'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
+import { FillMissingIcon } from '@/components/FillMissingIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
 import { EditOutlined, HomeOutlined, MenuOutlined } from '@ant-design/icons'
@@ -345,6 +347,32 @@ export const AnimeDetail = () => {
     })
   }
 
+  const handleFillMissing = record => {
+    modalApi.confirm({
+      title: '补全缺失分集',
+      zIndex: 1002,
+      content: (
+        <div>
+          将自动检索该源的全部分集，与已有分集对比后只下载缺失的部分。
+          <br />
+          确定要为 '{animeDetail.title}' 的这个数据源执行分集补全吗？
+        </div>
+      ),
+      okText: '确认',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const res = await fillMissingEpisodes({
+            sourceId: record.sourceId,
+          })
+          goTask(res)
+        } catch (error) {
+          messageApi.error(`启动补全任务失败: ${error.message}`)
+        }
+      },
+    })
+  }
+
   const goTask = res => {
     modalApi.confirm({
       title: '提示',
@@ -541,6 +569,16 @@ export const AnimeDetail = () => {
                   onClick={() => handleIncrementalUpdate(record)}
                 >
                   <MyIcon icon="zengliang" size={20}></MyIcon>
+                </span>
+              </Tooltip>
+            )}
+            {record?.providerName !== 'custom' && (
+              <Tooltip title="补全缺失分集">
+                <span
+                  className="cursor-pointer hover:text-primary"
+                  onClick={() => handleFillMissing(record)}
+                >
+                  <FillMissingIcon size={20} />
                 </span>
               </Tooltip>
             )}
@@ -919,6 +957,31 @@ export const AnimeDetail = () => {
                                   }}
                                 >
                                   增量获取
+                                </Button>
+                              )}
+                              {isMobile ? (
+                                <Tooltip title="补全缺失分集">
+                                  <Button
+                                    size="small"
+                                    type="text"
+                                    icon={<FillMissingIcon size={16} />}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      handleFillMissing(record)
+                                    }}
+                                  />
+                                </Tooltip>
+                              ) : (
+                                <Button
+                                  size="small"
+                                  type="text"
+                                  icon={<FillMissingIcon size={16} />}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleFillMissing(record)
+                                  }}
+                                >
+                                  补全
                                 </Button>
                               )}
                               {isMobile ? (

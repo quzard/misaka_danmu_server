@@ -635,6 +635,10 @@ export const incrementalUpdate = data =>
 export const fullSourceUpdate = data =>
   api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=full`)
 
+/** 补全缺失分集 */
+export const fillMissingEpisodes = data =>
+  api.post(`/api/ui/library/source/${data.sourceId}/refresh?mode=fill_missing`)
+
 /** 获取分集 */
 export const getEpisodes = data => {
   return api.get(`/api/ui/library/source/${data.sourceId}/episodes`, {

@@ -246,6 +246,9 @@ async def update_scraper_config(
             # 转换布尔值为字符串存储
             value = payload[log_responses_key_camel]
             await config_manager.setValue(log_responses_key_db, str(value).lower())
+            logger.info(f"[{providerName}] 记录原始响应设置已更新: {log_responses_key_db} = {str(value).lower()}")
+        else:
+            logger.warning(f"[{providerName}] payload 中未找到 '{log_responses_key_camel}' 字段，记录原始响应设置未更新。payload keys: {list(payload.keys())}")
 
         # 5. 重新加载该搜索源
         await manager.reload_scraper(providerName)
