@@ -5,7 +5,6 @@
 """
 
 import asyncio
-import json
 import logging
 import time
 from typing import Dict, Optional
@@ -14,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from src.db import crud, ConfigManager
-from src.core.cache import get_cache_backend
 from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search
 from src.utils import (
     parse_search_keyword,
@@ -417,27 +415,20 @@ async def execute_fallback_search_task(
             search_info_complete["results"] = [result.model_dump() for result in search_results]
             await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_complete, FALLBACK_SEARCH_CACHE_TTL)
 
-        # 将搜索结果存储到数据库缓存中
+        # 将搜索结果按标题存储到缓存，供相同标题重复搜索时复用
         try:
             parsed = parse_search_keyword(search_term)
             core_title = parsed["title"]
-            cache_key = f"fallback_search_{core_title}"
+            cache_key = f"fallback_result_{core_title}"
             cache_data = {
                 "search_term": core_title,
                 "results": [result.model_dump() for result in search_results],
                 "timestamp": time.time(),
             }
-            _backend = get_cache_backend()
-            if _backend is not None:
-                try:
-                    await _backend.set(cache_key, json.dumps(cache_data), ttl=600, region="default")
-                except Exception:
-                    await crud.set_cache(session, cache_key, json.dumps(cache_data), ttl_seconds=600)
-            else:
-                await crud.set_cache(session, cache_key, json.dumps(cache_data), ttl_seconds=600)
-            logger.info(f"后备搜索结果已存储到数据库缓存: {cache_key}")
+            await set_db_cache(session, "", cache_key, cache_data, 600)
+            logger.info(f"后备搜索结果已存储到缓存: {cache_key}")
         except Exception as e:
-            logger.warning(f"存储后备搜索结果到数据库缓存失败: {e}")
+            logger.warning(f"存储后备搜索结果到缓存失败: {e}")
 
         timer.step_end(details=f"{len(search_results)}个结果")
         await progress_callback(100, "搜索完成")

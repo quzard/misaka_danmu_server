@@ -51,6 +51,13 @@ async def get_db_cache(session: AsyncSession, prefix: str, key: str) -> Optional
     if backend is not None:
         try:
             result = await backend.get(cache_key, region="default")
+            if isinstance(result, str):
+                if not result.strip():
+                    return None
+                try:
+                    result = json.loads(result)
+                except (json.JSONDecodeError, TypeError):
+                    return result
             return _fix_bangumi_mapping(result)
         except Exception as e:
             logger.warning(f"缓存后端读取失败，回退到数据库: {cache_key}, 错误: {e}")
@@ -225,7 +232,9 @@ async def update_episode_mapping(
         for cache_key in all_cache_keys:
             search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
             search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-            if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+            if not isinstance(search_info, dict):
+                continue
+            if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                 for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
                     if mapping_info.get("real_anime_id") == real_anime_id:
                         mapping_info["provider"] = provider
@@ -273,7 +282,9 @@ async def get_next_virtual_anime_id(session: AsyncSession) -> int:
         for cache_key in all_cache_keys:
             search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
             search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-            if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+            if not isinstance(search_info, dict):
+                continue
+            if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                 for bangumi_id, mapping_info in search_info["bangumi_mapping"].items():
                     anime_id = mapping_info.get("anime_id")
                     if anime_id and 900000 <= anime_id <= 999999:

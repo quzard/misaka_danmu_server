@@ -665,8 +665,10 @@ async def get_comments_for_dandan(
                     for cache_key in all_cache_keys:
                         search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                         search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                        if not isinstance(search_info, dict):
+                            continue
 
-                        if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                        if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                             # 检查是否有用户最后的选择记录
                             last_bangumi_id = await get_db_cache(session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
                             if last_bangumi_id and last_bangumi_id in search_info["bangumi_mapping"]:
@@ -687,8 +689,10 @@ async def get_comments_for_dandan(
                         for cache_key_fallback in all_cache_keys_fallback:
                             search_key_fallback = cache_key_fallback.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                             search_info_fallback = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key_fallback)
+                            if not isinstance(search_info_fallback, dict):
+                                continue
 
-                            if search_info_fallback and search_info_fallback.get("status") == "completed" and "bangumi_mapping" in search_info_fallback:
+                            if search_info_fallback.get("status") == "completed" and "bangumi_mapping" in search_info_fallback:
                                 for bangumi_id, mapping_info in search_info_fallback["bangumi_mapping"].items():
                                     # 检查真实animeId是否匹配
                                     if mapping_info.get("real_anime_id") == real_anime_id:
@@ -745,7 +749,9 @@ async def get_comments_for_dandan(
                                         last_bangumi_id = await get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
                                         if last_bangumi_id:
                                             search_info = await get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-                                            if search_info and last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                            if not isinstance(search_info, dict):
+                                                continue
+                                            if last_bangumi_id in search_info.get("bangumi_mapping", {}):
                                                 temp_mapping = search_info["bangumi_mapping"][last_bangumi_id]
                                                 # 检查real_anime_id是否匹配
                                                 if temp_mapping.get("real_anime_id") == real_anime_id:
@@ -829,7 +835,9 @@ async def get_comments_for_dandan(
                                                 last_bangumi_id = await get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
                                                 if last_bangumi_id:
                                                     search_info = await get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-                                                    if search_info and last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                    if not isinstance(search_info, dict):
+                                                        continue
+                                                    if last_bangumi_id in search_info.get("bangumi_mapping", {}):
                                                         # 获取搜索关键词（从search_key中提取）
                                                         if search_key.startswith("search_"):
                                                             # 从数据库缓存中获取原始搜索词
@@ -950,8 +958,10 @@ async def get_comments_for_dandan(
                                             for cache_key_cleanup in all_cache_keys_cleanup:
                                                 search_key = cache_key_cleanup.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                                                 search_info = await get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                                                if not isinstance(search_info, dict):
+                                                    continue
 
-                                                if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                                                if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                                                     for bangumi_id, mapping_info in list(search_info["bangumi_mapping"].items()):
                                                         if mapping_info.get("real_anime_id") == real_anime_id:
                                                             # 从映射中移除这个条目
