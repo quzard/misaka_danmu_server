@@ -562,34 +562,37 @@ export const AnimeDetail = () => {
               </span>
             </Tooltip>
             {record?.providerName !== 'custom' && (
-              <Tooltip title="增量获取下一集">
-                <span
-                  className="cursor-pointer hover:text-primary"
-                  onClick={() => handleIncrementalUpdate(record)}
-                >
-                  <MyIcon icon="zengliang" size={20}></MyIcon>
-                </span>
-              </Tooltip>
-            )}
-            {record?.providerName !== 'custom' && (
-              <Tooltip title="补全缺失分集">
-                <span
-                  className="cursor-pointer hover:text-primary"
-                  onClick={() => handleFillMissing(record)}
-                >
-                  <MyIcon icon="a-image_9645309862730901" size={20} />
-                </span>
-              </Tooltip>
-            )}
-            {record?.providerName !== 'custom' && (
-              <Tooltip title="执行全量更新(此操作会删除旧数据)">
-                <span
-                  className="cursor-pointer hover:text-primary"
-                  onClick={() => handleFullSourceUpdate(record)}
-                >
-                  <MyIcon icon="refresh" size={20}></MyIcon>
-                </span>
-              </Tooltip>
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'incremental',
+                      icon: <MyIcon icon="image_134571035400041" size={16} />,
+                      label: '增量获取',
+                      onClick: () => handleIncrementalUpdate(record),
+                    },
+                    {
+                      key: 'fill_missing',
+                      icon: <MyIcon icon="a-image_0583743498849421" size={16} />,
+                      label: '补全缺失',
+                      onClick: () => handleFillMissing(record),
+                    },
+                    {
+                      key: 'full_update',
+                      icon: <MyIcon icon="image_488307257272375" size={16} />,
+                      label: '全量更新',
+                      onClick: () => handleFullSourceUpdate(record),
+                    },
+                  ],
+                }}
+                trigger={['click']}
+              >
+                <Tooltip title="更新操作">
+                  <span className="cursor-pointer hover:text-primary">
+                    <MyIcon icon="refresh" size={20} />
+                  </span>
+                </Tooltip>
+              </Dropdown>
             )}
 
             <Tooltip title="删除数据源">
@@ -933,81 +936,39 @@ export const AnimeDetail = () => {
                                   <Button size="small" type="text" icon={<MenuOutlined />} onClick={(e) => e.stopPropagation()} />
                                 </Dropdown>
                               )}
-                              {isMobile ? (
-                                <Tooltip title="增量获取下一集">
-                                  <Button
-                                    size="small"
-                                    type="text"
-                                    icon={<MyIcon icon="zengliang" size={16} />}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleIncrementalUpdate(record)
-                                    }}
-                                  />
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<MyIcon icon="zengliang" size={16} />}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleIncrementalUpdate(record)
-                                  }}
-                                >
-                                  增量获取
-                                </Button>
-                              )}
-                              {isMobile ? (
-                                <Tooltip title="补全缺失分集">
-                                  <Button
-                                    size="small"
-                                    type="text"
-                                    icon={<MyIcon icon="a-image_9645309862730901" size={16} />}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleFillMissing(record)
-                                    }}
-                                  />
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<MyIcon icon="a-image_9645309862730901" size={16} />}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleFillMissing(record)
-                                  }}
-                                >
-                                  补全
-                                </Button>
-                              )}
-                              {isMobile ? (
-                                <Tooltip title="执行全量更新(此操作会删除旧数据)">
-                                  <Button
-                                    size="small"
-                                    type="text"
-                                    icon={<MyIcon icon="refresh" size={16} />}
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      handleFullSourceUpdate(record)
-                                    }}
-                                  />
-                                </Tooltip>
-                              ) : (
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  icon={<MyIcon icon="refresh" size={16} />}
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    handleFullSourceUpdate(record)
-                                  }}
-                                >
-                                  全量更新
-                                </Button>
-                              )}
+                              <Dropdown
+                                menu={{
+                                  items: [
+                                    {
+                                      key: 'incremental',
+                                      icon: <MyIcon icon="image_134571035400041" size={16} />,
+                                      label: '增量获取',
+                                      onClick: () => handleIncrementalUpdate(record),
+                                    },
+                                    {
+                                      key: 'fill_missing',
+                                      icon: <MyIcon icon="a-image_0583743498849421" size={16} />,
+                                      label: '补全缺失',
+                                      onClick: () => handleFillMissing(record),
+                                    },
+                                    {
+                                      key: 'full_update',
+                                      icon: <MyIcon icon="image_488307257272375" size={16} />,
+                                      label: '全量更新',
+                                      onClick: () => handleFullSourceUpdate(record),
+                                    },
+                                  ],
+                                }}
+                                trigger={['click']}
+                              >
+                                {isMobile ? (
+                                  <Button size="small" type="text" icon={<MyIcon icon="refresh" size={16} />} onClick={(e) => e.stopPropagation()} />
+                                ) : (
+                                  <Button size="small" type="text" icon={<MyIcon icon="refresh" size={16} />} onClick={(e) => e.stopPropagation()}>
+                                    更新
+                                  </Button>
+                                )}
+                              </Dropdown>
                             </>
                           )}
                         </div>
