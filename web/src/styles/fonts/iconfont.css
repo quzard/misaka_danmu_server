@@ -1,8 +1,8 @@
 @font-face {
   font-family: "iconfont"; /* Project id 4997004 */
-  src: url('iconfont.woff2?t=1772453665087') format('woff2'),
-       url('iconfont.woff?t=1772453665087') format('woff'),
-       url('iconfont.ttf?t=1772453665087') format('truetype');
+  src: url('iconfont.woff2?t=1772774776852') format('woff2'),
+       url('iconfont.woff?t=1772774776852') format('woff'),
+       url('iconfont.ttf?t=1772774776852') format('truetype');
 }
 
 .iconfont {
@@ -11,6 +11,10 @@
   font-style: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.icon-a-image_9645309862730901:before {
+  content: "\e605";
 }
 
 .icon-wanjie1:before {

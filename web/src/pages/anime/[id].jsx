@@ -39,7 +39,6 @@ import { DANDAN_TYPE_DESC_MAPPING } from '../../configs'
 import { RoutePaths } from '../../general/RoutePaths'
 import dayjs from 'dayjs'
 import { MyIcon } from '@/components/MyIcon'
-import { FillMissingIcon } from '@/components/FillMissingIcon'
 import classNames from 'classnames'
 import { padStart } from 'lodash'
 import { EditOutlined, HomeOutlined, MenuOutlined } from '@ant-design/icons'
@@ -578,7 +577,7 @@ export const AnimeDetail = () => {
                   className="cursor-pointer hover:text-primary"
                   onClick={() => handleFillMissing(record)}
                 >
-                  <FillMissingIcon size={20} />
+                  <MyIcon icon="a-image_9645309862730901" size={20} />
                 </span>
               </Tooltip>
             )}
@@ -964,7 +963,7 @@ export const AnimeDetail = () => {
                                   <Button
                                     size="small"
                                     type="text"
-                                    icon={<FillMissingIcon size={16} />}
+                                    icon={<MyIcon icon="a-image_9645309862730901" size={16} />}
                                     onClick={(e) => {
                                       e.stopPropagation()
                                       handleFillMissing(record)
@@ -975,7 +974,7 @@ export const AnimeDetail = () => {
                                 <Button
                                   size="small"
                                   type="text"
-                                  icon={<FillMissingIcon size={16} />}
+                                  icon={<MyIcon icon="a-image_9645309862730901" size={16} />}
                                   onClick={(e) => {
                                     e.stopPropagation()
                                     handleFillMissing(record)
