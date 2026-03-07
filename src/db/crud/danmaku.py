@@ -66,7 +66,7 @@ async def save_danmaku_for_episode(
         return 0
 
     episode_stmt = select(Episode).where(Episode.id == episode_id).options(
-        selectinload(Episode.source).selectinload(AnimeSource.anime)
+        selectinload(Episode.source).selectinload(AnimeSource.anime).selectinload(Anime.metadataRecord)
     )
     episode_result = await session.execute(episode_stmt)
     episode = episode_result.scalar_one_or_none()

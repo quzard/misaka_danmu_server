@@ -158,20 +158,16 @@ class SchedulerManager:
                     return lambda session, callback: job_instance.run(session, callback)
 
             task_coro_factory = make_task_coro(task_config)
-            task_id, done_event = await self.task_manager.submit_task(
+            task_id, _ = await self.task_manager.submit_task(
                 task_coro_factory,
                 job_instance.job_name,
                 scheduled_task_id=scheduled_task_id,
                 queue_type="management",  # 定时任务使用管理队列
                 run_immediately=True  # 立即执行，不排队等待
             )
-            # The apscheduler job now waits for the actual task to complete.
-            # 添加超时保护，防止因流控暂停导致调度器卡死
-            try:
-                await asyncio.wait_for(done_event.wait(), timeout=300.0)  # 5分钟超时
-                logger.info(f"定时任务的运行器已确认任务 '{job_instance.job_name}' (ID: {task_id}) 执行完毕。")
-            except asyncio.TimeoutError:
-                logger.warning(f"定时任务 '{job_instance.job_name}' (ID: {task_id}) 执行超时（可能因流控暂停），任务将在后台继续执行。")
+            # 提交到 TaskManager 后立即返回，由 TaskManager 异步执行
+            # 不等待 done_event，避免阻塞 APScheduler / 事件循环 / 前端请求
+            logger.info(f"定时任务 '{job_instance.job_name}' (ID: {task_id}) 已提交到 TaskManager，将异步执行。")
 
         return runner
 

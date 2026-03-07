@@ -510,20 +510,28 @@ async def generic_import_task(
         raise TaskSuccess("数据源验证失败，未能获取到任何弹幕，未创建数据库条目。")
 
     # 处理所有分集（包括第一集）
-    total_comments_added, successful_episodes_indices, skipped_episodes_indices, failed_episodes_count, failed_episodes_details = await _import_episodes_iteratively(
-        session=session,
-        scraper=scraper,
-        rate_limiter=rate_limiter,
-        progress_callback=progress_callback,
-        episodes=episodes,
-        anime_id=anime_id,
-        source_id=source_id,
-        first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
-        config_manager=config_manager,
-        is_single_episode=currentEpisodeIndex is not None,  # 传递是否为单集下载模式
-        is_fallback=is_fallback,  # 传递后备任务标识
-        fallback_type=fallback_type  # 传递后备类型
-    )
+    try:
+        total_comments_added, successful_episodes_indices, skipped_episodes_indices, failed_episodes_count, failed_episodes_details = await _import_episodes_iteratively(
+            session=session,
+            scraper=scraper,
+            rate_limiter=rate_limiter,
+            progress_callback=progress_callback,
+            episodes=episodes,
+            anime_id=anime_id,
+            source_id=source_id,
+            first_episode_comments=first_comments,  # 传递第一集已获取的弹幕
+            config_manager=config_manager,
+            is_single_episode=currentEpisodeIndex is not None,  # 传递是否为单集下载模式
+            is_fallback=is_fallback,  # 传递后备任务标识
+            fallback_type=fallback_type  # 传递后备类型
+        )
+    except RateLimitExceededError as e:
+        # 单源配额已满，转为任务暂停，释放 worker 给其他源
+        logger.warning(f"下载分集时触发单源流控，暂停任务等待重试: {e}")
+        raise TaskPauseForRateLimit(
+            retry_after_seconds=e.retry_after_seconds,
+            message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+        )
 
     # 处理追更任务的失败计数
     if is_incremental_refresh and incremental_refresh_source_id:
@@ -733,17 +741,25 @@ async def edited_import_task(
         raise TaskSuccess(error_msg)
 
     # 处理所有分集
-    total_comments_added, successful_indices, skipped_indices, failed_count, failed_details = await _import_episodes_iteratively(
-        session=session,
-        scraper=scraper,
-        rate_limiter=rate_limiter,
-        progress_callback=progress_callback,
-        episodes=episodes,
-        anime_id=anime_id,
-        source_id=source_id,
-        first_episode_comments=first_episode_comments,
-        config_manager=config_manager
-    )
+    try:
+        total_comments_added, successful_indices, skipped_indices, failed_count, failed_details = await _import_episodes_iteratively(
+            session=session,
+            scraper=scraper,
+            rate_limiter=rate_limiter,
+            progress_callback=progress_callback,
+            episodes=episodes,
+            anime_id=anime_id,
+            source_id=source_id,
+            first_episode_comments=first_episode_comments,
+            config_manager=config_manager
+        )
+    except RateLimitExceededError as e:
+        # 单源配额已满，转为任务暂停，释放 worker 给其他源
+        logger.warning(f"编辑导入下载分集时触发单源流控，暂停任务等待重试: {e}")
+        raise TaskPauseForRateLimit(
+            retry_after_seconds=e.retry_after_seconds,
+            message=f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+        )
 
     if total_comments_added == 0:
         # 如果有失败详情，显示失败原因

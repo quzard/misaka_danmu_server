@@ -45,6 +45,7 @@ from .refresh import (
     refresh_episode_task,
     refresh_bulk_episodes_task,
     incremental_refresh_task,
+    fill_missing_task,
 )
 
 # 分集管理任务
@@ -112,6 +113,7 @@ __all__ = [
     'refresh_episode_task',
     'refresh_bulk_episodes_task',
     'incremental_refresh_task',
+    'fill_missing_task',
     # 分集管理任务
     'reorder_episodes_task',
     'offset_episodes_task',

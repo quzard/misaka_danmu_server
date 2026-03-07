@@ -1,5 +1,5 @@
 # 版本号
-APP_VERSION = "2.5.9-1"
+APP_VERSION = "2.6.0"
 
 # 文档信息
 DOCS_URL = "https://docs.misaka10876.top/"

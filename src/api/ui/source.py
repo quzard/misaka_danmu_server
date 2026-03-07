@@ -177,6 +177,19 @@ async def refresh_anime(
         task_type = "incremental_refresh"
         task_parameters = {"sourceId": sourceId, "nextEpisodeIndex": next_episode_index, "animeTitle": source_info["title"]}
         message_to_return = f"番剧 '{source_info['title']}' 的增量刷新任务已提交。"
+    elif mode == "fill_missing":
+        logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了分集补全任务。")
+        unique_key = f"fill-missing-{source_info['providerName']}-{source_info['mediaId']}"
+        task_title = f"补全: {source_info['title']} ({source_info['providerName']})"
+        task_coro = lambda s, cb: tasks.fill_missing_task(
+            sourceId=sourceId, session=s, manager=scraper_manager,
+            task_manager=task_manager, config_manager=config_manager, progress_callback=cb, animeTitle=source_info["title"],
+            rate_limiter=rate_limiter, metadata_manager=metadata_manager,
+            title_recognition_manager=title_recognition_manager
+        )
+        task_type = "fill_missing"
+        task_parameters = {"sourceId": sourceId, "animeTitle": source_info["title"]}
+        message_to_return = f"番剧 '{source_info['title']}' 的分集补全任务已提交。"
     elif mode == "full":
         logger.info(f"用户 '{current_user.username}' 为番剧 '{source_info['title']}' (源ID: {sourceId}) 启动了全量刷新任务。")
         unique_key = f"full-refresh-{sourceId}"
@@ -186,7 +199,7 @@ async def refresh_anime(
         task_parameters = {"sourceId": sourceId}
         message_to_return = f"番剧 '{source_info['title']}' 的全量刷新任务已提交。"
     else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full' 或 'incremental'。")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的刷新模式，必须是 'full'、'incremental' 或 'fill_missing'。")
 
     task_id, _ = await task_manager.submit_task(
         task_coro, task_title, unique_key=unique_key,
