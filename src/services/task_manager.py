@@ -66,6 +66,8 @@ class TaskManager:
         self._pending_titles: set[str] = set()
         self._active_unique_keys: set[str] = set()
         self._paused_tasks: Dict[str, Tuple[Task, float]] = {}  # {task_id: (task, resume_time)}
+        # run_immediately=True 的任务不经过队列 worker，单独注册以支持暂停/终止
+        self._immediate_tasks: Dict[str, Task] = {}  # {task_id: Task}
         self._lock = asyncio.Lock()
         self.config_manager = config_manager
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -161,6 +163,35 @@ class TaskManager:
         except Exception as e:
             self.logger.error(f"发射通知事件 {event_type} 失败: {e}")
 
+    async def _safe_finalize_task(self, task_id: str, status, message: str):
+        """安全地写入任务最终状态。
+
+        DB 暂时不可用时只记录 WARNING，不向上传播异常，
+        避免在 except/finally 清理路径中引发二次异常。
+        """
+        try:
+            async with self._session_factory() as session:
+                await crud.finalize_task_in_history(session, task_id, status, message)
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ 任务 {task_id} 最终状态（{status}）未能写入DB"
+                f"（DB 可能暂时不可用，重启后将由中断恢复机制处理）: {e}"
+            )
+
+    async def _safe_update_task_status(self, task_id: str, status, progress, message: str):
+        """安全地更新任务进度状态。
+
+        DB 暂时不可用时只记录 WARNING，不向上传播异常。
+        """
+        try:
+            async with self._session_factory() as session:
+                await crud.update_task_progress_in_history(session, task_id, status, progress, message)
+        except Exception as e:
+            self.logger.warning(
+                f"⚠️ 任务 {task_id} 进度状态（{status}）未能写入DB"
+                f"（DB 可能暂时不可用）: {e}"
+            )
+
     def start(self):
         """启动后台工作协程来处理任务队列。"""
         if self._download_worker_task is None:
@@ -182,6 +213,8 @@ class TaskManager:
             queue_type: 队列类型 ("download" 或 "management")
         """
         self.logger.info(f"开始执行任务 '{task.title}' (ID: {task.task_id}) [队列: {queue_type}]")
+        # 延迟导入避免循环依赖（rate_limiter → src.services → task_manager）
+        from src.rate_limiter import RateLimitExceededError
         try:
             # This task is now running, remove it from pending titles
             # This is now the single point of responsibility for this cleanup.
@@ -227,12 +260,11 @@ class TaskManager:
                     self._rate_limited_providers[provider_name] = expire_time
                 self.logger.info(f"源 '{provider_name}' 已标记为受限，将在 {e.retry_after_seconds:.0f} 秒后自动清除")
 
-            async with self._session_factory() as final_session:
-                await crud.update_task_progress_in_history(
-                    final_session, task.task_id, TaskStatus.PAUSED,
-                    None,  # 保持当前进度
-                    e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
-                )
+            await self._safe_update_task_status(
+                task.task_id, TaskStatus.PAUSED,
+                None,  # 保持当前进度
+                e.message or f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
             # 将任务放入暂停列表
             await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
             # 不设置 done_event，因为任务还会继续
@@ -240,10 +272,7 @@ class TaskManager:
         except TaskSuccess as e:
             self.logger.debug(f"捕获到 TaskSuccess 异常: {e}")
             final_message = str(e) if str(e) else "任务成功完成"
-            async with self._session_factory() as final_session:
-                await crud.finalize_task_in_history(
-                    final_session, task.task_id, TaskStatus.COMPLETED, final_message
-                )
+            await self._safe_finalize_task(task.task_id, TaskStatus.COMPLETED, final_message)
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
             await self._emit_task_event(task, True, final_message)
         except asyncio.CancelledError:
@@ -256,16 +285,29 @@ class TaskManager:
             else:
                 # 用户主动取消（abort_current_task 触发）
                 self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已被用户取消。")
-                async with self._session_factory() as final_session:
-                    await crud.finalize_task_in_history(
-                        final_session, task.task_id, TaskStatus.FAILED, "任务已被用户取消"
-                    )
+                await self._safe_finalize_task(task.task_id, TaskStatus.FAILED, "任务已被用户取消")
+        except RateLimitExceededError as e:
+            # 兜底：如果某个任务模块漏掉了 RateLimitExceededError → TaskPauseForRateLimit 的转换
+            # 在此统一处理，确保任务被暂停而非失败
+            self.logger.warning(f"任务 '{task.title}' (ID: {task.task_id}) 触发流控（兜底捕获），暂停任务 {e.retry_after_seconds:.0f} 秒")
+            provider_name = None
+            if task.task_parameters:
+                provider_name = task.task_parameters.get("provider") or task.task_parameters.get("providerName")
+            if provider_name:
+                expire_time = time.time() + e.retry_after_seconds
+                async with self._lock:
+                    self._rate_limited_providers[provider_name] = expire_time
+            await self._safe_update_task_status(
+                task.task_id, TaskStatus.PAUSED, None,
+                f"速率受限，将在 {e.retry_after_seconds:.0f} 秒后自动重试..."
+            )
+            await self.pause_task_for_rate_limit(task, e.retry_after_seconds)
+            return
         except Exception:
             error_message = f"任务执行失败 - {traceback.format_exc()}"
-            async with self._session_factory() as final_session:
-                await crud.finalize_task_in_history(
-                    final_session, task.task_id, TaskStatus.FAILED, error_message.splitlines()[-1]
-                )
+            await self._safe_finalize_task(
+                task.task_id, TaskStatus.FAILED, error_message.splitlines()[-1]
+            )
             self.logger.error(f"任务 '{task.title}' (ID: {task.task_id}) 执行失败: {traceback.format_exc()}")
             await self._emit_task_event(task, False, error_message.splitlines()[-1])
         finally:
@@ -534,7 +576,18 @@ class TaskManager:
 
         if run_immediately:
             self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过队列 [{queue_type}]。")
-            asyncio.create_task(self._run_task_wrapper(task, queue_type=queue_type))
+            # 注册到 _immediate_tasks，使 pause/abort/resume 能找到该任务
+            async with self._lock:
+                self._immediate_tasks[task_id] = task
+
+            async def _run_and_cleanup():
+                try:
+                    await self._run_task_wrapper(task, queue_type=queue_type)
+                finally:
+                    async with self._lock:
+                        self._immediate_tasks.pop(task_id, None)
+
+            asyncio.create_task(_run_and_cleanup())
         else:
             # 根据队列类型选择队列
             if queue_type == "download":
@@ -684,6 +737,14 @@ class TaskManager:
             self._current_fallback_task.running_coro_task.cancel()
             return True
 
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task and imm_task.running_coro_task:
+            self.logger.info(f"正在中止立即执行任务 '{imm_task.title}' (ID: {task_id})")
+            imm_task.pause_event.set()
+            imm_task.running_coro_task.cancel()
+            return True
+
         self.logger.warning(f"尝试中止任务 {task_id} 失败，因为它不是当前任务或未在运行。")
         return False
 
@@ -713,6 +774,15 @@ class TaskManager:
                 self.logger.info(f"已暂停后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
                 return True
 
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task:
+            async with self._session_factory() as session:
+                imm_task.pause_event.clear()
+                await crud.update_task_status(session, task_id, TaskStatus.PAUSED)
+                self.logger.info(f"已暂停立即执行任务 '{imm_task.title}' (ID: {task_id})。")
+                return True
+
         self.logger.warning(f"尝试暂停任务 {task_id} 失败，因为它不是当前正在运行的任务。")
         return False
 
@@ -740,6 +810,15 @@ class TaskManager:
                 self._current_fallback_task.pause_event.set()
                 await crud.update_task_status(session, self._current_fallback_task.task_id, TaskStatus.RUNNING)
                 self.logger.info(f"已恢复后备队列任务 '{self._current_fallback_task.title}' (ID: {task_id})。")
+                return True
+
+        # 检查 run_immediately 的立即执行任务
+        imm_task = self._immediate_tasks.get(task_id)
+        if imm_task:
+            async with self._session_factory() as session:
+                imm_task.pause_event.set()
+                await crud.update_task_status(session, task_id, TaskStatus.RUNNING)
+                self.logger.info(f"已恢复立即执行任务 '{imm_task.title}' (ID: {task_id})。")
                 return True
 
         self.logger.warning(f"尝试恢复任务 {task_id} 失败，因为它不是当前已暂停的任务。")
@@ -838,13 +917,13 @@ class TaskManager:
                     for task_info in pending_tasks:
                         if await self._try_recover_task(task_info):
                             recovered_count += 1
+                            # 将原记录标记为"已取消"，防止下次重启再次查到并重复恢复（翻倍）
+                            # 新任务已用新 ID 加入队列，原记录不再需要
+                            await crud.update_task_status(session, task_info["taskId"], "已取消")
                         else:
                             failed_count += 1
                             # 将无法恢复的任务标记为失败
-                            await crud.update_task_in_history(
-                                session, task_info["taskId"], "失败",
-                                description="因服务重启且无法恢复而取消"
-                            )
+                            await crud.update_task_status(session, task_info["taskId"], "失败")
 
                     self.logger.info(f"排队中的任务处理完成: {recovered_count} 个已恢复, {failed_count} 个无法恢复")
 

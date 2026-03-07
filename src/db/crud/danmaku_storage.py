@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
-from ..orm_models import Anime, AnimeSource, Episode
+from ..orm_models import Anime, AnimeSource, Episode, AnimeMetadata
 from src.utils.path_template import normalize_title
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ async def get_episodes_for_anime(session: AsyncSession, anime_id: int) -> List[E
         select(Episode)
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(AnimeSource.animeId == anime_id)
-        .options(selectinload(Episode.source).selectinload(AnimeSource.anime))
+        .options(selectinload(Episode.source).selectinload(AnimeSource.anime).selectinload(Anime.metadataRecord))
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -582,6 +582,17 @@ async def preview_apply_template(
                 # 处理 provider 变量
                 provider_name = episode.source.providerName if episode.source else "unknown"
                 relative_path = relative_path.replace("${provider}", provider_name or "unknown")
+                # 处理 sourceId 变量
+                source_id_val = str(episode.source.id) if episode.source else "unknown"
+                relative_path = relative_path.replace("${sourceId}", source_id_val)
+                # 处理 tmdbId 变量
+                tmdb_id_val = "unknown"
+                try:
+                    if anime.metadataRecord and anime.metadataRecord.tmdbId:
+                        tmdb_id_val = anime.metadataRecord.tmdbId
+                except Exception:
+                    pass
+                relative_path = relative_path.replace("${tmdbId}", tmdb_id_val)
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)
@@ -732,6 +743,17 @@ async def apply_danmaku_template(
                 # 处理 provider 变量
                 provider_name = episode.source.providerName if episode.source else "unknown"
                 relative_path = relative_path.replace("${provider}", provider_name or "unknown")
+                # 处理 sourceId 变量
+                source_id_val = str(episode.source.id) if episode.source else "unknown"
+                relative_path = relative_path.replace("${sourceId}", source_id_val)
+                # 处理 tmdbId 变量
+                tmdb_id_val = "unknown"
+                try:
+                    if anime.metadataRecord and anime.metadataRecord.tmdbId:
+                        tmdb_id_val = anime.metadataRecord.tmdbId
+                except Exception:
+                    pass
+                relative_path = relative_path.replace("${tmdbId}", tmdb_id_val)
 
                 # 清理非法字符
                 relative_path = re.sub(r'[<>:"|?*]', '_', relative_path)

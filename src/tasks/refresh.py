@@ -480,3 +480,37 @@ async def incremental_refresh_task(sourceId: int, nextEpisodeIndex: int, session
         logger.error(f"增量刷新源任务 (ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
 
+
+
+async def fill_missing_task(sourceId: int, session: AsyncSession, manager: ScraperManager, task_manager: TaskManager, config_manager: ConfigManager, rate_limiter: RateLimiter, metadata_manager: MetadataSourceManager, progress_callback: Callable, animeTitle: str, title_recognition_manager: TitleRecognitionManager):
+    """后台任务：补全一个已存在番剧源的缺失分集。
+
+    与增量刷新不同，补全任务会获取全部分集列表（currentEpisodeIndex=None），
+    然后通过 check_episode_existence 判重自动跳过已有分集，只下载缺失的分集弹幕。
+    """
+    logger.info(f"开始分集补全源 ID: {sourceId}")
+    source_info = await crud.get_anime_source_info(session, sourceId)
+    if not source_info:
+        await progress_callback(100, "失败: 找不到源信息")
+        logger.error(f"分集补全失败：在数据库中找不到源 ID: {sourceId}")
+        return
+    try:
+        generic_import_task = _get_generic_import()
+        await generic_import_task(
+            provider=source_info["providerName"], mediaId=source_info["mediaId"],
+            animeTitle=animeTitle, mediaType=source_info["type"],
+            season=source_info.get("season", 1), year=source_info.get("year"),
+            currentEpisodeIndex=None, imageUrl=source_info.get("imageUrl"),
+            doubanId=None, tmdbId=source_info.get("tmdbId"), config_manager=config_manager, metadata_manager=metadata_manager,
+            imdbId=None, tvdbId=None, bangumiId=source_info.get("bangumiId"),
+            progress_callback=progress_callback,
+            session=session,
+            manager=manager,  # type: ignore
+            task_manager=task_manager,
+            rate_limiter=rate_limiter,
+            title_recognition_manager=title_recognition_manager)
+    except TaskSuccess:
+        raise
+    except Exception as e:
+        logger.error(f"分集补全任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
+        raise

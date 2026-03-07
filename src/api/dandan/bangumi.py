@@ -101,8 +101,10 @@ async def get_bangumi_details(
                 for cache_key in all_cache_keys:
                     search_key = cache_key.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                     search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                    if not isinstance(search_info, dict):
+                        continue
 
-                    if search_info and search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
+                    if search_info.get("status") == "completed" and "bangumi_mapping" in search_info:
                         if bangumiId in search_info["bangumi_mapping"]:
                             mapping_info = search_info["bangumi_mapping"][bangumiId]
                             provider = mapping_info["provider"]
@@ -130,8 +132,10 @@ async def get_bangumi_details(
                                     for cache_key_inner in all_cache_keys_inner:
                                         search_key_inner = cache_key_inner.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                                         search_info_inner = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key_inner)
+                                        if not isinstance(search_info_inner, dict):
+                                            continue
 
-                                        if search_info_inner and search_info_inner.get("status") == "completed" and "bangumi_mapping" in search_info_inner:
+                                        if search_info_inner.get("status") == "completed" and "bangumi_mapping" in search_info_inner:
                                             for bangumi_id_inner, mapping_info_inner in search_info_inner["bangumi_mapping"].items():
                                                 if mapping_info_inner.get("anime_id") == anime_id:
                                                     media_type = mapping_info_inner.get("type")
@@ -187,7 +191,9 @@ async def get_bangumi_details(
                                         for cache_key_conflict in all_cache_keys_conflict:
                                             sk = cache_key_conflict.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
                                             si = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, sk)
-                                            if si and si.get("status") == "completed" and "bangumi_mapping" in si:
+                                            if not isinstance(si, dict):
+                                                continue
+                                            if si.get("status") == "completed" and "bangumi_mapping" in si:
                                                 for bid, mi in list(si["bangumi_mapping"].items()):
                                                     # 如果是其他映射使用了相同的real_anime_id，清除它
                                                     if mi.get("real_anime_id") == real_anime_id and bid != bangumiId:
