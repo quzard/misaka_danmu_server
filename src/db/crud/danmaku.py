@@ -73,7 +73,13 @@ async def save_danmaku_for_episode(
     if not episode:
         raise ValueError(f"找不到ID为 {episode_id} 的分集")
 
-    comments = handle_danmaku_likes(list(comments), fire_threshold)
+    likes_fetch_enabled = True
+    if config_manager is not None:
+        try:
+            likes_fetch_enabled = (await config_manager.get('danmakuLikesFetchEnabled', 'true')).lower() == 'true'
+        except Exception:
+            pass
+    comments = handle_danmaku_likes(list(comments), fire_threshold, enabled=likes_fetch_enabled)
 
     new_comment_count = len(comments)
     old_comment_count = episode.commentCount or 0
