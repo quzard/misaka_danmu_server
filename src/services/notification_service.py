@@ -254,7 +254,8 @@ class NotificationService:
                 if not events_cfg.get(event_type, False):
                     continue
                 title, text = self._format_event_message(event_type, data)
-                await channel_instance.send_message(title=title, text=text)
+                image_url: str = data.get("image_url", "") or ""
+                await channel_instance.send_message(title=title, text=text, image=image_url)
             except Exception as e:
                 logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
 
@@ -502,6 +503,7 @@ class NotificationService:
 
         lines = [f"🔍 搜索「{keyword}」({start+1}-{end}/{total}):\n"]
         buttons = []
+        articles = []
         for i, r in enumerate(page_items):
             idx = start + i
             # 显示更丰富的信息：源、标题、年份、集数
@@ -513,6 +515,13 @@ class NotificationService:
                 {"text": f"✏️ 编辑 {idx+1}", "callback_data": f"search_edit:{idx}"},
             ]
             buttons.append(row)
+            # 图文 article（供支持图文的渠道使用）
+            articles.append({
+                "title": f"{idx+1}. {r['title']}{year_str}{ep_str}",
+                "description": f"[{r['provider']}]  回复 {idx+1} 导入",
+                "picurl": r.get("imageUrl") or "",
+                "url": "",
+            })
 
         # 分页按钮
         nav = []
@@ -527,6 +536,7 @@ class NotificationService:
             text="\n".join(lines),
             reply_markup=buttons,
             edit_message_id=edit_message_id,
+            articles=articles,
         )
 
     async def cb_search_page(self, params, user_id, channel, **kw):
@@ -616,6 +626,7 @@ class NotificationService:
                 })
             # 默认全选
             selected = list(range(len(ep_list)))
+            # 把搜索结果快照一起存入，返回时可以恢复
             edit_data = {
                 "item": item,
                 "episodes": ep_list,
@@ -623,6 +634,7 @@ class NotificationService:
                 "title": item.get("title", ""),
                 "type": item.get("type", "tv_series"),
                 "season": item.get("season", 1),
+                "_search_snapshot": conv.data,   # 保存完整搜索结果，用于「返回搜索」
             }
             self.set_conversation(user_id, "edit_import", edit_data,
                                   chat_id=kw.get("chat_id"))
@@ -812,11 +824,20 @@ class NotificationService:
         conv = self.get_conversation(user_id)
         if not conv or conv.state != "edit_import":
             return CommandResult(text="", answer_callback_text="操作已过期")
-        # 恢复搜索结果状态（从 item 中恢复）
-        # 需要重新搜索或从缓存恢复，这里简单提示用户重新搜索
-        self.clear_conversation(user_id)
-        return CommandResult(
-            text="已退出编辑导入。请使用 /search 重新搜索。",
+        # 从 edit_data 里取出保存的搜索快照并恢复
+        snapshot = conv.data.get("_search_snapshot")
+        if not snapshot or not snapshot.get("results"):
+            self.clear_conversation(user_id)
+            return CommandResult(
+                text="已退出编辑。请使用 /search 重新搜索。",
+                edit_message_id=kw.get("message_id"),
+            )
+        # 恢复 search_results 状态
+        self.set_conversation(user_id, "search_results", snapshot,
+                              chat_id=kw.get("chat_id"))
+        keyword = snapshot.get("keyword", "")
+        return self._build_search_page(
+            snapshot["results"], keyword, 0,
             edit_message_id=kw.get("message_id"),
         )
 
@@ -1246,6 +1267,7 @@ class NotificationService:
             start = page * PAGE_SIZE
             lines = [f"📚 媒体库 ({start+1}-{min(start+PAGE_SIZE, total)}/{total}):\n"]
             buttons = []
+            articles = []
             for item in items:
                 anime_id = item.get("animeId") or item.get("id")
                 title = item.get("title", "未知")
@@ -1255,6 +1277,12 @@ class NotificationService:
                     "text": f"📂 {title}",
                     "callback_data": f"refresh_anime:{anime_id}",
                 }])
+                articles.append({
+                    "title": title,
+                    "description": f"{ep_count}集",
+                    "picurl": item.get("imageUrl") or "",
+                    "url": "",
+                })
             nav = []
             if page > 0:
                 nav.append({"text": "⬅️ 上一页", "callback_data": f"lib_page:{page-1}"})
@@ -1269,6 +1297,7 @@ class NotificationService:
                 text="\n".join(lines) + "\n\n💡 也可发送关键词搜索媒体库",
                 reply_markup=buttons,
                 edit_message_id=edit_message_id or kw.get("message_id"),
+                articles=articles,
             )
         except Exception as e:
             logger.error(f"获取媒体库失败: {e}", exc_info=True)
@@ -1296,6 +1325,7 @@ class NotificationService:
             start = page * PAGE_SIZE
             lines = [f"📚 搜索「{keyword}」({start+1}-{min(start+PAGE_SIZE, total)}/{total}):\n"]
             buttons = []
+            articles = []
             for item in items:
                 anime_id = item.get("animeId") or item.get("id")
                 title = item.get("title", "未知")
@@ -1304,6 +1334,12 @@ class NotificationService:
                     "text": f"📂 {title}",
                     "callback_data": f"refresh_anime:{anime_id}",
                 }])
+                articles.append({
+                    "title": title,
+                    "description": f"点击刷新",
+                    "picurl": item.get("imageUrl") or "",
+                    "url": "",
+                })
             nav = []
             if page > 0:
                 nav.append({"text": "⬅️", "callback_data": f"lib_page:{page-1}"})
@@ -1315,6 +1351,7 @@ class NotificationService:
                 text="\n".join(lines),
                 reply_markup=buttons,
                 edit_message_id=edit_message_id or kw.get("message_id"),
+                articles=articles,
             )
         except Exception as e:
             return CommandResult(text=f"搜索媒体库出错: {e}")
@@ -1347,6 +1384,7 @@ class NotificationService:
                 )
             lines = [f"📂 {title}\n选择要刷新的数据源：\n"]
             buttons = []
+            image_url = (details or {}).get("imageUrl") or "" if details else ""
             for s in sources:
                 sid = s.get("sourceId")
                 provider = s.get("providerName", "未知")
@@ -1356,10 +1394,19 @@ class NotificationService:
                     "text": f"🔄 [{provider}] {ep_count}集",
                     "callback_data": f"refresh_source:{anime_id}:{sid}",
                 }])
+            articles = [{
+                "title": title,
+                "description": f"共 {sum(s.get('episodeCount', 0) for s in sources)} 集，{len(sources)} 个源",
+                "picurl": image_url,
+                "url": "",
+            }] if image_url else []
+            # 返回上一页（媒体库列表）
+            buttons.append([{"text": "🔙 返回媒体库", "callback_data": "lib_page:0"}])
             return CommandResult(
                 text="\n".join(lines),
                 reply_markup=buttons,
                 edit_message_id=kw.get("message_id"),
+                articles=articles,
             )
         except Exception as e:
             return CommandResult(text=f"获取数据源失败: {e}")
@@ -1396,6 +1443,7 @@ class NotificationService:
             buttons = [
                 [{"text": "🔄 全部刷新", "callback_data": f"refresh_do:{source_id}:all"}],
                 [{"text": "📝 输入集数范围", "callback_data": f"refresh_do:{source_id}:input"}],
+                [{"text": "🔙 返回数据源", "callback_data": f"refresh_anime:{anime_id}"}],
             ]
             return CommandResult(
                 text="\n".join(lines),

@@ -94,7 +94,8 @@ async def get_anime_source_info(session: AsyncSession, source_id: int) -> Option
         select(
             AnimeSource.id.label("sourceId"), AnimeSource.animeId.label("animeId"), AnimeSource.providerName.label("providerName"),
             AnimeSource.mediaId.label("mediaId"), AnimeSource.sourceOrder.label("sourceOrder"), Anime.year,
-            Anime.title, Anime.type, Anime.season, AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
+            Anime.title, Anime.type, Anime.season, Anime.imageUrl.label("imageUrl"),
+            AnimeMetadata.tmdbId.label("tmdbId"), AnimeMetadata.bangumiId.label("bangumiId")
         )
         .join(Anime, AnimeSource.animeId == Anime.id)
         .join(AnimeMetadata, Anime.id == AnimeMetadata.animeId, isouter=True)

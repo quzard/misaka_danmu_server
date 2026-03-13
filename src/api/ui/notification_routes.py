@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import crud, get_db_session
 from src import security
+from src.services import apply_tunnel_from_notification_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -47,6 +48,22 @@ def _get_notification_manager(request: Request):
     if not manager:
         raise HTTPException(status_code=503, detail="通知服务未初始化")
     return manager
+
+
+async def _reevaluate_tunnel(request: Request):
+    """渠道配置变更后重新评估 VPS 隧道是否需要启停"""
+    from src.core import settings as _settings
+    tunnel_service = getattr(request.app.state, "tunnel_service", None)
+    notification_manager = getattr(request.app.state, "notification_manager", None)
+    config_manager = getattr(request.app.state, "config_manager", None)
+    if not tunnel_service or not notification_manager or not config_manager:
+        return
+    await apply_tunnel_from_notification_manager(
+        tunnel_service=tunnel_service,
+        notification_manager=notification_manager,
+        config_manager=config_manager,
+        local_port=_settings.server.port,
+    )
 
 
 async def _verify_webhook_api_key(api_key: str, session: AsyncSession):
@@ -139,6 +156,9 @@ async def update_channel(
 
     manager = _get_notification_manager(request)
     await manager.reload_channel(channel_id)
+
+    # 渠道配置变更后重新评估 VPS 隧道
+    await _reevaluate_tunnel(request)
 
     channel = await crud.get_notification_channel_by_id(session, channel_id)
     return channel

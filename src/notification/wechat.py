@@ -125,9 +125,20 @@ class WeChatChannel(BaseNotificationChannel):
         return self._CAPABILITIES
 
     def _api_base(self) -> str:
-        """返回企业微信 API Base URL（支持自定义反向代理地址，对齐 MP 的 WECHAT_PROXY 设计）"""
+        """返回企业微信 API Base URL（支持通用出网代理路由 /out/）"""
         proxy = self.config.get("wecom_proxy", "").strip().rstrip("/")
-        return f"{proxy}/cgi-bin" if proxy else WECOM_API_BASE
+        if not proxy:
+            return WECOM_API_BASE
+        # 通用出网代理格式：{vps_url}/out/qyapi.weixin.qq.com/cgi-bin
+        return f"{proxy}/out/qyapi.weixin.qq.com/cgi-bin"
+
+    def _relay_headers(self) -> dict:
+        """当使用 VPS 代理时注入认证 Header，防止代理被滥用"""
+        proxy = self.config.get("wecom_proxy", "").strip()
+        if not proxy:
+            return {}
+        key = self.config.get("__webhook_api_key", "")
+        return {"X-Relay-Key": key} if key else {}
 
     def _wecom_proxy(self) -> Optional[str]:
         """企业微信不使用 httpx 代理，API 请求走 _api_base() 的反代地址"""
@@ -186,6 +197,7 @@ class WeChatChannel(BaseNotificationChannel):
                 resp = await client.get(
                     f"{self._api_base()}/gettoken",
                     params={"corpid": corp_id, "corpsecret": corp_secret},
+                    headers=self._relay_headers(),
                 )
                 d = resp.json()
                 if d.get("errcode", -1) == 0:
@@ -207,7 +219,12 @@ class WeChatChannel(BaseNotificationChannel):
             params.update(extra_params)
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(f"{self._api_base()}/{path}", params=params, json=payload)
+                resp = await client.post(
+                    f"{self._api_base()}/{path}",
+                    params=params,
+                    json=payload,
+                    headers=self._relay_headers(),
+                )
                 return resp.json()
         except Exception as e:
             self.logger.error(f"API [{path}] 异常: {e}")
@@ -218,11 +235,32 @@ class WeChatChannel(BaseNotificationChannel):
         if not agent_id:
             return
         to_user = kwargs.get("to_user") or self.config.get("to_user", "@all").strip() or "@all"
-        content = f"【{title}】\n{text}" if title else text
-        d = await self._api_post("message/send", {
-            "touser": to_user, "msgtype": "text", "agentid": int(agent_id),
-            "text": {"content": content},
-        })
+        image: str = kwargs.get("image", "")   # 封面图 URL
+        url: str = kwargs.get("url", "")       # 点击跳转 URL
+
+        if image or url:
+            # 图文消息（news 类型），参考 MoviePilot 实现
+            article = {
+                "title": title or text[:64],
+                "description": text,
+                "picurl": image,
+                "url": url,
+            }
+            payload = {
+                "touser": to_user,
+                "msgtype": "news",
+                "agentid": int(agent_id),
+                "news": {"articles": [article]},
+            }
+        else:
+            content = f"【{title}】\n{text}" if title else text
+            payload = {
+                "touser": to_user,
+                "msgtype": "text",
+                "agentid": int(agent_id),
+                "text": {"content": content},
+            }
+        d = await self._api_post("message/send", payload)
         if d and d.get("errcode", -1) != 0:
             self.logger.error(f"发送消息失败: {d.get('errmsg')}")
 
@@ -395,6 +433,23 @@ class WeChatChannel(BaseNotificationChannel):
         if result and result.text:
             await self._render_result(user_id, result)
 
+    async def _send_news_to(self, to_user: str, articles: list) -> None:
+        """发送图文消息（news 类型），articles 最多 8 条"""
+        agent_id = self.config.get("agent_id", "").strip()
+        if not agent_id or not articles:
+            return
+        payload = {
+            "touser": to_user,
+            "msgtype": "news",
+            "agentid": int(agent_id),
+            "news": {"articles": articles[:8]},
+        }
+        self._log_raw("⬆ sendNews 请求", payload)
+        d = await self._api_post("message/send", payload)
+        self._log_raw("⬇ sendNews 响应", d or {})
+        if d and d.get("errcode", -1) != 0:
+            self.logger.error(f"发送图文消息失败: {d.get('errmsg')}")
+
     async def _render_result(self, user_id: str, result: CommandResult):
         """渲染响应 — 企业微信无内联按钮，降级为编号文本列表"""
         if not result:
@@ -427,6 +482,23 @@ class WeChatChannel(BaseNotificationChannel):
         else:
             # 没有按钮时清除旧映射，避免误触
             self._button_mappings.pop(user_id, None)
+
+        # 有图文 articles 时先发 news 卡片（仅有 picurl 的条目才有意义）
+        # 同时把文字正文只保留第一行（标题行），去掉重复列表，只保留操作提示
+        if result.articles:
+            has_image = any(a.get("picurl") for a in result.articles)
+            if has_image:
+                await self._send_news_to(user_id, result.articles)
+                # 文字部分去掉结果列表，只保留第一行标题 + 操作选项
+                first_line = text.split("\n")[0]
+                ops_start = text.find("可用操作：")
+                if ops_start != -1:
+                    ops_text = text[ops_start:]
+                    hint_start = text.rfind("\n\n💡")
+                    hint = text[hint_start:] if hint_start != -1 else ""
+                    text = first_line + "\n\n" + ops_text + (hint if hint not in ops_text else "")
+                else:
+                    text = first_line + "\n\n" + text[text.find("💡"):]  if "💡" in text else first_line
 
         await self._send_text_to(user_id, text)
 
@@ -497,6 +569,13 @@ class WeChatChannel(BaseNotificationChannel):
                 "type": "string",
                 "description": "企业微信 API 反向代理地址（对齐 MP 的 WECHAT_PROXY 设计）。留空则直连官方地址 代理搭建：https://t.me/areyouok32/90 ",
                 "placeholder": "https://qyapi.weixin.qq.com",
+            },
+            {
+                "key": "tunnel_enabled",
+                "label": "启用 VPS 隧道连接",
+                "type": "boolean",
+                "description": "启用后，弹幕库将使用上方「API 反向代理地址」作为 VPS 目标，通过 wstunnel 建立反向隧道，使 VPS 收到的回调自动转发到本地弹幕库。认证密钥使用系统设置 → Webhook API Key。",
+                "default": False,
             },
             {
                 "key": "server_url",
