@@ -92,9 +92,24 @@ class SQLAlchemyPoolShutdownFilter(logging.Filter):
     这是已知的良性噪音，降级为 DEBUG 避免误报。
     """
     def filter(self, record):
-        if record.name.startswith('sqlalchemy.pool') and record.levelno >= logging.ERROR:
+        if record.levelno >= logging.ERROR:
             msg = record.getMessage()
-            if 'Exception terminating connection' in msg or 'unable to perform operation' in msg:
+            # 检查主消息
+            is_pool_noise = (
+                'Exception terminating connection' in msg
+                or 'unable to perform operation' in msg
+                or 'TCPTransport closed' in msg
+                or 'the handler is closed' in msg
+            )
+            # 检查异常堆栈（RuntimeError 详情可能只在 exc_info 里）
+            if not is_pool_noise and record.exc_info:
+                exc_text = str(record.exc_info[1]) if record.exc_info[1] else ''
+                is_pool_noise = (
+                    'TCPTransport closed' in exc_text
+                    or 'the handler is closed' in exc_text
+                    or 'unable to perform operation' in exc_text
+                )
+            if is_pool_noise:
                 record.levelno = logging.DEBUG
                 record.levelname = 'DEBUG'
         return True

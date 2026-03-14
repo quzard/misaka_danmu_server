@@ -112,6 +112,21 @@ class TelegramChannel(BaseNotificationChannel):
                 "visibleWhen": {"mode": "webhook"},
             },
             {
+                "key": "tunnel_enabled",
+                "label": "启用 VPS 隧道连接",
+                "type": "boolean",
+                "description": "启用后，弹幕库将通过上方「外部访问地址」建立 WebSocket 反向隧道，将 Telegram 回调转发到本地（无需公网 IP）",
+                "default": False,
+                "visibleWhen": {"mode": "webhook"},
+            },
+            {
+                "key": "telegram_api_proxy",
+                "label": "API 出网代理地址",
+                "type": "string",
+                "description": "填入 VPS 地址（如 http://vps.example.com），Bot 的 API 请求将通过 VPS 出网，解决国内 IP 被封锁的问题。留空则直连 api.telegram.org",
+                "placeholder": "http://your-vps.com",
+            },
+            {
                 "key": "log_raw",
                 "label": "记录原始交互",
                 "type": "boolean",
@@ -161,13 +176,21 @@ class TelegramChannel(BaseNotificationChannel):
 
         telebot = _get_telebot()
 
-        # 配置代理（如果开启了代理开关且有代理 URL）
-        if self.proxy_url:
+        # 配置出网代理：优先用 telegram_api_proxy（通过 VPS /out/ 路由），否则用全局 proxy_url
+        api_proxy = self.config.get("telegram_api_proxy", "").strip().rstrip("/")
+        if api_proxy:
+            # pyTelegramBotAPI API_URL 格式：{base}/bot{0}/{1}
+            telebot.apihelper.API_URL = f"{api_proxy}/out/api.telegram.org/bot{{0}}/{{1}}"
+            telebot.apihelper.proxy = None
+            self.logger.info(f"Telegram Bot 已启用 VPS 出网代理: {api_proxy}/out/api.telegram.org")
+        elif self.proxy_url:
             telebot.apihelper.proxy = {"https": self.proxy_url}
+            telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
             self.logger.info(f"Telegram Bot 已启用代理: {self.proxy_url}")
         else:
-            # 确保清除可能被其他实例设置过的代理
+            # 确保清除可能被其他实例设置过的代理/API URL
             telebot.apihelper.proxy = None
+            telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
 
         self._bot = telebot.TeleBot(bot_token, threaded=False)
         self._register_handlers()
@@ -348,25 +371,67 @@ class TelegramChannel(BaseNotificationChannel):
             parse_mode = result.parse_mode
 
             if result.edit_message_id:
-                # 编辑已有消息
+                # 编辑已有消息：
+                # Telegram 区分文字消息（edit_message_text）和图片消息（edit_message_caption）
+                # 先尝试 edit_message_text，若报"no text"则原消息是图片，改用 edit_message_caption
                 self._log_raw("⬆ 编辑消息", {"chat_id": chat_id, "message_id": result.edit_message_id, "text": result.text[:200]})
-                self._bot.edit_message_text(
-                    text=result.text,
-                    chat_id=chat_id,
-                    message_id=result.edit_message_id,
-                    reply_markup=markup,
-                    parse_mode=parse_mode,
-                )
+                try:
+                    self._bot.edit_message_text(
+                        text=result.text,
+                        chat_id=chat_id,
+                        message_id=result.edit_message_id,
+                        reply_markup=markup,
+                        parse_mode=parse_mode,
+                    )
+                except Exception as edit_err:
+                    err_str = str(edit_err).lower()
+                    if "message is not modified" in err_str:
+                        # 内容未变化，Telegram 正常拒绝，静默忽略
+                        pass
+                    elif "no text in the message" in err_str:
+                        # 原消息是图片消息，改用 edit_message_caption
+                        try:
+                            self._bot.edit_message_caption(
+                                caption=result.text,
+                                chat_id=chat_id,
+                                message_id=result.edit_message_id,
+                                reply_markup=markup,
+                                parse_mode=parse_mode,
+                            )
+                        except Exception as cap_err:
+                            if "message is not modified" not in str(cap_err).lower():
+                                raise
+                    else:
+                        raise
             else:
-                # 发送新消息
-                self._log_raw("⬆ 发送消息", {"chat_id": chat_id, "text": result.text[:200]})
-                sent = self._bot.send_message(
-                    chat_id,
-                    result.text,
-                    reply_markup=markup,
-                    parse_mode=parse_mode,
-                    reply_to_message_id=reply_to_message_id,
-                )
+                # 有图文 articles 时，取第一张有图的封面，用 send_photo 发带图消息
+                cover_url = ""
+                if result.articles:
+                    for a in result.articles:
+                        if a.get("picurl"):
+                            cover_url = a["picurl"]
+                            break
+
+                if cover_url:
+                    self._log_raw("⬆ 发送图文消息", {"chat_id": chat_id, "photo": cover_url, "text": result.text[:200]})
+                    sent = self._bot.send_photo(
+                        chat_id,
+                        cover_url,
+                        caption=result.text,
+                        reply_markup=markup,
+                        parse_mode=parse_mode,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                else:
+                    # 发送纯文本消息
+                    self._log_raw("⬆ 发送消息", {"chat_id": chat_id, "text": result.text[:200]})
+                    sent = self._bot.send_message(
+                        chat_id,
+                        result.text,
+                        reply_markup=markup,
+                        parse_mode=parse_mode,
+                        reply_to_message_id=reply_to_message_id,
+                    )
                 # 如果服务层需要跟踪消息ID（用于后续编辑），回写到对话状态
                 if result.next_state and sent:
                     self.service.update_conversation_message_id(
@@ -423,9 +488,14 @@ class TelegramChannel(BaseNotificationChannel):
         if not chat_id:
             self.logger.warning("未配置 Chat ID，无法发送消息")
             return
-        content = f"*{title}*\n{text}" if title else text
+        image: str = kwargs.get("image", "") or ""
+        caption = f"*{title}*\n{text}" if title else text
         try:
-            self._bot.send_message(chat_id, content, parse_mode="Markdown")
+            if image:
+                # 有封面图：发带图片的消息，正文作为 caption
+                self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown")
+            else:
+                self._bot.send_message(chat_id, caption, parse_mode="Markdown")
         except Exception as e:
             self.logger.error(f"发送消息失败: {e}")
             # 降级为纯文本
@@ -441,11 +511,17 @@ class TelegramChannel(BaseNotificationChannel):
             return {"success": False, "message": "Bot Token 未配置"}
         try:
             telebot = _get_telebot()
-            # 测试时同样应用代理配置
-            if self.proxy_url:
+            # 测试时同样应用代理/出网代理配置
+            api_proxy = self.config.get("telegram_api_proxy", "").strip().rstrip("/")
+            if api_proxy:
+                telebot.apihelper.API_URL = f"{api_proxy}/out/api.telegram.org/bot{{0}}/{{1}}"
+                telebot.apihelper.proxy = None
+            elif self.proxy_url:
                 telebot.apihelper.proxy = {"https": self.proxy_url}
+                telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
             else:
                 telebot.apihelper.proxy = None
+                telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
             bot = telebot.TeleBot(bot_token, threaded=False)
             info = bot.get_me()
             # 发送测试消息到配置的 chat_id

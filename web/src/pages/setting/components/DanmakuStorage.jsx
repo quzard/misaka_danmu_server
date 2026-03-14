@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip, Collapse, Popover } from 'antd';
 import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables } from '@/apis';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables, getDanmakuLikesFetchEnabled, setDanmakuLikesFetchEnabled } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
 
 const { Text } = Typography;
@@ -49,6 +49,9 @@ const DanmakuStorage = () => {
   // Tab状态
   const [activeTab, setActiveTab] = useState('config');
   const [isMobile, setIsMobile] = useState(false);
+
+  // 设置分页状态
+  const [likesFetchEnabled, setLikesFetchEnabled] = useState(true);
 
   // 迁移与重命名状态
   const [libraryItems, setLibraryItems] = useState([]);
@@ -435,6 +438,14 @@ const DanmakuStorage = () => {
         }
       } catch (e) {
         console.warn('获取模板变量失败，使用默认值', e);
+      }
+
+      // 获取点赞开关
+      try {
+        const likesFetchRes = await getDanmakuLikesFetchEnabled();
+        setLikesFetchEnabled(likesFetchRes?.data?.value !== 'false');
+      } catch (e) {
+        console.warn('获取点赞开关失败', e);
       }
     } catch (error) {
       message.error('加载配置失败');
@@ -2051,6 +2062,30 @@ const DanmakuStorage = () => {
               </div>
             )}
           </Modal>
+        </TabPane>
+
+        <TabPane tab="设置" key="settings">
+          <div style={{ maxWidth: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <span>获取点赞</span>
+              <Switch
+                checked={likesFetchEnabled}
+                onChange={async (checked) => {
+                  setLikesFetchEnabled(checked);
+                  try {
+                    await setDanmakuLikesFetchEnabled({ value: checked ? 'true' : 'false' });
+                    message.success(checked ? '已启用获取点赞' : '已关闭获取点赞');
+                  } catch (error) {
+                    message.error('保存失败');
+                    setLikesFetchEnabled(!checked);
+                  }
+                }}
+              />
+            </div>
+            <div style={{ color: '#999', fontSize: 12 }}>
+              启用后，下载弹幕时会获取并存储点赞信息到弹幕文件中。关闭后新下载的弹幕将不包含点赞数据。
+            </div>
+          </div>
         </TabPane>
       </Tabs>
 

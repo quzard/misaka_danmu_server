@@ -80,6 +80,9 @@ class CommandResult:
     clear_state: bool = False           # 清除当前对话状态
     # 回调查询应答文本（仅 callback_query 场景使用）
     answer_callback_text: Optional[str] = None
+    # 图文文章列表（渠道层有能力时优先展示带图版本）
+    # 每项: {"title": str, "description": str, "picurl": str, "url": str}
+    articles: List[Dict[str, str]] = field(default_factory=list)
 
 
 @dataclass

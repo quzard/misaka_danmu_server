@@ -207,23 +207,14 @@ async def test_proxy_latency(
         if not accelerate_proxy_url:
             proxy_connectivity_result = ProxyTestResult(status="skipped", error="未配置加速代理地址")
         else:
-            # 构建加速代理格式的测试 URL
-            # 格式: {proxy_base}/{protocol}/{host}/{path}
-            # 使用 HTTPS 协议，因为部分云函数代理不支持 HTTP
             proxy_base = accelerate_proxy_url.rstrip('/')
             accelerated_test_url = f"{proxy_base}/https/www.gstatic.com/generate_204"
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
                     start_time = time.time()
-                    response = await client.get(accelerated_test_url)
+                    await client.head(accelerated_test_url)
                     latency = (time.time() - start_time) * 1000
-                    if response.status_code == 204:
-                        proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
-                    else:
-                        proxy_connectivity_result = ProxyTestResult(
-                            status="failure",
-                            error=f"连接成功但状态码异常: {response.status_code}"
-                        )
+                    proxy_connectivity_result = ProxyTestResult(status="success", latency=latency)
             except Exception as e:
                 proxy_connectivity_result = ProxyTestResult(status="failure", error=str(e))
     else:

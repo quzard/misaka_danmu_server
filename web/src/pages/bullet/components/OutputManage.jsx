@@ -10,6 +10,8 @@ import {
   setDanmakuChConvert,
   getDanmakuChConvertPriority,
   setDanmakuChConvertPriority,
+  getDanmakuLikesOutputEnabled,
+  setDanmakuLikesOutputEnabled,
   getDanmakuRandomColorMode,
   setDanmakuRandomColorMode,
   getDanmakuRandomColorPalette,
@@ -84,13 +86,14 @@ export const OutputManage = () => {
   const [blacklistSaveLoading, setBlacklistSaveLoading] = useState(false)
   const [chConvert, setChConvert] = useState('0')
   const [chConvertPriority, setChConvertPriority] = useState('player')
+  const [likesOutputEnabled, setLikesOutputEnabled] = useState(true)
 
   const messageApi = useMessage()
 
   const getConfig = async () => {
     setLoading(true)
     try {
-      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes, chConvertRes, chConvertPriorityRes] = await Promise.all([
+      const [limitRes, mergeEnabledRes, colorModeRes, colorPaletteRes, blacklistEnabledRes, blacklistPatternsRes, chConvertRes, chConvertPriorityRes, likesOutputRes] = await Promise.all([
         getDanmuOutputTotal(),
         getDanmakuMergeOutputEnabled(),
         getDanmakuRandomColorMode(),
@@ -99,6 +102,7 @@ export const OutputManage = () => {
         getDanmakuBlacklistPatterns(),
         getDanmakuChConvert(),
         getDanmakuChConvertPriority(),
+        getDanmakuLikesOutputEnabled(),
       ])
       setLimit(limitRes.data?.value ?? '-1')
       setMergeEnabled(mergeEnabledRes.data?.value === 'true')
@@ -108,6 +112,7 @@ export const OutputManage = () => {
       setBlacklistPatterns(blacklistPatternsRes.data?.value || '')
       setChConvert(chConvertRes.data?.value || '0')
       setChConvertPriority(chConvertPriorityRes.data?.value || 'player')
+      setLikesOutputEnabled(likesOutputRes.data?.value !== 'false')
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -124,6 +129,7 @@ export const OutputManage = () => {
         setDanmakuMergeOutputEnabled({ value: mergeEnabled ? 'true' : 'false' }),
         setDanmakuChConvert({ value: chConvert }),
         setDanmakuChConvertPriority({ value: chConvertPriority }),
+        setDanmakuLikesOutputEnabled({ value: likesOutputEnabled ? 'true' : 'false' }),
       ])
       messageApi.success('弹幕输出配置已保存')
     } catch (e) {
@@ -203,6 +209,16 @@ export const OutputManage = () => {
                   onChange={setMergeEnabled}
                 />
                 <Tooltip title="启用后，将所有源的弹幕合并后再进行均衡采样输出，而不是每个源单独采样">
+                  <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+                </Tooltip>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>输出点赞状态</span>
+                <Switch
+                  checked={likesOutputEnabled}
+                  onChange={setLikesOutputEnabled}
+                />
+                <Tooltip title="启用后，达到阈值的点赞数会以 🤍/🔥 + 数字的形式追加到弹幕内容末尾">
                   <QuestionCircleOutlined className="text-gray-400 cursor-help" />
                 </Tooltip>
               </div>

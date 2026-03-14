@@ -33,11 +33,11 @@ def clean_xml_string(xml_string: str) -> str:
     )
     return invalid_xml_char_re.sub('', xml_string)
 
-def handle_danmaku_likes(comments: List[Dict[str, Any]], fire_threshold: int = 1000) -> List[Dict[str, Any]]:
+def handle_danmaku_likes(comments: List[Dict[str, Any]], fire_threshold: int = 1000, enabled: bool = True) -> List[Dict[str, Any]]:
     """
-    处理弹幕点赞数，将 like 字段格式化后追加到弹幕内容末尾，并移除 like 字段。
+    处理弹幕点赞数，移除 like 字段；当 enabled=True 时将格式化后的点赞信息追加到弹幕内容末尾。
 
-    - l >= fire_threshold → 🔥，否则 ❤️（阈值由各源的 likes_fire_threshold 决定）
+    - l >= fire_threshold → 🔥，否则 🤍（阈值由各源的 likes_fire_threshold 决定）
     - 最低显示阈值：like >= 5
     - 格式化：>= 10000 → "1.2w"，>= 1000 → "1.2k"，否则直接数字
     """
@@ -52,10 +52,20 @@ def handle_danmaku_likes(comments: List[Dict[str, Any]], fire_threshold: int = 1
 
     for item in comments:
         like = item.pop('l', None)
-        if like and isinstance(like, (int, float)) and like >= MIN_LIKE:
-            emoji = '🔥' if like >= fire_threshold else '❤️'
+        if enabled and like and isinstance(like, (int, float)) and like >= MIN_LIKE:
+            emoji = '🔥' if like >= fire_threshold else '🤍'
             item['m'] = f"{item.get('m', '')} {emoji} {_fmt(int(like))}"
 
+    return comments
+
+
+_LIKES_SUFFIX_RE = re.compile(r'\s+[🤍🔥]\s+\d+(?:\.\d+)?[wk]?$')
+
+def strip_danmaku_likes(comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    for item in comments:
+        m = item.get('m', '')
+        if m:
+            item['m'] = _LIKES_SUFFIX_RE.sub('', m)
     return comments
 
 
