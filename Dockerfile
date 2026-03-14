@@ -71,7 +71,6 @@ RUN set -ex \
         libmariadb3 \
         libpq5 \
         curl \
-        tar \
     && addgroup --gid 1000 appgroup \
     && adduser --shell /bin/sh --disabled-password --uid 1000 --gid 1000 appuser \
     && if [ "$SO_TAG" = "latest" ]; then \
@@ -92,7 +91,7 @@ RUN set -ex \
     && mkdir -p ./src \
     && curl -fsSL "${GITHUB_RAW_BASE}/${PLATFORM_DIR}/rate_limiter.so" -o ./src/rate_limiter.so \
     && curl -fsSL "${GITHUB_RAW_BASE}/${PLATFORM_DIR}/security_core.so" -o ./src/security_core.so \
-    && apt-get purge -y curl tar && apt-get autoremove -y \
+    && apt-get purge -y curl && apt-get autoremove -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
