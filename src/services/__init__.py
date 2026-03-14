@@ -53,6 +53,9 @@ from .alias_service import (
 from .notification_service import NotificationService
 from .notification_manager import NotificationManager
 
+# VPS 隧道服务
+from .tunnel_service import TunnelService, apply_tunnel_from_notification_manager
+
 # 入库存在性检查
 from .import_existence_checker import check_anime_existence, check_episode_existence
 
@@ -99,6 +102,9 @@ __all__ = [
     # 通知服务
     'NotificationService',
     'NotificationManager',
+    # VPS 隧道服务
+    'TunnelService',
+    'apply_tunnel_from_notification_manager',
     # 入库存在性检查
     'check_anime_existence',
     'check_episode_existence',

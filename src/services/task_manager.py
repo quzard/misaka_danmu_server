@@ -153,12 +153,38 @@ class TaskManager:
         event_type = self._determine_event_type(task, is_success)
         if not event_type:
             return
+
+        # 1. 优先从 task_parameters 取 imageUrl（import/auto_import 任务已有）
+        image_url: str = (task.task_parameters or {}).get("imageUrl", "") or ""
+
+        # 2. 刷新任务 task_parameters 里没有 imageUrl，从数据库补查
+        if not image_url and task.unique_key:
+            key = task.unique_key
+            try:
+                async with self._session_factory() as session:
+                    if key.startswith("refresh-episode-") or key.startswith("full-refresh-"):
+                        # key 格式: refresh-episode-{source_id}-xxx 或 full-refresh-{anime_id}-xxx
+                        parts = key.split("-")
+                        id_val = int(parts[2])
+                        if key.startswith("refresh-episode-"):
+                            info = await crud.get_anime_source_info(session, id_val)
+                            image_url = (info or {}).get("imageUrl", "") or ""
+                        else:
+                            # full-refresh: 直接查 Anime
+                            from src.db.orm_models import Anime as AnimeORM
+                            from sqlalchemy import select as sa_select
+                            row = await session.get(AnimeORM, id_val)
+                            image_url = (row.imageUrl if row else "") or ""
+            except Exception:
+                pass  # imageUrl 获取失败不影响通知发出
+
         try:
             await self._notification_service.emit_event(event_type, {
                 "task_title": task.title,
                 "message": message,
                 "task_id": task.task_id,
                 "unique_key": task.unique_key or "",
+                "image_url": image_url,
             })
         except Exception as e:
             self.logger.error(f"发射通知事件 {event_type} 失败: {e}")

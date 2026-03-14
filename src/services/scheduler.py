@@ -252,6 +252,10 @@ class SchedulerManager:
                 exists = await crud.check_scheduled_task_exists_by_type(session, "webhookProcessor")
                 if exists:
                     raise ValueError("Webhook 延时任务处理器已存在，无法重复创建。")
+            elif job_type == "autoFinish":
+                exists = await crud.check_scheduled_task_exists_by_type(session, "autoFinish")
+                if exists:
+                    raise ValueError("追更自动完结任务已存在，无法重复创建。")
 
             task_id = str(uuid4())
             await crud.create_scheduled_task(session, task_id, name, job_type, cron, is_enabled, task_config)

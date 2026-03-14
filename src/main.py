@@ -26,6 +26,7 @@ from src.services import (
     SchedulerManager, TitleRecognitionManager, MediaServerManager,
     TransportManager, setup_logging,
     NotificationService, NotificationManager,
+    TunnelService, apply_tunnel_from_notification_manager,
 )
 from src.utils import InternalPollingManager, init_proxy_middleware
 from src.api import api_router, control_router
@@ -80,6 +81,15 @@ def _get_default_danmaku_path_template():
         return '/app/config/danmaku/${animeId}/${episodeId}'
     else:
         return 'config/danmaku/${animeId}/${episodeId}'
+
+
+async def _apply_tunnel_from_channels(app):
+    await apply_tunnel_from_notification_manager(
+        tunnel_service=app.state.tunnel_service,
+        notification_manager=app.state.notification_manager,
+        config_manager=app.state.config_manager,
+        local_port=settings.server.port,
+    )
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -285,6 +295,11 @@ async def lifespan(app: FastAPI):
     app.state.notification_service.notification_manager = app.state.notification_manager
     await app.state.notification_manager.start_channels()
 
+    # 初始化 TunnelService，并根据渠道配置决定是否启动隧道
+    app.state.tunnel_service = TunnelService()
+    await _apply_tunnel_from_channels(app)
+    logger.info("隧道服务已初始化")
+
     # 将通知服务注入 TaskManager 和 WebhookManager
     app.state.task_manager.set_notification_service(app.state.notification_service)
     app.state.webhook_manager.notification_service = app.state.notification_service
@@ -356,6 +371,8 @@ async def lifespan(app: FastAPI):
         await app.state.metadata_manager.close_all()
     if hasattr(app.state, "notification_manager"):
         await app.state.notification_manager.stop_channels()
+    if hasattr(app.state, "tunnel_service"):
+        await app.state.tunnel_service.stop()
     if hasattr(app.state, "media_server_manager"):
         await app.state.media_server_manager.close_all()
     if hasattr(app.state, "scheduler_manager"):

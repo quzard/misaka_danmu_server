@@ -302,6 +302,18 @@ export const getDanmakuChConvertPriority = () =>
 /** 弹幕输出配置 简繁转换优先级 */
 export const setDanmakuChConvertPriority = data =>
   api.put('/api/ui/config/danmakuChConvertPriority', data)
+/** 弹幕输出配置 输出点赞状态开关 */
+export const getDanmakuLikesOutputEnabled = () =>
+  api.get('/api/ui/config/danmakuLikesOutputEnabled')
+/** 弹幕输出配置 输出点赞状态开关 */
+export const setDanmakuLikesOutputEnabled = data =>
+  api.put('/api/ui/config/danmakuLikesOutputEnabled', data)
+/** 弹幕存储配置 获取点赞开关 */
+export const getDanmakuLikesFetchEnabled = () =>
+  api.get('/api/ui/config/danmakuLikesFetchEnabled')
+/** 弹幕存储配置 获取点赞开关 */
+export const setDanmakuLikesFetchEnabled = data =>
+  api.put('/api/ui/config/danmakuLikesFetchEnabled', data)
 /** 弹幕输出配置 随机颜色模式 */
 export const getDanmakuRandomColorMode = () =>
   api.get('/api/ui/config/danmakuRandomColorMode')

@@ -62,8 +62,12 @@ class ServerChanChannel(BaseNotificationChannel):
     # ─── 内部辅助 ───────────────────────────────
 
     def _api_url(self, method: str) -> str:
-        """构造 Bot API 完整 URL"""
+        """构造 Bot API 完整 URL（支持 VPS 出网代理路由 /out/）"""
         token = self.config.get("bot_token", "")
+        api_proxy = self.config.get("sc3_api_proxy", "").strip().rstrip("/")
+        if api_proxy:
+            # 通用出网代理格式：{vps_url}/out/bot-go.apijia.cn/bot{token}/{method}
+            return f"{api_proxy}/out/bot-go.apijia.cn/bot{token}/{method}"
         return f"{SC3_BOT_API_BASE.format(token=token)}/{method}"
 
 
@@ -109,6 +113,13 @@ class ServerChanChannel(BaseNotificationChannel):
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=30.0)
         return self._client
+
+    def _relay_headers(self) -> dict:
+        """当使用 VPS 出网代理时注入认证 Header"""
+        if not self.config.get("sc3_api_proxy", "").strip():
+            return {}
+        key = self.config.get("__webhook_api_key", "")
+        return {"X-Relay-Key": key} if key else {}
 
     # ─── 生命周期 ───────────────────────────────
 
@@ -338,7 +349,11 @@ class ServerChanChannel(BaseNotificationChannel):
                 "silent": silent,
             }
             self._log_raw("⬆ sendMessage 请求", payload)
-            resp = await client.post(self._api_url("sendMessage"), json=payload)
+            resp = await client.post(
+                self._api_url("sendMessage"),
+                json=payload,
+                headers=self._relay_headers(),
+            )
             data = resp.json()
             self._log_raw("⬇ sendMessage 响应", data)
             if not data.get("ok", True):
@@ -384,8 +399,9 @@ class ServerChanChannel(BaseNotificationChannel):
         if not bot_token:
             return {"success": False, "message": "Bot Token 未配置"}
         try:
+            relay_hdrs = self._relay_headers()
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(self._api_url("getMe"))
+                resp = await client.get(self._api_url("getMe"), headers=relay_hdrs)
                 data = resp.json()
                 if data.get("ok"):
                     bot_info = data.get("result", {})
@@ -399,7 +415,7 @@ class ServerChanChannel(BaseNotificationChannel):
                                 "text": f"🔔 测试连接成功！\nBot: {name}\n来自 Misaka 弹幕服务器的测试消息。",
                                 "silent": False,
                             }
-                            await client.post(self._api_url("sendMessage"), json=payload)
+                            await client.post(self._api_url("sendMessage"), json=payload, headers=relay_hdrs)
                         except Exception as e:
                             self.logger.warning(f"测试消息发送失败: {e}")
                     return {
@@ -488,12 +504,27 @@ class ServerChanChannel(BaseNotificationChannel):
                 "visibleWhen": {"mode": "webhook"},
             },
             {
+                "key": "tunnel_enabled",
+                "label": "启用 VPS 隧道连接",
+                "type": "boolean",
+                "description": "启用后，弹幕库将通过上方「外部访问地址」建立 WebSocket 反向隧道，将 SC3 回调转发到本地（无需公网 IP）",
+                "default": False,
+                "visibleWhen": {"mode": "webhook"},
+            },
+            {
                 "key": "webhook_secret",
                 "label": "Webhook Secret",
                 "type": "password",
                 "description": "Webhook 密钥（可选），配置后会验证请求头中的 X-Sc3Bot-Webhook-Secret",
                 "placeholder": "",
                 "visibleWhen": {"mode": "webhook"},
+            },
+            {
+                "key": "sc3_api_proxy",
+                "label": "API 出网代理地址",
+                "type": "string",
+                "description": "填入 VPS 地址（如 http://vps.example.com），Bot 的 API 请求将通过 VPS 出网。留空则直连 bot-go.apijia.cn",
+                "placeholder": "http://your-vps.com",
             },
             {
                 "key": "log_raw",
