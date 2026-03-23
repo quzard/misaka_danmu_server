@@ -25,8 +25,6 @@ VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random", "all_white",
 # num_only 样式用正则检测，避免 " +" 误匹配
 _LIKE_KEYWORDS = (
     "\U0001f90d",      # heart_white  🤍
-    "\U0001fa75",      # heart_blue   🩵
-    "\U0001fa77",      # heart_pink   🩷
     "\u2764",          # heart_red    ❤️ (U+2764，子串匹配覆盖带 FE0F 的版本)
     "\u2661",          # heart_outline ♡ (U+2661)
     "\U0001f525",      # fire          🔥

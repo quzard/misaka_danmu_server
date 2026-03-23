@@ -230,8 +230,6 @@ export const OutputManage = () => {
                   options={[
                     { label: '🚫 关闭', value: 'off' },
                     { label: '🤍/🔥 默认', value: 'heart_white' },
-                    { label: '🩵/🔥 蓝心', value: 'heart_blue' },
-                    { label: '🩷/🔥 粉心', value: 'heart_pink' },
                     { label: '❤️/🔥 红心', value: 'heart_red' },
                     { label: '♡/🔥 空心', value: 'heart_outline' },
                     { label: '[👍]/[🔥] 方括号', value: 'like_bracket' },
@@ -239,7 +237,7 @@ export const OutputManage = () => {
                     { label: '+数字 纯数字', value: 'num_only' },
                   ]}
                 />
-                <Tooltip title="选择点赞数的显示样式，达到热度阈值时显示🔥。选择"关闭"则不显示点赞信息">
+                <Tooltip title="选择点赞数的显示样式，达到热度阈值时显示🔥。选择「关闭」则不显示点赞信息">
                   <QuestionCircleOutlined className="text-gray-400 cursor-help" />
                 </Tooltip>
               </div>

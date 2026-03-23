@@ -57,8 +57,6 @@ def handle_danmaku_likes(
     # 普通点赞符号映射
     _NORMAL_EMOJI = {
         "heart_white":   "🤍",
-        "heart_blue":    "🩵",
-        "heart_pink":    "🩷",
         "heart_red":     "❤️",
         "heart_outline": "♡",
     }
@@ -138,8 +136,6 @@ def restyle_danmaku_likes(
 
     _NORMAL_EMOJI = {
         "heart_white":   "🤍",
-        "heart_blue":    "🩵",
-        "heart_pink":    "🩷",
         "heart_red":     "❤️",
         "heart_outline": "♡",
     }
