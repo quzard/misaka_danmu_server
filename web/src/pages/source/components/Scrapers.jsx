@@ -328,12 +328,17 @@ export const Scrapers = () => {
   const getInfo = async () => {
     try {
       setLoading(true)
-      const [res1, res2] = await Promise.all([getScrapers(), getbiliUserinfo()])
+      const res1 = await getScrapers()
       setList(res1.data ?? [])
-      setBiliUserinfo(res2.data)
     } catch (error) {
     } finally {
       setLoading(false)
+    }
+    // bilibili 登录状态独立加载，不阻塞主列表渲染
+    try {
+      const res2 = await getbiliUserinfo()
+      setBiliUserinfo(res2.data)
+    } catch (error) {
     }
   }
 
