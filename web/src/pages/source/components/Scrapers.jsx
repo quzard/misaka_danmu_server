@@ -1791,9 +1791,8 @@ export const Scrapers = () => {
             </div>
           )}
 
-          {/* 版本信息 + 操作按钮（合并为一行） */}
-          {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion || versionInfo.officialVersion) && (
-            <div className={`flex ${isMobile ? 'flex-col gap-4' : 'items-center justify-between'} mb-4`}>
+          {/* 版本信息 + 操作按钮（合并为一行，始终展示） */}
+          <div className={`flex ${isMobile ? 'flex-col gap-4' : 'items-center justify-between'} mb-4`}>
               <Card size="small" className={isMobile ? 'w-full' : ''}>
                 <div className="flex flex-col gap-2">
                   {isMobile ? (
@@ -2133,8 +2132,6 @@ export const Scrapers = () => {
                 </Dropdown>
               )}
             </div>
-          )
-          }
 
           {/* 移动端：源操作按钮 */}
           {
