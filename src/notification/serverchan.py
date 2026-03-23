@@ -19,6 +19,7 @@ from src.notification.base import (
     BaseNotificationChannel, CommandResult,
     ChannelCapability, ChannelCapabilities,
 )
+from src._version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 bot_raw_logger = logging.getLogger("bot_raw")
@@ -412,7 +413,7 @@ class ServerChanChannel(BaseNotificationChannel):
                         try:
                             payload = {
                                 "chat_id": int(chat_id),
-                                "text": f"🔔 测试连接成功！\nBot: {name}\n来自 Misaka 弹幕服务器的测试消息。",
+                                "text": f"🔔 测试连接成功！\nBot: {name}\n来自 Misaka 弹幕服务器的测试消息。\n版本：v{APP_VERSION}",
                                 "silent": False,
                             }
                             await client.post(self._api_url("sendMessage"), json=payload, headers=relay_hdrs)

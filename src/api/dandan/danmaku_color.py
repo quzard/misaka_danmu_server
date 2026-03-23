@@ -21,8 +21,20 @@ DEFAULT_RANDOM_COLOR_PALETTE: List[int] = [
 DEFAULT_RANDOM_COLOR_MODE = "off"
 VALID_RANDOM_COLOR_MODES = {"off", "white_to_random", "all_random", "all_white", "highlight_only"}
 
-# 识别点赞弹幕的关键词（handle_danmaku_likes 会把 🤍/🔥 追加到 m 字段）
-_LIKE_KEYWORDS = ("🤍", "🔥")
+# 识别点赞弹幕的关键词（handle_danmaku_likes 会把各样式符号追加到 m 字段末尾）
+# num_only 样式用正则检测，避免 " +" 误匹配
+_LIKE_KEYWORDS = (
+    "\U0001f90d",      # heart_white  🤍
+    "\U0001fa75",      # heart_blue   🩵
+    "\U0001fa77",      # heart_pink   🩷
+    "\u2764",          # heart_red    ❤️ (U+2764，子串匹配覆盖带 FE0F 的版本)
+    "\u2661",          # heart_outline ♡ (U+2661)
+    "\U0001f525",      # fire          🔥
+    "[\U0001f44d",     # like_bracket  [👍
+    "(\u70b9\u8d5e",   # text 普通    (点赞
+    "(\u70ed\u95e8",   # text 热门    (热门
+)
+_LIKE_NUM_ONLY_RE = re.compile(r'\s\+\d+(?:\.\d+)?[wk]?$')
 
 # 重复弹幕高亮：最小重复次数为 3（颜色从随机色板中随机取，与普通弹幕行为一致）
 DEFAULT_REPEAT_HIGHLIGHT_MIN_COUNT: int = 3
@@ -174,6 +186,8 @@ def apply_random_color(
         for item in comments:
             m = item.get("m", "")
             is_like = any(kw in m for kw in _LIKE_KEYWORDS)
+            if not is_like:
+                is_like = bool(_LIKE_NUM_ONLY_RE.search(m))
             if is_like:
                 p_attr = item.get("p", "")
                 if p_attr:

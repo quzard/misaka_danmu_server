@@ -19,6 +19,7 @@ from src.core import get_now
 from src.core.cache import get_cache_backend
 from src.services import ScraperManager, TaskManager
 from src.utils import parse_search_keyword, sample_comments_evenly, record_play_history, handle_danmaku_likes, strip_danmaku_likes
+from src.utils import restyle_danmaku_likes
 from src.rate_limiter import RateLimiter
 from src import tasks
 
@@ -146,7 +147,13 @@ async def get_external_comments_from_url(
             episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
             comments_data = await scraper.get_comments(episode_id_for_comments)
             likes_enabled = (await config_manager.get('danmakuLikesOutputEnabled', 'true')).lower() == 'true'
-            comments_data = handle_danmaku_likes(comments_data, scraper.likes_fire_threshold, enabled=likes_enabled)
+            likes_style = await config_manager.get('danmakuLikesStyle', 'heart_white')
+            # likes_style='off' 等价于 enabled=False
+            comments_data = handle_danmaku_likes(
+                comments_data, scraper.likes_fire_threshold,
+                enabled=likes_enabled and likes_style != 'off',
+                style=likes_style
+            )
 
             # 修正：使用 scraper.provider_name 修复未定义的 'provider' 变量
             if not comments_data: logger.warning(f"未能从 {scraper.provider_name} URL 获取任何弹幕: {url}")
@@ -1172,6 +1179,12 @@ async def get_comments_for_dandan(
         likes_output_enabled = (await config_manager.get('danmakuLikesOutputEnabled', 'true')).lower() == 'true'
         if not likes_output_enabled and comments_data:
             comments_data = strip_danmaku_likes(comments_data)
+        elif likes_output_enabled and comments_data:
+            likes_style = await config_manager.get('danmakuLikesStyle', 'heart_white')
+            if likes_style == 'off':
+                comments_data = strip_danmaku_likes(comments_data)
+            else:
+                comments_data = restyle_danmaku_likes(comments_data, style=likes_style)
     except Exception as e:
         logger.error(f"应用点赞状态过滤失败: {e}", exc_info=True)
 

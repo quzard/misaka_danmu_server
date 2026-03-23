@@ -12,6 +12,8 @@ import {
   setDanmakuChConvertPriority,
   getDanmakuLikesOutputEnabled,
   setDanmakuLikesOutputEnabled,
+  getDanmakuLikesStyle,
+  setDanmakuLikesStyle,
   getDanmakuRandomColorMode,
   setDanmakuRandomColorMode,
   getDanmakuRandomColorPalette,
@@ -86,7 +88,7 @@ export const OutputManage = () => {
   const [blacklistSaveLoading, setBlacklistSaveLoading] = useState(false)
   const [chConvert, setChConvert] = useState('0')
   const [chConvertPriority, setChConvertPriority] = useState('player')
-  const [likesOutputEnabled, setLikesOutputEnabled] = useState(true)
+  const [likesStyle, setLikesStyle] = useState('heart_white')
 
   const messageApi = useMessage()
 
@@ -112,7 +114,13 @@ export const OutputManage = () => {
       setBlacklistPatterns(blacklistPatternsRes.data?.value || '')
       setChConvert(chConvertRes.data?.value || '0')
       setChConvertPriority(chConvertPriorityRes.data?.value || 'player')
-      setLikesOutputEnabled(likesOutputRes.data?.value !== 'false')
+      const rawStyle = await getDanmakuLikesStyle()
+      // 兼容旧配置：danmakuLikesOutputEnabled=false 时映射为 off
+      if (likesOutputRes.data?.value === 'false') {
+        setLikesStyle('off')
+      } else {
+        setLikesStyle(rawStyle.data?.value || 'heart_white')
+      }
     } catch (e) {
       console.log(e)
       messageApi.error('获取配置失败')
@@ -129,7 +137,8 @@ export const OutputManage = () => {
         setDanmakuMergeOutputEnabled({ value: mergeEnabled ? 'true' : 'false' }),
         setDanmakuChConvert({ value: chConvert }),
         setDanmakuChConvertPriority({ value: chConvertPriority }),
-        setDanmakuLikesOutputEnabled({ value: likesOutputEnabled ? 'true' : 'false' }),
+        setDanmakuLikesOutputEnabled({ value: likesStyle !== 'off' ? 'true' : 'false' }),
+        setDanmakuLikesStyle({ value: likesStyle !== 'off' ? likesStyle : 'heart_white' }),
       ])
       messageApi.success('弹幕输出配置已保存')
     } catch (e) {
@@ -214,11 +223,23 @@ export const OutputManage = () => {
               </div>
               <div className="flex items-center gap-2">
                 <span>输出点赞状态</span>
-                <Switch
-                  checked={likesOutputEnabled}
-                  onChange={setLikesOutputEnabled}
+                <Select
+                  value={likesStyle}
+                  style={{ width: 175 }}
+                  onChange={setLikesStyle}
+                  options={[
+                    { label: '🚫 关闭', value: 'off' },
+                    { label: '🤍/🔥 默认', value: 'heart_white' },
+                    { label: '🩵/🔥 蓝心', value: 'heart_blue' },
+                    { label: '🩷/🔥 粉心', value: 'heart_pink' },
+                    { label: '❤️/🔥 红心', value: 'heart_red' },
+                    { label: '♡/🔥 空心', value: 'heart_outline' },
+                    { label: '[👍]/[🔥] 方括号', value: 'like_bracket' },
+                    { label: '(点赞)/(热门) 文字', value: 'text' },
+                    { label: '+数字 纯数字', value: 'num_only' },
+                  ]}
                 />
-                <Tooltip title="启用后，达到阈值的点赞数会以 🤍/🔥 + 数字的形式追加到弹幕内容末尾">
+                <Tooltip title="选择点赞数的显示样式，达到热度阈值时显示🔥。选择"关闭"则不显示点赞信息">
                   <QuestionCircleOutlined className="text-gray-400 cursor-help" />
                 </Tooltip>
               </div>
