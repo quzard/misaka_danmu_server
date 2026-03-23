@@ -136,7 +136,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiProvider': ('deepseek', 'AI提供商: deepseek, siliconflow, openai, gemini'),
             'aiApiKey': ('', 'AI服务的API密钥'),
             'aiBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
-            'aiModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, Qwen/Qwen2.5-7B-Instruct, gpt-4'),
+            'aiModel': ('', 'AI模型名称，通过提供商接口刷新获取，如: deepseek-chat, gpt-4o, gemini-2.5-flash'),
             'aiPrompt': (ai_prompts.get('DEFAULT_AI_MATCH_PROMPT', ''), 'AI智能匹配提示词'),
             'aiRecognitionEnabled': ('false', '是否启用AI辅助识别。启用后，在TMDB自动刮削任务中使用AI识别标题和季度信息。'),
             'aiRecognitionPrompt': (ai_prompts.get('DEFAULT_AI_RECOGNITION_PROMPT', ''), 'AI辅助识别提示词'),

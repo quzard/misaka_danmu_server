@@ -321,15 +321,49 @@ class NotificationService(
         if event_type == "webhook_triggered":
             anime = data.get("anime_title", "未知")
             source = data.get("webhook_source", "")
-            return (label, f"媒体: {anime}\n来源: {source}")
+            delayed = data.get("delayed", False)
+            delay_hours = data.get("delay_hours", "")
+            wh_lines = [f"📺 媒体：{anime}", f"📡 来源：{source}"]
+            if delayed:
+                wh_lines.append(f"⏳ 延迟入库：{delay_hours} 小时后执行")
+            else:
+                wh_lines.append("⚡ 即时导入")
+            return (label, "\n".join(wh_lines))
 
         # 通用任务类消息
+        icon = "✅" if is_success else "❌"
+        search_term = data.get("search_term", "")
+        search_type = data.get("search_type", "")
+        season = data.get("season")
+        episode = data.get("episode")
+        task_id = data.get("task_id", "")
+        anime_title = data.get("anime_title", "")
+        ep_count = data.get("episode_count")
+        webhook_source = data.get("webhook_source", "")
         lines = []
         if task_title:
-            lines.append(f"任务: {task_title}")
+            lines.append(f"📋 任务：{task_title}")
+        if anime_title and anime_title != task_title:
+            lines.append(f"📺 媒体：{anime_title}")
+        if search_term:
+            type_label = {"keyword": "关键词", "tmdb": "TMDB", "tvdb": "TVDB",
+                          "douban": "豆瓣", "imdb": "IMDB", "bangumi": "Bangumi"}.get(search_type, search_type)
+            suffix = f"（{type_label}）" if type_label else ""
+            lines.append(f"🔍 搜索词：{search_term}{suffix}")
+        if season is not None:
+            ep_str = f"  E{episode}" if episode else ""
+            lines.append(f"📅 季集：第 {season} 季{ep_str}")
+        if ep_count is not None:
+            lines.append(f"📝 导入集数：{ep_count} 集")
+        if webhook_source:
+            lines.append(f"📡 来源：{webhook_source}")
         if message:
-            lines.append(f"{'结果' if is_success else '错误'}: {message}")
-        return (label, "\n".join(lines) if lines else label)
+            msg_prefix = "💬 结果" if is_success else "⚠️ 错误"
+            msg_short = message if len(message) <= 200 else message[:197] + "..."
+            lines.append(f"{msg_prefix}：{msg_short}")
+        if task_id:
+            lines.append(f"🆔 任务ID：`{task_id}`")
+        return (f"{icon} {label}", "\n".join(lines) if lines else label)
 
     # ═══════════════════════════════════════════
     # 命令实现

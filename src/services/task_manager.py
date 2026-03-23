@@ -179,12 +179,24 @@ class TaskManager:
                 pass  # imageUrl 获取失败不影响通知发出
 
         try:
+            params = task.task_parameters or {}
+            # 提取任务参数中的上下文字段，供通知格式化使用
+            extra = {
+                "search_term": params.get("searchTerm", ""),
+                "search_type": str(params.get("searchType", "")).replace("AutoImportSearchType.", "").lower(),
+                "season": params.get("season"),
+                "episode": params.get("episode"),
+                "anime_title": params.get("animeTitle", "") or params.get("anime_title", ""),
+                "episode_count": params.get("episodeCount"),
+                "webhook_source": params.get("webhookSource", ""),
+            }
             await self._notification_service.emit_event(event_type, {
                 "task_title": task.title,
                 "message": message,
                 "task_id": task.task_id,
                 "unique_key": task.unique_key or "",
                 "image_url": image_url,
+                **extra,
             })
         except Exception as e:
             self.logger.error(f"发射通知事件 {event_type} 失败: {e}")

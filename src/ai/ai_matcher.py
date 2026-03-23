@@ -18,6 +18,19 @@ ProviderSearchInfo = models.ProviderSearchInfo
 logger = logging.getLogger(__name__)
 ai_responses_logger = logging.getLogger("ai_responses")
 
+
+def _get_max_tokens_param(model: str, n: int) -> dict:
+    """根据模型名返回正确的 token 限制参数名。
+
+    OpenAI o1/o3/o4 系列及 gpt-4.1 系列已将 max_tokens 改为
+    max_completion_tokens，传旧参数名会触发 API 报错。
+    其他兼容接口（deepseek/siliconflow 等）仍使用 max_tokens。
+    """
+    new_series = ("o1", "o3", "o4", "gpt-4.1", "gpt-4o-2024")
+    if any(model.startswith(p) for p in new_series):
+        return {"max_completion_tokens": n}
+    return {"max_tokens": n}
+
 # 从 ai_prompts 导入提示词
 from .ai_prompts import (
     DEFAULT_AI_MATCH_PROMPT,
@@ -1378,7 +1391,7 @@ class AIMatcher:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.1,
-                    max_tokens=50
+                    **_get_max_tokens_param(self.model, 50)
                 )
                 content = _extract_openai_content(response)
                 if content is None:
