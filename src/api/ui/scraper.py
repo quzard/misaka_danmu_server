@@ -64,8 +64,13 @@ async def get_scraper_settings(
 
         full_setting_data['verificationEnabled'] = verification_enabled
 
-        s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
-        result.append(s_with_config)
+        try:
+            s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
+            result.append(s_with_config)
+        except Exception as e:
+            logger.warning(
+                f"搜索源 '{provider_name}' 数据校验失败，已跳过（不影响其他源）: {e}"
+            )
 
     return result
 

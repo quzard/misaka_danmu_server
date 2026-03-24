@@ -122,7 +122,7 @@ const AutoMatchSetting = () => {
         aiProvider: providerValue,
         aiApiKey: apiKeyRes.data.value || '',
         aiBaseUrl: baseUrlRes.data.value || '',
-        aiModel: modelRes.data.value || 'deepseek-chat',
+        aiModel: modelRes.data.value || '',
         aiPrompt: promptRes.data.value || '',
         aiRecognitionEnabled: recognition,
         aiRecognitionPrompt: recognitionPromptRes.data.value || '',
@@ -186,23 +186,20 @@ const AutoMatchSetting = () => {
       const defaultProviders = [
         {
           id: 'deepseek',
-          displayName: 'DeepSeek (推荐)',
-          defaultModel: 'deepseek-chat',
-          modelPlaceholder: 'deepseek-chat',
+          displayName: 'DeepSeek',
+          modelPlaceholder: '请通过刷新按钮获取模型列表',
           baseUrlPlaceholder: 'https://api.deepseek.com (默认)'
         },
         {
           id: 'siliconflow',
           displayName: 'SiliconFlow 硅基流动',
-          defaultModel: 'Qwen/Qwen2.5-7B-Instruct',
-          modelPlaceholder: 'Qwen/Qwen2.5-7B-Instruct, deepseek-ai/DeepSeek-V2.5',
+          modelPlaceholder: '请通过刷新按钮获取模型列表',
           baseUrlPlaceholder: 'https://api.siliconflow.cn/v1 (默认)'
         },
         {
           id: 'openai',
           displayName: 'OpenAI (兼容接口)',
-          defaultModel: 'gpt-4-turbo',
-          modelPlaceholder: 'gpt-4, gpt-4-turbo, gpt-3.5-turbo',
+          modelPlaceholder: '请通过刷新按钮获取模型列表',
           baseUrlPlaceholder: 'https://api.openai.com/v1 (默认) 或自定义兼容接口'
         }
       ]

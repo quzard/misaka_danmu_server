@@ -308,6 +308,12 @@ export const getDanmakuLikesOutputEnabled = () =>
 /** 弹幕输出配置 输出点赞状态开关 */
 export const setDanmakuLikesOutputEnabled = data =>
   api.put('/api/ui/config/danmakuLikesOutputEnabled', data)
+/** 弹幕输出配置 点赞显示样式 */
+export const getDanmakuLikesStyle = () =>
+  api.get('/api/ui/config/danmakuLikesStyle')
+/** 弹幕输出配置 点赞显示样式 */
+export const setDanmakuLikesStyle = data =>
+  api.put('/api/ui/config/danmakuLikesStyle', data)
 /** 弹幕存储配置 获取点赞开关 */
 export const getDanmakuLikesFetchEnabled = () =>
   api.get('/api/ui/config/danmakuLikesFetchEnabled')

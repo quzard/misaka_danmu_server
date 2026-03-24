@@ -86,6 +86,8 @@ class BaseWebhook(ABC):
                         "anime_title": payload.get("animeTitle", "未知"),
                         "webhook_source": webhook_source,
                         "task_title": task_title,
+                        "delayed": delayed_enabled,
+                        "delay_hours": delay_hours if delayed_enabled else 0,
                     })
                 except Exception as e:
                     self.logger.error(f"发射 webhook_triggered 事件失败: {e}")

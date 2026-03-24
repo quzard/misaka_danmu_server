@@ -271,6 +271,16 @@ async def update_task_progress_in_history(
     await session.commit()
 
 
+async def update_task_title_in_history(session: AsyncSession, task_id: str, new_title: str):
+    """更新任务历史记录的标题（用于在任务运行中动态反映匹配结果）"""
+    await session.execute(
+        update(TaskHistory)
+        .where(TaskHistory.taskId == task_id)
+        .values(title=new_title, updatedAt=get_now())
+    )
+    await session.commit()
+
+
 async def finalize_task_in_history(session: AsyncSession, task_id: str, status: str, description: str):
     """完成任务"""
     await session.execute(

@@ -215,6 +215,7 @@ class ScraperManager:
         # 使用 pkgutil 发现模块，这对于 .py, .pyc, .so 文件都有效。
         # 我们需要同时处理源码和编译后的情况。
         # 对文件列表排序以确保每次发现的顺序一致
+        failed_providers: list = []  # import 失败的源，同步数据库时保留，不删除
         for file_path in sorted(scrapers_dir.iterdir()):
             # 我们只关心 .py 文件或已知的二进制扩展名
             if not (file_path.name.endswith(".py") or file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
@@ -276,9 +277,11 @@ class ScraperManager:
                 else:
                     # 正常处理其他 TypeError
                     logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)
+                failed_providers.append(module_name_stem)
             except Exception as e:
                 # 使用标准日志记录器
                 logging.getLogger(__name__).error(f"加载搜索源模块 {module_name} 失败，已跳过。错误: {e}", exc_info=True)
+                failed_providers.append(module_name_stem)
         
         # 在同步数据库之前，注册所有发现的默认配置
         if default_configs_to_register:
@@ -289,9 +292,10 @@ class ScraperManager:
         async with self._session_factory() as session:
             # 1. 仅当发现基于文件的搜索源时，才清理过时的条目。
             #    这是一个安全措施，防止在发现过程失败时意外清空数据库。
+            #    import 失败的源也保留（不能因为依赖问题就删掉数据库记录）。
             #    我们总是将 'custom' 添加到要保留的列表中。
             if discovered_providers:
-                providers_to_keep = discovered_providers + ['custom']
+                providers_to_keep = discovered_providers + failed_providers + ['custom']
                 await crud.remove_stale_scrapers(session, providers_to_keep)
             
             # 2. 确保所有发现的搜索源和 'custom' 源都存在于数据库中。

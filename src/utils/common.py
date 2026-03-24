@@ -33,15 +33,33 @@ def clean_xml_string(xml_string: str) -> str:
     )
     return invalid_xml_char_re.sub('', xml_string)
 
-def handle_danmaku_likes(comments: List[Dict[str, Any]], fire_threshold: int = 1000, enabled: bool = True) -> List[Dict[str, Any]]:
+def handle_danmaku_likes(
+    comments: List[Dict[str, Any]],
+    fire_threshold: int = 1000,
+    enabled: bool = True,
+    style: str = "heart_white"
+) -> List[Dict[str, Any]]:
     """
     处理弹幕点赞数，移除 like 字段；当 enabled=True 时将格式化后的点赞信息追加到弹幕内容末尾。
 
-    - l >= fire_threshold → 🔥，否则 🤍（阈值由各源的 likes_fire_threshold 决定）
-    - 最低显示阈值：like >= 5
-    - 格式化：>= 10000 → "1.2w"，>= 1000 → "1.2k"，否则直接数字
+    style 可选值：
+      heart_white   → 🤍 128 / 🔥 1.2k  (默认)
+      heart_blue    → 🩵 128 / 🔥 1.2k
+      heart_pink    → 🩷 128 / 🔥 1.2k
+      heart_red     → ❤️ 128 / 🔥 1.2k
+      heart_outline → ♡ 128  / 🔥 1.2k  (空心线条)
+      like_bracket  → [👍128] / [🔥1.2k]
+      text          → (点赞128) / (热门1.2k)
+      num_only      → +128 / +1.2k
     """
     MIN_LIKE = 5
+
+    # 普通点赞符号映射
+    _NORMAL_EMOJI = {
+        "heart_white":   "🤍",
+        "heart_red":     "❤️",
+        "heart_outline": "♡",
+    }
 
     def _fmt(n: int) -> str:
         if n >= 10000:
@@ -50,22 +68,102 @@ def handle_danmaku_likes(comments: List[Dict[str, Any]], fire_threshold: int = 1
             return f"{n / 1000:.1f}k"
         return str(n)
 
+    def _suffix(like: int) -> str:
+        n = _fmt(like)
+        is_fire = like >= fire_threshold
+        if style in _NORMAL_EMOJI:
+            sym = "🔥" if is_fire else _NORMAL_EMOJI[style]
+            return f" {sym} {n}"
+        if style == "like_bracket":
+            sym = "🔥" if is_fire else "👍"
+            return f" [{sym}{n}]"
+        if style == "text":
+            word = "热门" if is_fire else "点赞"
+            return f" ({word}{n})"
+        if style == "num_only":
+            return f" +{n}"
+        # 未知 style 回退到默认
+        sym = "🔥" if is_fire else "🤍"
+        return f" {sym} {n}"
+
     for item in comments:
         like = item.pop('l', None)
         if enabled and like and isinstance(like, (int, float)) and like >= MIN_LIKE:
-            emoji = '🔥' if like >= fire_threshold else '🤍'
-            item['m'] = f"{item.get('m', '')} {emoji} {_fmt(int(like))}"
+            item['m'] = f"{item.get('m', '')}{_suffix(int(like))}"
 
     return comments
 
 
-_LIKES_SUFFIX_RE = re.compile(r'\s+[🤍🔥]\s+\d+(?:\.\d+)?[wk]?$')
+# 匹配所有样式后缀，用于 strip
+_LIKES_SUFFIX_RE = re.compile(
+    r'(?:'
+    r'\s+[🤍🩵🩷❤♡🔥]\s+\d+(?:\.\d+)?[wk]?'   # heart_* / fire
+    r'|'
+    r'\s+\[[👍🔥]\d+(?:\.\d+)?[wk]?\]'           # like_bracket
+    r'|'
+    r'\s+\((?:点赞|热门)\d+(?:\.\d+)?[wk]?\)'    # text
+    r'|'
+    r'\s+\+\d+(?:\.\d+)?[wk]?'                    # num_only
+    r')$'
+)
 
 def strip_danmaku_likes(comments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for item in comments:
         m = item.get('m', '')
         if m:
             item['m'] = _LIKES_SUFFIX_RE.sub('', m)
+    return comments
+
+
+# 匹配存量 XML 中写入的默认样式后缀，用于重新格式化
+# 格式：空格 + (🤍/🔥) + 空格 + 数字[wk]?
+_LEGACY_LIKES_RE = re.compile(
+    r'\s+([🤍🔥])\s+(\d+(?:\.\d+)?[wk]?)$'
+)
+
+
+def restyle_danmaku_likes(
+    comments: List[Dict[str, Any]],
+    style: str
+) -> List[Dict[str, Any]]:
+    """
+    将存量 XML 中以默认样式（🤍/🔥 + 数字）写入的点赞后缀，
+    转换为指定 style 对应的格式。
+    heart_white 样式保持不变直接返回。
+    """
+    if style == "heart_white":
+        return comments
+
+    _NORMAL_EMOJI = {
+        "heart_white":   "🤍",
+        "heart_red":     "❤️",
+        "heart_outline": "♡",
+    }
+
+    def _convert(m: str) -> str:
+        match = _LEGACY_LIKES_RE.search(m)
+        if not match:
+            return m
+        orig_sym, num = match.group(1), match.group(2)
+        is_fire = orig_sym == "🔥"
+        base = m[:match.start()]
+        if style in _NORMAL_EMOJI:
+            sym = "🔥" if is_fire else _NORMAL_EMOJI[style]
+            return f"{base} {sym} {num}"
+        if style == "like_bracket":
+            sym = "🔥" if is_fire else "👍"
+            return f"{base} [{sym}{num}]"
+        if style == "text":
+            word = "热门" if is_fire else "点赞"
+            return f"{base} ({word}{num})"
+        if style == "num_only":
+            return f"{base} +{num}"
+        return m
+
+    for item in comments:
+        m = item.get('m', '')
+        if m:
+            item['m'] = _convert(m)
     return comments
 
 

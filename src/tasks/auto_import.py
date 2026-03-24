@@ -19,6 +19,11 @@ from src.utils import (
 logger = logging.getLogger(__name__)
 
 
+def _get_auto_import_media_type():
+    from src.api.control.models import AutoImportMediaType
+    return AutoImportMediaType
+
+
 # 延迟导入辅助函数
 def _get_unified_search():
     from src.services.search import unified_search
@@ -197,7 +202,7 @@ async def auto_search_and_import_task(
                 else:
                     logger.info(f"TMDB反查功能未启用或不支持源 '{effective_search_type}'，继续使用原标题: '{main_title}'")
             if hasattr(details, 'type') and details.type:
-                media_type = models.AutoImportMediaType(details.type)
+                media_type = _get_auto_import_media_type()(details.type)
             if hasattr(details, 'year') and details.year:
                 year = details.year
 

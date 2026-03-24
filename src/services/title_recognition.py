@@ -192,8 +192,16 @@ class TitleRecognitionManager:
         elif target.startswith('{[') and target.endswith(']}'):
             metadata_info = self._parse_metadata_target(target)
             if metadata_info:
+                # 检查是否包含部分集数偏移信息（ep_range + ep_offset）
+                if 'ep_range' in metadata_info and 'ep_offset' in metadata_info:
+                    logger.debug(f"解析部分集数偏移规则: {source} => {target}")
+                    metadata_copy = metadata_info.copy()
+                    if 'source' in metadata_copy:
+                        metadata_copy['source_restriction'] = metadata_copy.pop('source')
+                    metadata_copy['source'] = source
+                    return TitleRecognitionRule('partial_offset', 'postprocess', **metadata_copy)
                 # 检查是否包含季度偏移信息
-                if 'season_offset' in metadata_info:
+                elif 'season_offset' in metadata_info:
                     logger.debug(f"解析季度偏移规则: {source} => {target}")
                     # 重命名source参数为source_restriction以避免冲突
                     metadata_copy = metadata_info.copy()
@@ -301,6 +309,20 @@ class TitleRecognitionManager:
                     metadata[key] = int(value)
                 except ValueError:
                     continue
+            elif key == 'ep_range':
+                # 解析集数范围，格式：1-12
+                range_parts = value.split('-', 1)
+                if len(range_parts) == 2:
+                    try:
+                        ep_start = int(range_parts[0].strip())
+                        ep_end_raw = range_parts[1].strip()
+                        ep_end = None if ep_end_raw == '*' else int(ep_end_raw)
+                        metadata['ep_range'] = (ep_start, ep_end)
+                    except ValueError:
+                        continue
+            elif key == 'ep_offset':
+                # 集数偏移量，如 +12、-12、EP+5 等，保留字符串交由计算方法处理
+                metadata['ep_offset'] = value
             elif key in ['type', 's', 'e', 'source', 'season_offset', 'title', 'search_season']:
                 if key == 'search_season':
                     try:
@@ -630,6 +652,25 @@ class TitleRecognitionManager:
                 else:
                     logger.debug(f"○ 季度偏移规则不匹配: '{processed_text}' 不匹配 '{rule.data['source']}'")
 
+            elif rule.rule_type == 'partial_offset':
+                # 部分集数偏移规则：标题匹配 + 集数在范围内才偏移
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"跳过部分集数偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
+                    new_episode = self._apply_partial_episode_offset(
+                        processed_episode,
+                        rule.data['ep_range'],
+                        rule.data['ep_offset']
+                    )
+                    if new_episode != processed_episode:
+                        processed_episode = new_episode
+                        has_changed = True
+                        logger.info(f"✓ 部分集数偏移: '{rule.data['source']}' 第{episode}集 => 第{processed_episode}集 (范围: {rule.data['ep_range']}, 偏移: {rule.data['ep_offset']})")
+
         return processed_text, processed_episode, processed_season, has_changed, metadata_info
 
     def _exact_match(self, text: str, pattern: str) -> bool:
@@ -665,9 +706,50 @@ class TitleRecognitionManager:
             rule.data['offset']
         )
 
+    def _apply_partial_episode_offset(self, episode: Optional[int], ep_range: Tuple, ep_offset: str) -> Optional[int]:
+        """
+        应用部分集数偏移规则
+
+        Args:
+            episode: 当前集数
+            ep_range: 集数范围元组 (start, end)，end 为 None 表示无上限
+            ep_offset: 偏移表达式，支持 +N、-N、EP+N、EP-N 等
+
+        Returns:
+            偏移后的集数，若当前集数不在范围内则返回原值
+        """
+        if episode is None:
+            return episode
+
+        ep_start, ep_end = ep_range
+        # 检查集数是否在范围内
+        in_range = episode >= ep_start and (ep_end is None or episode <= ep_end)
+        if not in_range:
+            return episode
+
+        try:
+            offset_expr = ep_offset.strip()
+            if offset_expr.upper().startswith('EP'):
+                # EP 变量表达式，如 EP+5、EP-12
+                calc_expr = offset_expr.upper().replace('EP', str(episode))
+                new_episode = eval(calc_expr)
+            elif offset_expr.startswith('+'):
+                new_episode = episode + int(offset_expr[1:])
+            elif offset_expr.startswith('-'):
+                new_episode = episode - int(offset_expr[1:])
+            else:
+                new_episode = episode + int(offset_expr)
+
+            result = max(1, int(new_episode))
+            logger.debug(f"部分集数偏移: 第{episode}集 ({ep_offset}) => 第{result}集")
+            return result
+        except Exception as e:
+            logger.warning(f"部分集数偏移计算失败: episode={episode}, offset={ep_offset}, 错误: {e}")
+            return episode
+
     def _apply_episode_offset_with_locators(self, text: str, episode: Optional[int],
-                                          before_locator: str, after_locator: str,
-                                          offset: str) -> Optional[int]:
+        before_locator: str, after_locator: str,
+        offset: str) -> Optional[int]:
         """
         使用定位词应用集数偏移
 

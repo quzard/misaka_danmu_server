@@ -672,12 +672,17 @@ async def test_ai_connection(
             "Content-Type": "application/json"
         }
 
+        # 新版 OpenAI 模型（o1/o3/o4/gpt-4.1 系列）使用 max_completion_tokens
+        _new_series = ("o1", "o3", "o4", "gpt-4.1", "gpt-4o-2024")
+        _token_key = "max_completion_tokens" if any(
+            request.model.startswith(p) for p in _new_series
+        ) else "max_tokens"
         payload = {
             "model": request.model,
             "messages": [
                 {"role": "user", "content": "Hello"}
             ],
-            "max_tokens": 10
+            _token_key: 10
         }
 
         # 发送测试请求

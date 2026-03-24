@@ -68,6 +68,11 @@ async def get_title_recognition_content(
 # 某动画第5季 => {[source=bilibili;season_offset=5+3]}
 # 错误标题 => {[source=iqiyi;title=正确标题;season_offset=*+1]}
 
+# 7. 部分集数偏移：只对指定集数范围内的剧集应用偏移
+# 某动画(下) => {[ep_range=1-12;ep_offset=+12]}
+# 某动画第二期 => {[ep_range=1-24;ep_offset=-24;source=bilibili]}
+# 某动画 => {[ep_range=13-*;ep_offset=-12]}
+
 # 集偏移支持运算：
 # EP+1：集数加1
 # 2*EP：集数翻倍
@@ -79,6 +84,12 @@ async def get_title_recognition_content(
 # 9-1：第9季减1变成第8季
 # *+4：所有季度都加4
 # *>1：所有季度都改为第1季
+
+# 部分集数偏移说明：
+# ep_range=1-12：只对第1到12集生效
+# ep_range=13-*：只对第13集及之后生效（无上限）
+# ep_offset=+12 / -12 / EP+12：偏移量，支持正负数和EP变量
+# source=bilibili：可选，限定只对特定源生效
 """
             return TitleRecognitionContent(content=default_content)
         

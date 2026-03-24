@@ -73,7 +73,7 @@ class AutoMenuMixin:
         )
 
     async def cb_auto_media_type(self, params, user_id, channel, **kw):
-        """选择媒体类型 → 电影直接导入，电视剧选季度"""
+        """选择媒体类型：电影直接导入，电视剧选季度"""
         media_type = params[0] if params else "tv_series"
         conv = self.get_conversation(user_id)
         if not conv:
@@ -82,7 +82,7 @@ class AutoMenuMixin:
         if media_type == "movie":
             self.clear_conversation(user_id)
             return await self._submit_auto_import(
-                search_type="keyword", search_term=search_term,
+                search_type=conv.data.get("search_type", "keyword"), search_term=search_term,
                 media_type="movie", edit_message_id=kw.get("message_id"),
             )
         conv.data["media_type"] = media_type
@@ -99,7 +99,7 @@ class AutoMenuMixin:
             buttons.append(row)
         buttons.append([{"text": "🔢 自动推断", "callback_data": "auto_season:0"}])
         return CommandResult(
-            text=f"关键词: {search_term}\n类型: 电视剧/番剧\n请选择季度：",
+            text=f"🔍 搜索词：{search_term}\n🗂 类型：电视剧/番剧\n\n请选择季度（或自动推断）：",
             reply_markup=buttons,
             edit_message_id=kw.get("message_id"),
         )
@@ -112,9 +112,10 @@ class AutoMenuMixin:
             return CommandResult(text="", answer_callback_text="操作已过期")
         search_term = conv.data.get("search_term", "")
         media_type = conv.data.get("media_type", "tv_series")
+        search_type = conv.data.get("search_type", "keyword")
         self.clear_conversation(user_id)
         return await self._submit_auto_import(
-            search_type="keyword", search_term=search_term,
+            search_type=search_type, search_term=search_term,
             media_type=media_type,
             season=season if season > 0 else None,
             edit_message_id=kw.get("message_id"),

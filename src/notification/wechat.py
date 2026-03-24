@@ -26,6 +26,7 @@ from src.notification.base import (
     BaseNotificationChannel,
     ChannelCapability, ChannelCapabilities, CommandResult,
 )
+from src._version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 bot_raw_logger = logging.getLogger("bot_raw")
@@ -510,7 +511,7 @@ class WeChatChannel(BaseNotificationChannel):
         if not token:
             return {"success": False, "message": "获取 access_token 失败，请检查 corp_id 和 corp_secret"}
         try:
-            await self.send_message("测试连接", "✅ Misaka 弹幕服务器 - 企业微信渠道连接测试成功！")
+            await self.send_message("测试连接", f"✅ Misaka 弹幕服务器 - 企业微信渠道连接测试成功！\n版本：v{APP_VERSION}")
             return {"success": True, "message": "连接成功！测试消息已发送"}
         except Exception as e:
             return {"success": False, "message": f"测试消息发送失败: {e}"}
