@@ -647,7 +647,10 @@ class TaskManager:
 
     def _get_progress_callback(self, task: Task) -> Callable:
         """为特定任务创建一个可暂停的回调闭包。"""
-        is_fallback = getattr(task, "queue_type", "") == "fallback"
+        queue_type = getattr(task, "queue_type", "download")
+        is_fallback = queue_type == "fallback"
+        # fallback 任务用 download_fallback_complete 开关；普通任务用 task_progress 开关
+        progress_check_key = "download_fallback_complete" if is_fallback else "task_progress"
 
         async def pausable_callback(progress: int, description: str, status: Optional[TaskStatus] = None):
             # 核心暂停逻辑：在每次更新进度前，检查暂停事件。
@@ -675,17 +678,18 @@ class TaskManager:
             except Exception as e:
                 self.logger.error(f"任务进度更新失败 (ID: {task.task_id}): {e}", exc_info=False)
 
-            # 后备任务：额外触发进度通知（TG 会 edit 已有消息）
-            if is_fallback and self._notification_service and progress < 100:
+            # 进度未完成时触发 TG 进度通知（TG 会 edit 已有消息，其他渠道跳过进度推送）
+            if self._notification_service and progress < 100:
                 try:
-                    await self._notification_service.emit_fallback_progress(
+                    await self._notification_service.emit_task_progress(
                         task_id=task.task_id,
                         task_title=task.title,
                         progress=int(progress),
                         description=description,
+                        check_event_key=progress_check_key,
                     )
                 except Exception as e:
-                    self.logger.debug(f"后备任务进度通知失败 (ID: {task.task_id}): {e}")
+                    self.logger.debug(f"任务进度通知失败 (ID: {task.task_id}): {e}")
 
         return pausable_callback
 

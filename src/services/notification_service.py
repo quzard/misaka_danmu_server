@@ -53,9 +53,10 @@ class NotificationService(
         self.notification_manager = None
         # 对话状态: user_id -> ConversationState
         self._conversations: Dict[str, ConversationState] = {}
-        # 后备任务消息跟踪: task_id -> {channel_id: message_id}
+        # 任务进度消息跟踪: task_id -> {channel_id: message_id}
         # 用于 TG edit_message 功能（发新消息后记录 message_id，后续进度更新时 edit）
-        self._fallback_tg_msg: Dict[str, Dict[str, int]] = {}
+        # 同时覆盖 fallback 和普通下载任务
+        self._task_progress_tg_msg: Dict[str, Dict[str, int]] = {}
 
     def set_dependencies(self, **kwargs):
         """注入系统依赖"""
@@ -270,12 +271,27 @@ class NotificationService(
     # 出站：通知发送（系统 → 用户）
     # ═══════════════════════════════════════════
 
+    # 有进度消息记录时，完成通知会 edit 已有消息（适用于所有任务类型）
+    _COMPLETE_EVENT_TYPES = {
+        "download_fallback_success", "download_fallback_failed",
+        "import_success", "import_failed",
+        "auto_import_success", "auto_import_failed",
+        "webhook_import_success", "webhook_import_failed",
+        "refresh_success", "refresh_failed",
+        "incremental_refresh_success", "incremental_refresh_failed",
+        "scheduled_task_complete", "scheduled_task_failed",
+    }
+
+    # fallback 完成事件与其订阅 key 的映射
+    _FALLBACK_COMPLETE_EVENTS = {"download_fallback_success", "download_fallback_failed"}
+
     async def emit_event(self, event_type: str, data: Dict[str, Any]):
         """向所有订阅了该事件的渠道发送通知"""
         if not self.notification_manager:
             return
         channels = self.notification_manager.get_all_channels()
-        is_fallback_complete = event_type in ("download_fallback_success", "download_fallback_failed")
+        is_fallback_complete = event_type in self._FALLBACK_COMPLETE_EVENTS
+        is_any_complete = event_type in self._COMPLETE_EVENT_TYPES
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
@@ -286,26 +302,29 @@ class NotificationService(
                 title, text = self._format_event_message(event_type, data)
                 image_url: str = data.get("image_url", "") or ""
                 task_id: str = data.get("task_id", "")
-                if is_fallback_complete and task_id:
-                    # fallback 完成：尝试 edit 已有进度消息，否则发新消息
-                    edit_mid = self._fallback_tg_msg.get(task_id, {}).get(ch_id)
+                # 任务完成时：若 TG 有已发进度消息，则 edit；否则发新消息
+                if is_any_complete and task_id:
+                    edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
                     msg_id_out: List[int] = []
                     await channel_instance.send_message(
                         title=title, text=text, image=image_url,
                         edit_message_id=edit_mid, _msg_id_out=msg_id_out
                     )
                     # 任务完成后清理缓存
-                    self._fallback_tg_msg.pop(task_id, None)
+                    self._task_progress_tg_msg.pop(task_id, None)
                 else:
                     await channel_instance.send_message(title=title, text=text, image=image_url)
             except Exception as e:
                 logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
 
-    async def emit_fallback_progress(self, task_id: str, task_title: str, progress: int, description: str):
-        """向所有订阅了 download_fallback_complete 的渠道发送后备任务进度（TG 会 edit 已有消息）
+    async def emit_task_progress(self, task_id: str, task_title: str, progress: int,
+                                  description: str, check_event_key: str = "task_progress"):
+        """向 TG 渠道发送任务进度通知（edit 已有消息，其他渠道不推送进度）
 
-        注：仅对支持消息编辑的渠道（如 Telegram）发送进度通知，
-        其他渠道（ServerChan、微信等）不支持 edit，跳过进度更新，仅在任务完成时收到一条通知。
+        Args:
+            check_event_key: 检查用户是否订阅的事件 key。
+                - fallback 任务传 "download_fallback_complete"
+                - 普通下载任务传 "task_progress"
         """
         if not self.notification_manager:
             return
@@ -313,14 +332,13 @@ class NotificationService(
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
-                if not events_cfg.get("download_fallback_complete", False):
+                if not events_cfg.get(check_event_key, False):
                     continue
-                # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送
+                # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送（完成时才收通知）
                 if getattr(channel_instance, "channel_type", "") != "telegram":
                     continue
-                title, text = self._format_fallback_progress_message(task_title, progress, description)
-                # 查已有消息 ID
-                edit_mid = self._fallback_tg_msg.get(task_id, {}).get(ch_id)
+                title, text = self._format_task_progress_message(task_title, progress, description)
+                edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
                 msg_id_out: List[int] = []
                 await channel_instance.send_message(
                     title=title, text=text,
@@ -328,9 +346,9 @@ class NotificationService(
                 )
                 # 记录新发出的 message_id（首次 send 时）
                 if msg_id_out and not edit_mid:
-                    self._fallback_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
+                    self._task_progress_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
             except Exception as e:
-                logger.debug(f"渠道 {ch_id} 发送后备进度通知失败: {e}")
+                logger.debug(f"渠道 {ch_id} 发送任务进度通知失败: {e}")
 
     # ═══════════════════════════════════════════
     # 事件消息格式化
@@ -427,8 +445,8 @@ class NotificationService(
             lines.append(f"🆔 任务ID：`{task_id}`")
         return (f"{icon} {label}", "\n".join(lines) if lines else label)
 
-    def _format_fallback_progress_message(self, task_title: str, progress: int, description: str) -> tuple:
-        """格式化后备任务进度消息，返回 (title, text)"""
+    def _format_task_progress_message(self, task_title: str, progress: int, description: str) -> tuple:
+        """格式化任务进度消息，返回 (title, text)，适用于后备和普通下载任务"""
         # 进度条：10格，每格10%
         filled = int(progress / 10)
         bar = "█" * filled + "░" * (10 - filled)
@@ -438,7 +456,7 @@ class NotificationService(
         lines.append(f"⏳ `[{bar}]` {progress}%")
         if description:
             lines.append(f"📝 {description}")
-        return ("⬇️ 后备弹幕下载中", "\n".join(lines))
+        return ("⬇️ 任务进行中", "\n".join(lines))
 
     # ═══════════════════════════════════════════
     # 命令实现
