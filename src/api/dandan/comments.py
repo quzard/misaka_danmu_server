@@ -538,7 +538,7 @@ async def get_comments_for_dandan(
                 try:
                     task_id, done_event = await task_manager.submit_task(
                         download_match_fallback_comments_task,
-                        f"匹配后备弹幕下载: episodeId={episodeId}",
+                        f"匹配后备弹幕下载: {final_title} 第{episode_number}集 [{provider}:{mediaId}]",
                         unique_key=task_unique_key,
                         task_type="download_comments",
                         queue_type="fallback"  # 使用后备队列
