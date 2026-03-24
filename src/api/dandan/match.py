@@ -345,6 +345,7 @@ async def get_match_for_item(
 
         # 将匹配后备逻辑包装成协程工厂
         match_fallback_result = {"response": None}  # 用于存储结果
+        task_id_ref = {"id": None}  # 用于在 coro_factory 内部回写更新后的标题
 
         async def match_fallback_coro_factory(session_inner: AsyncSession, progress_callback):
             """匹配后备任务的协程工厂"""
@@ -914,6 +915,15 @@ async def get_match_for_item(
                         final_season = converted_season if converted_season is not None else 1
                         logger.info(f"  - 应用入库后处理: '{best_match.title}' S{season or 1:02d} -> '{final_title}' S{final_season:02d}")
 
+                # 选出 best_match 后，更新任务标题以显示来源和媒体ID
+                if task_id_ref["id"]:
+                    ep_label = f" 第{episode_number}集" if episode_number and not is_movie else ""
+                    new_title = f"匹配后备: {final_title}{ep_label} [{best_match.provider}:{best_match.mediaId}]"
+                    try:
+                        await crud.update_task_title_in_history(session_inner, task_id_ref["id"], new_title)
+                    except Exception as _title_err:
+                        logger.debug(f"更新任务标题失败（非关键）: {_title_err}")
+
                 # 步骤5：分配虚拟animeId和真实episodeId
                 logger.info(f"步骤5：分配虚拟animeId和真实episodeId")
 
@@ -977,7 +987,7 @@ async def get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, mapping_key, mapping_data, FALLBACK_SEARCH_CACHE_TTL)
+                await set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, mapping_key, mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 # 存储episodeId映射
                 episode_mapping_key = f"fallback_episode_{real_episode_id}"
@@ -994,7 +1004,7 @@ async def get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
+                await set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 logger.info(f"匹配后备完成: virtual_anime_id={virtual_anime_id}, real_anime_id={real_anime_id}, episodeId={real_episode_id}")
 
@@ -1100,6 +1110,7 @@ async def get_match_for_item(
                 run_immediately=True,
                 queue_type="fallback"
             )
+            task_id_ref["id"] = task_id  # 赋值后 coro_factory 内部才能用来更新标题
             logger.info(f"匹配后备任务已提交: {task_id}")
 
             # 等待任务完成(最多30秒)

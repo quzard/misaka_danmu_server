@@ -62,6 +62,7 @@ def get_default_configs(settings=None, ai_prompts=None):
         'danmakuChConvertPriority': ('player', '简繁转换优先级。player-播放器优先（播放器明确指定时覆盖服务端配置），server-服务端优先（始终使用服务端配置）。'),
         'danmakuLikesFetchEnabled': ('true', '是否在下载弹幕时获取并存储点赞信息。关闭后新下载的弹幕不会包含点赞数据。'),
         'danmakuLikesOutputEnabled': ('true', '是否在弹幕输出中显示点赞状态。关闭后即使弹幕文件中包含点赞信息也不会输出。'),
+        'danmakuLikesStyle': ('heart_white', '点赞显示样式。可选：heart_white(🤍/🔥)、heart_red(❤️/🔥)、heart_outline(♡/🔥)、like_bracket([👍]/[🔥])、text(点赞/热门)、num_only(+数字)。danmakuLikesOutputEnabled=false 时此配置无效。'),
         'danmakuRandomColorMode': ('off', '弹幕颜色转换模式：off(不使用)、white_to_random(白色弹幕随机染色)、all_random(全部随机染色)、all_white(全部变白色)。'),
         'danmakuRandomColorPalette': (
             '16777215,16777215,16777215,16777215,16777215,16777215,16777215,16777215,16744319,16752762,16774799,9498256,8388564,8900346,14204888,16758465',
@@ -136,7 +137,7 @@ def get_default_configs(settings=None, ai_prompts=None):
             'aiProvider': ('deepseek', 'AI提供商: deepseek, siliconflow, openai, gemini'),
             'aiApiKey': ('', 'AI服务的API密钥'),
             'aiBaseUrl': ('', 'AI服务的Base URL (可选,用于自定义接口)'),
-            'aiModel': ('deepseek-chat', 'AI模型名称,如: deepseek-chat, Qwen/Qwen2.5-7B-Instruct, gpt-4'),
+            'aiModel': ('', 'AI模型名称，通过提供商接口刷新获取，如: deepseek-chat, gpt-4o, gemini-2.5-flash'),
             'aiPrompt': (ai_prompts.get('DEFAULT_AI_MATCH_PROMPT', ''), 'AI智能匹配提示词'),
             'aiRecognitionEnabled': ('false', '是否启用AI辅助识别。启用后，在TMDB自动刮削任务中使用AI识别标题和季度信息。'),
             'aiRecognitionPrompt': (ai_prompts.get('DEFAULT_AI_RECOGNITION_PROMPT', ''), 'AI辅助识别提示词'),

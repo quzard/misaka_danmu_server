@@ -9,6 +9,7 @@ import json
 import logging
 import threading
 from typing import Any, Dict, List, Optional
+from src._version import APP_VERSION
 
 from src.notification.base import (
     BaseNotificationChannel, CommandResult,
@@ -530,7 +531,7 @@ class TelegramChannel(BaseNotificationChannel):
                 try:
                     bot.send_message(
                         chat_id,
-                        f"🔔 测试连接成功！\nBot: @{info.username} ({info.first_name})\n来自 Misaka 弹幕服务器的测试消息。",
+                        f"🔔 测试连接成功！\nBot: @{info.username} ({info.first_name})\n来自 Misaka 弹幕服务器的测试消息。\n版本：v{APP_VERSION}",
                     )
                 except Exception as e:
                     self.logger.warning(f"测试消息发送失败: {e}")

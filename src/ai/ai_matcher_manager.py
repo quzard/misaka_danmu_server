@@ -57,7 +57,7 @@ class AIMatcherManager:
             "ai_match_provider": await self.config_manager.get("aiProvider", "deepseek"),
             "ai_match_api_key": await self.config_manager.get("aiApiKey", ""),
             "ai_match_base_url": await self.config_manager.get("aiBaseUrl", ""),
-            "ai_match_model": await self.config_manager.get("aiModel", "deepseek-chat"),
+            "ai_match_model": await self.config_manager.get("aiModel", ""),
             "ai_match_prompt": await self.config_manager.get("aiPrompt", ""),
             "ai_recognition_prompt": await self.config_manager.get("aiRecognitionPrompt", ""),
             "ai_alias_validation_prompt": await self.config_manager.get("aiAliasValidationPrompt", ""),

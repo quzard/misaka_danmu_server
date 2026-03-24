@@ -171,7 +171,7 @@ const SortableItem = ({
 }
 
 export const Scrapers = () => {
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [list, setList] = useState([])
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
@@ -326,14 +326,24 @@ export const Scrapers = () => {
   }, [])
 
   const getInfo = async () => {
+    let scraperList = []
     try {
       setLoading(true)
-      const [res1, res2] = await Promise.all([getScrapers(), getbiliUserinfo()])
-      setList(res1.data ?? [])
-      setBiliUserinfo(res2.data)
+      const res1 = await getScrapers()
+      scraperList = res1.data ?? []
+      setList(scraperList)
     } catch (error) {
     } finally {
       setLoading(false)
+    }
+    // bilibili 登录状态：仅当 bilibili 搜索源存在时才请求，避免无意义的报错
+    const hasBilibili = scraperList.some(s => s.providerName === 'bilibili')
+    if (hasBilibili) {
+      try {
+        const res2 = await getbiliUserinfo()
+        setBiliUserinfo(res2.data)
+      } catch (error) {
+      }
     }
   }
 
@@ -1786,9 +1796,8 @@ export const Scrapers = () => {
             </div>
           )}
 
-          {/* 版本信息 + 操作按钮（合并为一行） */}
-          {(versionInfo.localVersion !== 'unknown' || versionInfo.remoteVersion || versionInfo.officialVersion) && (
-            <div className={`flex ${isMobile ? 'flex-col gap-4' : 'items-center justify-between'} mb-4`}>
+          {/* 版本信息 + 操作按钮（合并为一行，始终展示） */}
+          <div className={`flex ${isMobile ? 'flex-col gap-4' : 'items-center justify-between'} mb-4`}>
               <Card size="small" className={isMobile ? 'w-full' : ''}>
                 <div className="flex flex-col gap-2">
                   {isMobile ? (
@@ -2128,8 +2137,6 @@ export const Scrapers = () => {
                 </Dropdown>
               )}
             </div>
-          )
-          }
 
           {/* 移动端：源操作按钮 */}
           {

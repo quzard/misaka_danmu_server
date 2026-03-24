@@ -49,8 +49,22 @@ class ImportBaseMixin:
                 task_type="auto_import",
                 task_parameters=payload.model_dump()
             )
+            type_label = {"keyword": "关键词", "tmdb": "TMDB", "tvdb": "TVDB",
+                          "douban": "豆瓣", "imdb": "IMDB", "bangumi": "Bangumi"}.get(search_type, search_type)
+            mt_label = {"tv_series": "📺 剧集", "movie": "🎬 电影"}.get(media_type or "", "")
+            lines = [
+                f"✅ 导入任务已提交",
+                f"🔍 搜索词：{search_term}（{type_label}）",
+            ]
+            if mt_label:
+                lines.append(f"🗂 类型：{mt_label}")
+            if season is not None:
+                ep_str = f"  E{episode}" if episode else ""
+                lines.append(f"📅 季集：第 {season} 季{ep_str}")
+            lines.append(f"🆔 任务ID：`{task_id}`")
             return CommandResult(
-                text=f"✅ 导入任务已提交\n标题: {search_term}\n任务ID: {task_id}",
+                text="\n".join(lines),
+                parse_mode="Markdown",
                 reply_markup=[[{"text": "📋 查看任务状态", "callback_data": f"task_detail:{task_id}"}]],
                 edit_message_id=edit_message_id,
             )

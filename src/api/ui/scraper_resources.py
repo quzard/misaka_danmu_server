@@ -292,7 +292,7 @@ async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, st
     Returns:
         包含 version 和 changelog 的字典，失败返回 None
     """
-    timeout_config = httpx.Timeout(30.0, read=30.0)  # 连接30秒，读取30秒
+    timeout_config = httpx.Timeout(15.0, read=8.0)  # 版本检查是非关键操作，超时快速失败
 
     for attempt in range(max_retries):
         try:
@@ -387,7 +387,7 @@ async def get_versions(
             # 区分日志：用户配置的仓库
             platform_name = "Gitee" if gitee_info else "GitHub"
             logger.info(f"[版本检查] 正在获取用户配置仓库版本 ({platform_name}): {repo_url}")
-            remote_info = await _fetch_package_info_with_retry(package_url, headers, proxy=proxy_to_use)
+            remote_info = await _fetch_package_info_with_retry(package_url, headers, max_retries=1, proxy=proxy_to_use)
             if remote_info:
                 remote_version = remote_info["version"]
                 remote_changelog = remote_info.get("changelog")
@@ -395,31 +395,31 @@ async def get_versions(
             else:
                 logger.warning(f"[版本检查] 用户配置仓库版本获取失败")
 
-        # 固定源仓库（官方仓库）版本
+        # 固定源仓库（官方仓库）版本——仅在用户已配置资源仓库时才请求，避免无谓的网络超时
         official_version = None
         official_changelog = None
-        try:
-            official_repo_info = parse_github_url("https://github.com/l429609201/Misaka-Scraper-Resources")
+        if repo_url:
+            try:
+                official_repo_info = parse_github_url("https://github.com/l429609201/Misaka-Scraper-Resources")
 
-            github_token = await config_manager.get("github_token", "")
-            headers_official = {}
-            if github_token:
-                headers_official["Authorization"] = f"Bearer {github_token}"
+                github_token = await config_manager.get("github_token", "")
+                headers_official = {}
+                if github_token:
+                    headers_official["Authorization"] = f"Bearer {github_token}"
 
-            official_base_url = _build_base_url(official_repo_info, "https://github.com/l429609201/Misaka-Scraper-Resources")
-            official_package_url = f"{official_base_url}/package.json"
+                official_base_url = _build_base_url(official_repo_info, "https://github.com/l429609201/Misaka-Scraper-Resources")
+                official_package_url = f"{official_base_url}/package.json"
 
-            # 区分日志：官方仓库
-            logger.info(f"[版本检查] 正在获取官方仓库版本 (GitHub): https://github.com/l429609201/Misaka-Scraper-Resources")
-            official_info = await _fetch_package_info_with_retry(official_package_url, headers_official, proxy=proxy_to_use)
-            if official_info:
-                official_version = official_info["version"]
-                official_changelog = official_info.get("changelog")
-                logger.info(f"[版本检查] 官方仓库版本: {official_version}")
-            else:
-                logger.warning(f"[版本检查] 官方仓库版本获取失败")
-        except Exception as e:
-            logger.warning(f"获取官方资源仓库版本失败: {e}")
+                logger.info(f"[版本检查] 正在获取官方仓库版本 (GitHub): https://github.com/l429609201/Misaka-Scraper-Resources")
+                official_info = await _fetch_package_info_with_retry(official_package_url, headers_official, max_retries=1, proxy=proxy_to_use)
+                if official_info:
+                    official_version = official_info["version"]
+                    official_changelog = official_info.get("changelog")
+                    logger.info(f"[版本检查] 官方仓库版本: {official_version}")
+                else:
+                    logger.warning(f"[版本检查] 官方仓库版本获取失败")
+            except Exception as e:
+                logger.warning(f"获取官方资源仓库版本失败: {e}")
 
         # 构建结果
         result = {

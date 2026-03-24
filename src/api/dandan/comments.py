@@ -19,6 +19,7 @@ from src.core import get_now
 from src.core.cache import get_cache_backend
 from src.services import ScraperManager, TaskManager
 from src.utils import parse_search_keyword, sample_comments_evenly, record_play_history, handle_danmaku_likes, strip_danmaku_likes
+from src.utils import restyle_danmaku_likes
 from src.rate_limiter import RateLimiter
 from src import tasks
 
@@ -146,7 +147,13 @@ async def get_external_comments_from_url(
             episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
             comments_data = await scraper.get_comments(episode_id_for_comments)
             likes_enabled = (await config_manager.get('danmakuLikesOutputEnabled', 'true')).lower() == 'true'
-            comments_data = handle_danmaku_likes(comments_data, scraper.likes_fire_threshold, enabled=likes_enabled)
+            likes_style = await config_manager.get('danmakuLikesStyle', 'heart_white')
+            # likes_style='off' 等价于 enabled=False
+            comments_data = handle_danmaku_likes(
+                comments_data, scraper.likes_fire_threshold,
+                enabled=likes_enabled and likes_style != 'off',
+                style=likes_style
+            )
 
             # 修正：使用 scraper.provider_name 修复未定义的 'provider' 变量
             if not comments_data: logger.warning(f"未能从 {scraper.provider_name} URL 获取任何弹幕: {url}")
@@ -261,6 +268,7 @@ async def get_comments_for_dandan(
             fallback_series_key = f"fallback_episode_{virtual_anime_base}"
 
             # 从数据库缓存中查找整部剧的信息
+            # 注意：整部剧缓存存储时无前缀（_backend.set/crud.set_cache直接用key），查询同样无前缀
             _backend = get_cache_backend()
             fallback_info = None
             if _backend is not None:
@@ -530,7 +538,7 @@ async def get_comments_for_dandan(
                 try:
                     task_id, done_event = await task_manager.submit_task(
                         download_match_fallback_comments_task,
-                        f"匹配后备弹幕下载: episodeId={episodeId}",
+                        f"匹配后备弹幕下载: {final_title} 第{episode_number}集 [{provider}:{mediaId}]",
                         unique_key=task_unique_key,
                         task_type="download_comments",
                         queue_type="fallback"  # 使用后备队列
@@ -772,47 +780,51 @@ async def get_comments_for_dandan(
                                 nonlocal current_episodes_list_ref
                                 current_episodes_list_ref = episodes_list
 
-                            if episodes_list and len(episodes_list) >= current_episode_number:
-                                # 获取对应集数的分集信息（episode_number是从1开始的）
-                                target_episode = episodes_list[current_episode_number - 1]
-                                provider_episode_id = target_episode.episodeId
-                                # 使用原生分集标题和URL
-                                original_episode_title = target_episode.title
-                                original_episode_url = target_episode.url or ""
+                            if episodes_list:
+                                # get_episodes 已做归一化，episodeIndex 从1开始，直接用下标取集
+                                if current_episode_number <= len(episodes_list):
+                                    target_episode = episodes_list[current_episode_number - 1]
+                                    provider_episode_id = target_episode.episodeId
+                                    # 使用原生分集标题和URL
+                                    original_episode_title = target_episode.title
+                                    original_episode_url = target_episode.url or ""
 
-                                if provider_episode_id:
-                                    episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+                                    if provider_episode_id:
+                                        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
-                                    # 使用三线程下载模式获取弹幕
-                                    virtual_episode = ProviderEpisodeInfo(
-                                        provider=current_provider,
-                                        episodeIndex=current_episode_number,
-                                        title=original_episode_title,  # 使用原生标题
-                                        episodeId=episode_id_for_comments,
-                                        url=original_episode_url  # 使用原生URL
-                                    )
+                                        # 使用三线程下载模式获取弹幕
+                                        virtual_episode = ProviderEpisodeInfo(
+                                            provider=current_provider,
+                                            episodeIndex=current_episode_number,
+                                            title=original_episode_title,  # 使用原生标题
+                                            episodeId=episode_id_for_comments,
+                                            url=original_episode_url  # 使用原生URL
+                                        )
 
-                                    # 使用并发下载获取弹幕（三线程模式）
-                                    async def dummy_progress_callback(_, _unused):
-                                        pass  # 空的异步进度回调，忽略所有参数
+                                        # 使用并发下载获取弹幕（三线程模式）
+                                        async def dummy_progress_callback(_, _unused):
+                                            pass  # 空的异步进度回调，忽略所有参数
 
-                                    download_results = await tasks._download_episode_comments_concurrent(
-                                        scraper, [virtual_episode], current_rate_limiter,
-                                        dummy_progress_callback,
-                                        is_fallback=True,
-                                        fallback_type="search"
-                                    )
+                                        download_results = await tasks._download_episode_comments_concurrent(
+                                            scraper, [virtual_episode], current_rate_limiter,
+                                            dummy_progress_callback,
+                                            is_fallback=True,
+                                            fallback_type="search"
+                                        )
 
-                                    # 提取弹幕数据
-                                    raw_comments_data = None
-                                    if download_results and len(download_results) > 0:
-                                        _, comments = download_results[0]  # 忽略episode_index
-                                        raw_comments_data = comments
+                                        # 提取弹幕数据
+                                        raw_comments_data = None
+                                        if download_results and len(download_results) > 0:
+                                            _, comments = download_results[0]  # 忽略episode_index
+                                            raw_comments_data = comments
+                                    else:
+                                        logger.warning(f"无法获取 {current_provider} 的分集ID: episode_number={current_episode_number}")
+                                        raw_comments_data = None
                                 else:
-                                    logger.warning(f"无法获取 {current_provider} 的分集ID: episode_number={current_episode_number}")
+                                    logger.warning(f"从 {current_provider} 获取分集列表失败或集数不足: media_id={current_episode_url}, episode_number={current_episode_number}, total={len(episodes_list)}")
                                     raw_comments_data = None
                             else:
-                                logger.warning(f"从 {current_provider} 获取分集列表失败或集数不足: media_id={current_episode_url}, episode_number={current_episode_number}")
+                                logger.warning(f"从 {current_provider} 获取分集列表失败: media_id={current_episode_url}, episode_number={current_episode_number}")
                                 raw_comments_data = None
 
                             if raw_comments_data:
@@ -1172,6 +1184,12 @@ async def get_comments_for_dandan(
         likes_output_enabled = (await config_manager.get('danmakuLikesOutputEnabled', 'true')).lower() == 'true'
         if not likes_output_enabled and comments_data:
             comments_data = strip_danmaku_likes(comments_data)
+        elif likes_output_enabled and comments_data:
+            likes_style = await config_manager.get('danmakuLikesStyle', 'heart_white')
+            if likes_style == 'off':
+                comments_data = strip_danmaku_likes(comments_data)
+            else:
+                comments_data = restyle_danmaku_likes(comments_data, style=likes_style)
     except Exception as e:
         logger.error(f"应用点赞状态过滤失败: {e}", exc_info=True)
 

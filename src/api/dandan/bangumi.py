@@ -156,11 +156,12 @@ async def get_bangumi_details(
                                             logger.info(f"检测到源切换: 剧集'{original_title}' 已存在 (anime_id={real_anime_id})，将更新映射到新源 {provider}")
 
                                             # 更新现有episodeId的映射关系
-                                            for i, episode_data in enumerate(actual_episodes):
-                                                episode_id = generate_episode_id(real_anime_id, 1, i + 1)
+                                            for episode_data in actual_episodes:
+                                                ep_index = episode_data.episodeIndex
+                                                episode_id = generate_episode_id(real_anime_id, 1, ep_index)
                                                 await update_episode_mapping(
                                                     session, episode_id, provider, media_id,
-                                                    i + 1, original_title
+                                                    ep_index, original_title
                                                 )
                                             logger.info(f"源切换: '{original_title}' 更新 {len(actual_episodes)} 个分集映射到 {provider}")
                                         else:
@@ -208,8 +209,10 @@ async def get_bangumi_details(
                                         search_info["bangumi_mapping"][bangumiId] = mapping_info
                                         await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
 
-                                        for i, episode_data in enumerate(actual_episodes):
-                                            episode_index = i + 1
+                                        for episode_data in actual_episodes:
+                                            # 直接使用归一化后的 episodeIndex，而非枚举下标 i+1
+                                            # 归一化在 get_episodes 内部完成，episodeIndex 已从1开始
+                                            episode_index = episode_data.episodeIndex
 
                                             # 如果指定了特定集数，只返回该集数
                                             if target_episode is not None and episode_index != target_episode:
@@ -230,7 +233,7 @@ async def get_bangumi_details(
                                             episodes.append(BangumiEpisode(
                                                 episodeId=episode_id,
                                                 episodeTitle=episode_title,
-                                                episodeNumber=str(episode_data.episodeIndex if episode_data.episodeIndex else episode_index)
+                                                episodeNumber=str(episode_index)
                                             ))
 
                                     else:
