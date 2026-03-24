@@ -183,6 +183,7 @@ class TaskManager:
                 pass  # imageUrl 获取失败不影响通知发出
 
         try:
+            import datetime
             params = task.task_parameters or {}
             # 提取任务参数中的上下文字段，供通知格式化使用
             extra = {
@@ -193,6 +194,11 @@ class TaskManager:
                 "anime_title": params.get("animeTitle", "") or params.get("anime_title", ""),
                 "episode_count": params.get("episodeCount"),
                 "webhook_source": params.get("webhookSource", ""),
+                "provider": params.get("provider", "") or params.get("providerName", ""),
+                "media_id": params.get("mediaId", "") or params.get("media_id", ""),
+                "tmdb_id": params.get("tmdbId", ""),
+                "media_type": params.get("type", "") or params.get("mediaType", ""),
+                "finished_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             await self._notification_service.emit_event(event_type, {
                 "task_title": task.title,
