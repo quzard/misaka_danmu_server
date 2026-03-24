@@ -779,47 +779,51 @@ async def get_comments_for_dandan(
                                 nonlocal current_episodes_list_ref
                                 current_episodes_list_ref = episodes_list
 
-                            if episodes_list and len(episodes_list) >= current_episode_number:
-                                # 获取对应集数的分集信息（episode_number是从1开始的）
-                                target_episode = episodes_list[current_episode_number - 1]
-                                provider_episode_id = target_episode.episodeId
-                                # 使用原生分集标题和URL
-                                original_episode_title = target_episode.title
-                                original_episode_url = target_episode.url or ""
+                            if episodes_list:
+                                # get_episodes 已做归一化，episodeIndex 从1开始，直接用下标取集
+                                if current_episode_number <= len(episodes_list):
+                                    target_episode = episodes_list[current_episode_number - 1]
+                                    provider_episode_id = target_episode.episodeId
+                                    # 使用原生分集标题和URL
+                                    original_episode_title = target_episode.title
+                                    original_episode_url = target_episode.url or ""
 
-                                if provider_episode_id:
-                                    episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
+                                    if provider_episode_id:
+                                        episode_id_for_comments = scraper.format_episode_id_for_comments(provider_episode_id)
 
-                                    # 使用三线程下载模式获取弹幕
-                                    virtual_episode = ProviderEpisodeInfo(
-                                        provider=current_provider,
-                                        episodeIndex=current_episode_number,
-                                        title=original_episode_title,  # 使用原生标题
-                                        episodeId=episode_id_for_comments,
-                                        url=original_episode_url  # 使用原生URL
-                                    )
+                                        # 使用三线程下载模式获取弹幕
+                                        virtual_episode = ProviderEpisodeInfo(
+                                            provider=current_provider,
+                                            episodeIndex=current_episode_number,
+                                            title=original_episode_title,  # 使用原生标题
+                                            episodeId=episode_id_for_comments,
+                                            url=original_episode_url  # 使用原生URL
+                                        )
 
-                                    # 使用并发下载获取弹幕（三线程模式）
-                                    async def dummy_progress_callback(_, _unused):
-                                        pass  # 空的异步进度回调，忽略所有参数
+                                        # 使用并发下载获取弹幕（三线程模式）
+                                        async def dummy_progress_callback(_, _unused):
+                                            pass  # 空的异步进度回调，忽略所有参数
 
-                                    download_results = await tasks._download_episode_comments_concurrent(
-                                        scraper, [virtual_episode], current_rate_limiter,
-                                        dummy_progress_callback,
-                                        is_fallback=True,
-                                        fallback_type="search"
-                                    )
+                                        download_results = await tasks._download_episode_comments_concurrent(
+                                            scraper, [virtual_episode], current_rate_limiter,
+                                            dummy_progress_callback,
+                                            is_fallback=True,
+                                            fallback_type="search"
+                                        )
 
-                                    # 提取弹幕数据
-                                    raw_comments_data = None
-                                    if download_results and len(download_results) > 0:
-                                        _, comments = download_results[0]  # 忽略episode_index
-                                        raw_comments_data = comments
+                                        # 提取弹幕数据
+                                        raw_comments_data = None
+                                        if download_results and len(download_results) > 0:
+                                            _, comments = download_results[0]  # 忽略episode_index
+                                            raw_comments_data = comments
+                                    else:
+                                        logger.warning(f"无法获取 {current_provider} 的分集ID: episode_number={current_episode_number}")
+                                        raw_comments_data = None
                                 else:
-                                    logger.warning(f"无法获取 {current_provider} 的分集ID: episode_number={current_episode_number}")
+                                    logger.warning(f"从 {current_provider} 获取分集列表失败或集数不足: media_id={current_episode_url}, episode_number={current_episode_number}, total={len(episodes_list)}")
                                     raw_comments_data = None
                             else:
-                                logger.warning(f"从 {current_provider} 获取分集列表失败或集数不足: media_id={current_episode_url}, episode_number={current_episode_number}")
+                                logger.warning(f"从 {current_provider} 获取分集列表失败: media_id={current_episode_url}, episode_number={current_episode_number}")
                                 raw_comments_data = None
 
                             if raw_comments_data:
