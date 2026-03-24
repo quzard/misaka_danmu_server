@@ -171,7 +171,7 @@ const SortableItem = ({
 }
 
 export const Scrapers = () => {
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [list, setList] = useState([])
   const [activeItem, setActiveItem] = useState(null)
   const dragOverlayRef = useRef(null)
@@ -326,19 +326,24 @@ export const Scrapers = () => {
   }, [])
 
   const getInfo = async () => {
+    let scraperList = []
     try {
       setLoading(true)
       const res1 = await getScrapers()
-      setList(res1.data ?? [])
+      scraperList = res1.data ?? []
+      setList(scraperList)
     } catch (error) {
     } finally {
       setLoading(false)
     }
-    // bilibili 登录状态独立加载，不阻塞主列表渲染
-    try {
-      const res2 = await getbiliUserinfo()
-      setBiliUserinfo(res2.data)
-    } catch (error) {
+    // bilibili 登录状态：仅当 bilibili 搜索源存在时才请求，避免无意义的报错
+    const hasBilibili = scraperList.some(s => s.providerName === 'bilibili')
+    if (hasBilibili) {
+      try {
+        const res2 = await getbiliUserinfo()
+        setBiliUserinfo(res2.data)
+      } catch (error) {
+      }
     }
   }
 
