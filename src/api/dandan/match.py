@@ -977,7 +977,7 @@ async def get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, mapping_key, mapping_data, FALLBACK_SEARCH_CACHE_TTL)
+                await set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, mapping_key, mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 # 存储episodeId映射
                 episode_mapping_key = f"fallback_episode_{real_episode_id}"
@@ -994,7 +994,7 @@ async def get_match_for_item(
                     "year": best_match.year,
                     "timestamp": time.time()
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
+                await set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
 
                 logger.info(f"匹配后备完成: virtual_anime_id={virtual_anime_id}, real_anime_id={real_anime_id}, episodeId={real_episode_id}")
 

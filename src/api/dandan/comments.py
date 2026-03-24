@@ -268,6 +268,7 @@ async def get_comments_for_dandan(
             fallback_series_key = f"fallback_episode_{virtual_anime_base}"
 
             # 从数据库缓存中查找整部剧的信息
+            # 注意：整部剧缓存存储时无前缀（_backend.set/crud.set_cache直接用key），查询同样无前缀
             _backend = get_cache_backend()
             fallback_info = None
             if _backend is not None:
