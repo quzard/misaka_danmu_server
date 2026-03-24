@@ -297,6 +297,7 @@ class NotificationService(
                 events_cfg = channel_instance.config.get("__events_config", {})
                 # 检查订阅：fallback complete/failed 统一用 download_fallback_complete 开关
                 check_key = "download_fallback_complete" if is_fallback_complete else event_type
+                logger.debug(f"[emit_event] event={event_type} ch={ch_id} check_key={check_key} subscribed={events_cfg.get(check_key)} events_cfg_keys={list(events_cfg.keys())}")
                 if not events_cfg.get(check_key, False):
                     continue
                 title, text = self._format_event_message(event_type, data)
@@ -332,6 +333,7 @@ class NotificationService(
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
+                logger.debug(f"[emit_task_progress] task={task_id} ch={ch_id} check_key={check_event_key} subscribed={events_cfg.get(check_event_key)} ch_type={getattr(channel_instance, 'channel_type', '?')}")
                 if not events_cfg.get(check_event_key, False):
                     continue
                 # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送（完成时才收通知）
