@@ -76,6 +76,18 @@ const EVENT_GROUPS = [
       { label: '系统启动', value: 'system_start' },
     ],
   },
+  {
+    label: '后备下载',
+    events: [
+      { label: '下载完成/失败', value: 'download_fallback_complete' },
+    ],
+  },
+  {
+    label: '任务进度',
+    events: [
+      { label: '实时进度推送（TG）', value: 'task_progress' },
+    ],
+  },
 ]
 
 // 扁平化所有事件（用于序列化）

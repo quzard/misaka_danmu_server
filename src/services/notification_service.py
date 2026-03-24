@@ -53,6 +53,10 @@ class NotificationService(
         self.notification_manager = None
         # 对话状态: user_id -> ConversationState
         self._conversations: Dict[str, ConversationState] = {}
+        # 任务进度消息跟踪: task_id -> {channel_id: message_id}
+        # 用于 TG edit_message 功能（发新消息后记录 message_id，后续进度更新时 edit）
+        # 同时覆盖 fallback 和普通下载任务
+        self._task_progress_tg_msg: Dict[str, Dict[str, int]] = {}
 
     def set_dependencies(self, **kwargs):
         """注入系统依赖"""
@@ -267,21 +271,87 @@ class NotificationService(
     # 出站：通知发送（系统 → 用户）
     # ═══════════════════════════════════════════
 
+    # 有进度消息记录时，完成通知会 edit 已有消息（适用于所有任务类型）
+    _COMPLETE_EVENT_TYPES = {
+        "download_fallback_success", "download_fallback_failed",
+        "import_success", "import_failed",
+        "auto_import_success", "auto_import_failed",
+        "webhook_import_success", "webhook_import_failed",
+        "refresh_success", "refresh_failed",
+        "incremental_refresh_success", "incremental_refresh_failed",
+        "scheduled_task_complete", "scheduled_task_failed",
+    }
+
+    # fallback 完成事件与其订阅 key 的映射
+    _FALLBACK_COMPLETE_EVENTS = {"download_fallback_success", "download_fallback_failed"}
+
     async def emit_event(self, event_type: str, data: Dict[str, Any]):
         """向所有订阅了该事件的渠道发送通知"""
+        if not self.notification_manager:
+            return
+        channels = self.notification_manager.get_all_channels()
+        is_fallback_complete = event_type in self._FALLBACK_COMPLETE_EVENTS
+        is_any_complete = event_type in self._COMPLETE_EVENT_TYPES
+        for ch_id, channel_instance in channels.items():
+            try:
+                events_cfg = channel_instance.config.get("__events_config", {})
+                # 检查订阅：fallback complete/failed 统一用 download_fallback_complete 开关
+                check_key = "download_fallback_complete" if is_fallback_complete else event_type
+                subscribed = events_cfg.get(check_key)
+                logger.info(f"[通知] event={event_type} ch={ch_id} check_key={check_key} subscribed={subscribed}")
+                if not subscribed:
+                    continue
+                title, text = self._format_event_message(event_type, data)
+                image_url: str = data.get("image_url", "") or ""
+                task_id: str = data.get("task_id", "")
+                # 任务完成时：若 TG 有已发进度消息，则 edit；否则发新消息
+                if is_any_complete and task_id:
+                    edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
+                    msg_id_out: List[int] = []
+                    await channel_instance.send_message(
+                        title=title, text=text, image=image_url,
+                        edit_message_id=edit_mid, _msg_id_out=msg_id_out
+                    )
+                    # 任务完成后清理缓存
+                    self._task_progress_tg_msg.pop(task_id, None)
+                else:
+                    await channel_instance.send_message(title=title, text=text, image=image_url)
+            except Exception as e:
+                logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
+
+    async def emit_task_progress(self, task_id: str, task_title: str, progress: int,
+                                  description: str, check_event_key: str = "task_progress"):
+        """向 TG 渠道发送任务进度通知（edit 已有消息，其他渠道不推送进度）
+
+        Args:
+            check_event_key: 检查用户是否订阅的事件 key。
+                - fallback 任务传 "download_fallback_complete"
+                - 普通下载任务传 "task_progress"
+        """
         if not self.notification_manager:
             return
         channels = self.notification_manager.get_all_channels()
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
-                if not events_cfg.get(event_type, False):
+                logger.info(f"[进度通知] task={task_id[:8]} ch={ch_id} check_key={check_event_key} subscribed={events_cfg.get(check_event_key)} ch_type={getattr(channel_instance, 'channel_type', '?')}")
+                if not events_cfg.get(check_event_key, False):
                     continue
-                title, text = self._format_event_message(event_type, data)
-                image_url: str = data.get("image_url", "") or ""
-                await channel_instance.send_message(title=title, text=text, image=image_url)
+                # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送（完成时才收通知）
+                if getattr(channel_instance, "channel_type", "") != "telegram":
+                    continue
+                title, text = self._format_task_progress_message(task_title, progress, description)
+                edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
+                msg_id_out: List[int] = []
+                await channel_instance.send_message(
+                    title=title, text=text,
+                    edit_message_id=edit_mid, _msg_id_out=msg_id_out
+                )
+                # 记录新发出的 message_id（首次 send 时）
+                if msg_id_out and not edit_mid:
+                    self._task_progress_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
             except Exception as e:
-                logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
+                logger.debug(f"渠道 {ch_id} 发送任务进度通知失败: {e}")
 
     # ═══════════════════════════════════════════
     # 事件消息格式化
@@ -303,6 +373,9 @@ class NotificationService(
         "scheduled_task_complete": ("定时任务完成", True),
         "scheduled_task_failed": ("定时任务失败", False),
         "system_start": ("系统启动", True),
+        # 后备下载任务
+        "download_fallback_success": ("后备弹幕下载完成", True),
+        "download_fallback_failed": ("后备弹幕下载失败", False),
     }
 
     def _format_event_message(self, event_type: str, data: Dict[str, Any]) -> tuple:
@@ -312,58 +385,168 @@ class NotificationService(
             return (event_type, data.get("text", ""))
 
         label, is_success = label_info
-        task_title = data.get("task_title", "")
-        message = data.get("message", "")
+        task_title  = data.get("task_title", "")
+        message     = data.get("message", "")
+        task_id     = data.get("task_id", "")
+        anime_title = data.get("anime_title", "")
+        season      = data.get("season")
+        episode     = data.get("episode")
+        ep_count    = data.get("episode_count")
+        search_term = data.get("search_term", "")
+        search_type = data.get("search_type", "")
+        webhook_src = data.get("webhook_source", "")
+        provider    = data.get("provider", "")
+        media_id    = data.get("media_id", "")
+        tmdb_id     = data.get("tmdb_id", "")
+        media_type  = data.get("media_type", "")
+        finished_at = data.get("finished_at", "")
+        icon        = "✅" if is_success else "❌"
+        status_str  = "处理完成" if is_success else "处理失败"
+        msg_short   = (message[:300] + "…") if len(message) > 300 else message
 
+        # ── 系统启动 ──────────────────────────────────────
         if event_type == "system_start":
             return (label, "弹幕服务器已启动完成 ✓")
 
+        # ── Webhook 触发 ───────────────────────────────────
         if event_type == "webhook_triggered":
-            anime = data.get("anime_title", "未知")
-            source = data.get("webhook_source", "")
-            delayed = data.get("delayed", False)
+            anime  = anime_title or "未知"
+            source = webhook_src
+            delayed    = data.get("delayed", False)
             delay_hours = data.get("delay_hours", "")
-            wh_lines = [f"📺 媒体：{anime}", f"📡 来源：{source}"]
-            if delayed:
-                wh_lines.append(f"⏳ 延迟入库：{delay_hours} 小时后执行")
-            else:
-                wh_lines.append("⚡ 即时导入")
-            return (label, "\n".join(wh_lines))
+            lines = [
+                "📺 *媒体信息*",
+                f"• 名称: {anime}",
+                f"• 来源: {source}",
+                f"• 操作: {'⏳ 延迟入库 ' + str(delay_hours) + ' 小时后执行' if delayed else '⚡ 即时导入'}",
+            ]
+            return (label, "\n".join(lines))
 
-        # 通用任务类消息
-        icon = "✅" if is_success else "❌"
-        search_term = data.get("search_term", "")
-        search_type = data.get("search_type", "")
-        season = data.get("season")
-        episode = data.get("episode")
-        task_id = data.get("task_id", "")
-        anime_title = data.get("anime_title", "")
-        ep_count = data.get("episode_count")
-        webhook_source = data.get("webhook_source", "")
-        lines = []
+        # ── 后备弹幕下载 ──────────────────────────────────
+        if event_type in ("download_fallback_success", "download_fallback_failed"):
+            lines = [
+                "📺 *媒体信息*",
+                f"• 任务: {task_title}" if task_title else "",
+                "",
+                "⚙️ *执行结果*",
+                f"• 状态: {icon} {status_str}",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+            ]
+            return (f"{icon} {label}", "\n".join(l for l in lines if l != "─skip─"))
+
+        # ── 媒体库扫描 ────────────────────────────────────
+        if event_type == "media_scan_complete":
+            lines = [
+                "⚙️ *执行结果*",
+                f"• 状态: {icon} 扫描完成",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+                f"• TaskID: `{task_id[:8]}…`" if task_id else "",
+            ]
+            return (f"{icon} {label}", "\n".join(l for l in lines if l))
+
+        # ── 定时任务 ──────────────────────────────────────
+        if event_type in ("scheduled_task_complete", "scheduled_task_failed"):
+            lines = [
+                "⚙️ *执行结果*",
+                f"• 任务: {task_title}" if task_title else "",
+                f"• 状态: {icon} {'已完成' if is_success else '执行失败'}",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+                f"• TaskID: `{task_id[:8]}…`" if task_id else "",
+            ]
+            return (f"{icon} {label}", "\n".join(l for l in lines if l))
+
+        # ── 刷新类 ────────────────────────────────────────
+        if "refresh" in event_type:
+            s_str = f"S{int(season):02d}" if season is not None else ""
+            e_str = f"E{int(episode):02d}" if episode is not None else ""
+            lines = [
+                "📺 *媒体信息*",
+                f"• 名称: {anime_title}" if anime_title else "",
+                f"• 季集: {s_str}{e_str}" if s_str else "",
+                f"• 操作: 刷新弹幕",
+                f"• 状态: {icon} {status_str}",
+                f"• 更新集数: {ep_count} 集" if ep_count is not None else "",
+                "",
+                "⚙️ *执行结果*",
+                f"• TaskID: `{task_id[:8]}…`" if task_id else "",
+                f"  └─ 状态: {icon} 已完成 (100%)" if is_success else f"  └─ 状态: ❌ 失败",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+            ]
+            return (f"{icon} {label}", "\n".join(l for l in lines if l))
+
+        # ── 导入类（import / auto_import / webhook_import）──
+        if "auto" in event_type:
+            header   = "🤖 自动导入通知"
+            op_label = "自动导入"
+        elif "webhook" in event_type:
+            header   = "🔗 Webhook 导入通知"
+            op_label = "Webhook 导入"
+        else:
+            header   = "🎬 任务导入通知"
+            op_label = "导入"
+
+        type_label_map = {"tv_series": "剧集", "movie": "电影", "tv": "剧集"}
+        media_type_zh  = type_label_map.get(media_type, media_type) if media_type else ""
+
+        provider_str = ""
+        if provider and (tmdb_id or media_id):
+            pid = tmdb_id or media_id
+            provider_str = f"{provider.upper()} {pid}"
+        elif provider:
+            provider_str = provider.upper()
+
+        s_str = f"S{int(season):02d}" if season is not None else ""
+        e_str = f"E{int(episode):02d}" if episode is not None else ""
+
+        # 操作描述
+        if s_str and e_str:
+            op_str = f"{op_label}{s_str}{e_str}"
+        elif s_str:
+            op_str = f"{op_label}{s_str}"
+        elif ep_count is not None:
+            op_str = f"{op_label}（共 {ep_count} 集）"
+        else:
+            op_str = op_label
+
+        type_map = {"keyword": "关键词", "tmdb": "TMDB", "tvdb": "TVDB",
+                    "douban": "豆瓣", "imdb": "IMDB", "bangumi": "Bangumi"}
+
+        lines = [
+            f"*{header}*",
+            "",
+            "📺 *媒体信息*",
+            f"• 名称: {anime_title}" if anime_title else (f"• 搜索词: {search_term}" if search_term else ""),
+            f"• 类型: {media_type_zh}" if media_type_zh else "",
+            f"• 操作: {op_str}",
+            f"• 状态: 🔄 入库中 → {icon} {status_str}",
+            f"• 季度: {s_str}" if s_str else "",
+            f"• 统计: {msg_short.split('，')[0]}" if msg_short and "新增" in msg_short else "",
+            f"• Provider: {provider_str}" if provider_str else "",
+            f"• 来源: {webhook_src}" if webhook_src else "",
+            f"• 时间: {finished_at}" if finished_at else "",
+            "",
+            "⚙️ *任务执行信息*",
+            f"• TaskID: `{task_id}`" if task_id else "",
+            f"  └─ 状态: {icon} 已完成 (100%)" if is_success else f"  └─ 状态: ❌ 失败",
+            f"  └─ 📋 {msg_short}" if msg_short else "",
+        ]
+        return (f"{icon} {label}", "\n".join(l for l in lines if l))
+
+    def _format_task_progress_message(self, task_title: str, progress: int, description: str) -> tuple:
+        """格式化任务进度消息，返回 (title, text)，适用于后备和普通下载任务"""
+        filled = int(progress / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        lines = ["⚙️ *执行进度*", ""]
         if task_title:
-            lines.append(f"📋 任务：{task_title}")
-        if anime_title and anime_title != task_title:
-            lines.append(f"📺 媒体：{anime_title}")
-        if search_term:
-            type_label = {"keyword": "关键词", "tmdb": "TMDB", "tvdb": "TVDB",
-                          "douban": "豆瓣", "imdb": "IMDB", "bangumi": "Bangumi"}.get(search_type, search_type)
-            suffix = f"（{type_label}）" if type_label else ""
-            lines.append(f"🔍 搜索词：{search_term}{suffix}")
-        if season is not None:
-            ep_str = f"  E{episode}" if episode else ""
-            lines.append(f"📅 季集：第 {season} 季{ep_str}")
-        if ep_count is not None:
-            lines.append(f"📝 导入集数：{ep_count} 集")
-        if webhook_source:
-            lines.append(f"📡 来源：{webhook_source}")
-        if message:
-            msg_prefix = "💬 结果" if is_success else "⚠️ 错误"
-            msg_short = message if len(message) <= 200 else message[:197] + "..."
-            lines.append(f"{msg_prefix}：{msg_short}")
-        if task_id:
-            lines.append(f"🆔 任务ID：`{task_id}`")
-        return (f"{icon} {label}", "\n".join(lines) if lines else label)
+            lines.append(f"• 任务: {task_title}")
+        lines.append(f"• 进度: `[{bar}]` {progress}%")
+        if description:
+            lines.append(f"• 状态: {description}")
+        return ("⬇️ 任务进行中", "\n".join(lines))
 
     # ═══════════════════════════════════════════
     # 命令实现

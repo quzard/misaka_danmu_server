@@ -140,6 +140,10 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
+        # 后备下载/搜索任务
+        if getattr(task, "queue_type", "") == "fallback":
+            return f"download_fallback{suffix}"
+
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
             return f"import{suffix}"
@@ -179,6 +183,7 @@ class TaskManager:
                 pass  # imageUrl 获取失败不影响通知发出
 
         try:
+            import datetime
             params = task.task_parameters or {}
             # 提取任务参数中的上下文字段，供通知格式化使用
             extra = {
@@ -189,6 +194,11 @@ class TaskManager:
                 "anime_title": params.get("animeTitle", "") or params.get("anime_title", ""),
                 "episode_count": params.get("episodeCount"),
                 "webhook_source": params.get("webhookSource", ""),
+                "provider": params.get("provider", "") or params.get("providerName", ""),
+                "media_id": params.get("mediaId", "") or params.get("media_id", ""),
+                "tmdb_id": params.get("tmdbId", ""),
+                "media_type": params.get("type", "") or params.get("mediaType", ""),
+                "finished_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
             await self._notification_service.emit_event(event_type, {
                 "task_title": task.title,
@@ -643,6 +653,11 @@ class TaskManager:
 
     def _get_progress_callback(self, task: Task) -> Callable:
         """为特定任务创建一个可暂停的回调闭包。"""
+        queue_type = getattr(task, "queue_type", "download")
+        is_fallback = queue_type == "fallback"
+        # fallback 任务用 download_fallback_complete 开关；普通任务用 task_progress 开关
+        progress_check_key = "download_fallback_complete" if is_fallback else "task_progress"
+
         async def pausable_callback(progress: int, description: str, status: Optional[TaskStatus] = None):
             # 核心暂停逻辑：在每次更新进度前，检查暂停事件。
             # 如果事件被清除 (cleared)，.wait() 将会阻塞，直到事件被重新设置 (set)。
@@ -652,7 +667,7 @@ class TaskManager:
             # 只在状态改变、首次、完成或距离上次更新超过0.5秒时才更新数据库
             is_status_change = status is not None
             force_update = progress == 0 or progress >= 100 or is_status_change
-            
+
             # 使用锁来防止并发更新 last_update_time
             async with task.update_lock:
                 if not force_update and (now - task.last_update_time < 0.5):
@@ -668,6 +683,19 @@ class TaskManager:
                     )
             except Exception as e:
                 self.logger.error(f"任务进度更新失败 (ID: {task.task_id}): {e}", exc_info=False)
+
+            # 进度未完成时触发 TG 进度通知（TG 会 edit 已有消息，其他渠道跳过进度推送）
+            if self._notification_service and progress < 100:
+                try:
+                    await self._notification_service.emit_task_progress(
+                        task_id=task.task_id,
+                        task_title=task.title,
+                        progress=int(progress),
+                        description=description,
+                        check_event_key=progress_check_key,
+                    )
+                except Exception as e:
+                    self.logger.debug(f"任务进度通知失败 (ID: {task.task_id}): {e}")
 
         return pausable_callback
 
