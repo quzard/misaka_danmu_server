@@ -491,18 +491,58 @@ class TelegramChannel(BaseNotificationChannel):
             return
         image: str = kwargs.get("image", "") or ""
         caption = f"*{title}*\n{text}" if title else text
+        # edit_message_id：有则 edit 已有消息，无则发新消息
+        edit_message_id: Optional[int] = kwargs.get("edit_message_id")
+        # _msg_id_out：调用方传入的列表，发新消息后把 message_id 写进去
+        msg_id_out: Optional[list] = kwargs.get("_msg_id_out")
         try:
-            if image:
+            if edit_message_id:
+                # 尝试 edit 已有消息
+                try:
+                    self._bot.edit_message_text(
+                        text=caption,
+                        chat_id=chat_id,
+                        message_id=edit_message_id,
+                        parse_mode="Markdown",
+                    )
+                except Exception as edit_err:
+                    err_str = str(edit_err).lower()
+                    if "message is not modified" in err_str:
+                        pass  # 内容未变化，静默忽略
+                    elif "no text in the message" in err_str:
+                        try:
+                            self._bot.edit_message_caption(
+                                caption=caption,
+                                chat_id=chat_id,
+                                message_id=edit_message_id,
+                                parse_mode="Markdown",
+                            )
+                        except Exception as cap_err:
+                            if "message is not modified" not in str(cap_err).lower():
+                                self.logger.warning(f"edit_message_caption 失败: {cap_err}")
+                    else:
+                        self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
+                        # edit 失败时降级为发新消息
+                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                        if msg_id_out is not None and sent:
+                            msg_id_out.append(sent.message_id)
+            elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown")
+                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown")
+                if msg_id_out is not None and sent:
+                    msg_id_out.append(sent.message_id)
             else:
-                self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                if msg_id_out is not None and sent:
+                    msg_id_out.append(sent.message_id)
         except Exception as e:
             self.logger.error(f"发送消息失败: {e}")
             # 降级为纯文本
             try:
                 plain = f"{title}\n{text}" if title else text
-                self._bot.send_message(chat_id, plain)
+                sent = self._bot.send_message(chat_id, plain)
+                if msg_id_out is not None and sent:
+                    msg_id_out.append(sent.message_id)
             except Exception:
                 pass
 

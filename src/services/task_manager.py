@@ -140,6 +140,10 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
+        # 后备下载/搜索任务
+        if getattr(task, "queue_type", "") == "fallback":
+            return f"download_fallback{suffix}"
+
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
             return f"import{suffix}"
@@ -643,6 +647,8 @@ class TaskManager:
 
     def _get_progress_callback(self, task: Task) -> Callable:
         """为特定任务创建一个可暂停的回调闭包。"""
+        is_fallback = getattr(task, "queue_type", "") == "fallback"
+
         async def pausable_callback(progress: int, description: str, status: Optional[TaskStatus] = None):
             # 核心暂停逻辑：在每次更新进度前，检查暂停事件。
             # 如果事件被清除 (cleared)，.wait() 将会阻塞，直到事件被重新设置 (set)。
@@ -652,7 +658,7 @@ class TaskManager:
             # 只在状态改变、首次、完成或距离上次更新超过0.5秒时才更新数据库
             is_status_change = status is not None
             force_update = progress == 0 or progress >= 100 or is_status_change
-            
+
             # 使用锁来防止并发更新 last_update_time
             async with task.update_lock:
                 if not force_update and (now - task.last_update_time < 0.5):
@@ -668,6 +674,18 @@ class TaskManager:
                     )
             except Exception as e:
                 self.logger.error(f"任务进度更新失败 (ID: {task.task_id}): {e}", exc_info=False)
+
+            # 后备任务：额外触发进度通知（TG 会 edit 已有消息）
+            if is_fallback and self._notification_service and progress < 100:
+                try:
+                    await self._notification_service.emit_fallback_progress(
+                        task_id=task.task_id,
+                        task_title=task.title,
+                        progress=int(progress),
+                        description=description,
+                    )
+                except Exception as e:
+                    self.logger.debug(f"后备任务进度通知失败 (ID: {task.task_id}): {e}")
 
         return pausable_callback
 

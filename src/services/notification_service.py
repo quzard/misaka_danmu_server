@@ -53,6 +53,9 @@ class NotificationService(
         self.notification_manager = None
         # 对话状态: user_id -> ConversationState
         self._conversations: Dict[str, ConversationState] = {}
+        # 后备任务消息跟踪: task_id -> {channel_id: message_id}
+        # 用于 TG edit_message 功能（发新消息后记录 message_id，后续进度更新时 edit）
+        self._fallback_tg_msg: Dict[str, Dict[str, int]] = {}
 
     def set_dependencies(self, **kwargs):
         """注入系统依赖"""
@@ -272,16 +275,62 @@ class NotificationService(
         if not self.notification_manager:
             return
         channels = self.notification_manager.get_all_channels()
+        is_fallback_complete = event_type in ("download_fallback_success", "download_fallback_failed")
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
-                if not events_cfg.get(event_type, False):
+                # 检查订阅：fallback complete/failed 统一用 download_fallback_complete 开关
+                check_key = "download_fallback_complete" if is_fallback_complete else event_type
+                if not events_cfg.get(check_key, False):
                     continue
                 title, text = self._format_event_message(event_type, data)
                 image_url: str = data.get("image_url", "") or ""
-                await channel_instance.send_message(title=title, text=text, image=image_url)
+                task_id: str = data.get("task_id", "")
+                if is_fallback_complete and task_id:
+                    # fallback 完成：尝试 edit 已有进度消息，否则发新消息
+                    edit_mid = self._fallback_tg_msg.get(task_id, {}).get(ch_id)
+                    msg_id_out: List[int] = []
+                    await channel_instance.send_message(
+                        title=title, text=text, image=image_url,
+                        edit_message_id=edit_mid, _msg_id_out=msg_id_out
+                    )
+                    # 任务完成后清理缓存
+                    self._fallback_tg_msg.pop(task_id, None)
+                else:
+                    await channel_instance.send_message(title=title, text=text, image=image_url)
             except Exception as e:
                 logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
+
+    async def emit_fallback_progress(self, task_id: str, task_title: str, progress: int, description: str):
+        """向所有订阅了 download_fallback_complete 的渠道发送后备任务进度（TG 会 edit 已有消息）
+
+        注：仅对支持消息编辑的渠道（如 Telegram）发送进度通知，
+        其他渠道（ServerChan、微信等）不支持 edit，跳过进度更新，仅在任务完成时收到一条通知。
+        """
+        if not self.notification_manager:
+            return
+        channels = self.notification_manager.get_all_channels()
+        for ch_id, channel_instance in channels.items():
+            try:
+                events_cfg = channel_instance.config.get("__events_config", {})
+                if not events_cfg.get("download_fallback_complete", False):
+                    continue
+                # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送
+                if getattr(channel_instance, "channel_type", "") != "telegram":
+                    continue
+                title, text = self._format_fallback_progress_message(task_title, progress, description)
+                # 查已有消息 ID
+                edit_mid = self._fallback_tg_msg.get(task_id, {}).get(ch_id)
+                msg_id_out: List[int] = []
+                await channel_instance.send_message(
+                    title=title, text=text,
+                    edit_message_id=edit_mid, _msg_id_out=msg_id_out
+                )
+                # 记录新发出的 message_id（首次 send 时）
+                if msg_id_out and not edit_mid:
+                    self._fallback_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
+            except Exception as e:
+                logger.debug(f"渠道 {ch_id} 发送后备进度通知失败: {e}")
 
     # ═══════════════════════════════════════════
     # 事件消息格式化
@@ -303,6 +352,9 @@ class NotificationService(
         "scheduled_task_complete": ("定时任务完成", True),
         "scheduled_task_failed": ("定时任务失败", False),
         "system_start": ("系统启动", True),
+        # 后备下载任务
+        "download_fallback_success": ("后备弹幕下载完成", True),
+        "download_fallback_failed": ("后备弹幕下载失败", False),
     }
 
     def _format_event_message(self, event_type: str, data: Dict[str, Any]) -> tuple:
@@ -329,6 +381,16 @@ class NotificationService(
             else:
                 wh_lines.append("⚡ 即时导入")
             return (label, "\n".join(wh_lines))
+
+        if event_type in ("download_fallback_success", "download_fallback_failed"):
+            icon = "✅" if is_success else "❌"
+            lines = []
+            if task_title:
+                lines.append(f"📋 {task_title}")
+            if message:
+                msg_short = message if len(message) <= 200 else message[:197] + "..."
+                lines.append(f"💬 {msg_short}")
+            return (f"{icon} {label}", "\n".join(lines) if lines else label)
 
         # 通用任务类消息
         icon = "✅" if is_success else "❌"
@@ -364,6 +426,19 @@ class NotificationService(
         if task_id:
             lines.append(f"🆔 任务ID：`{task_id}`")
         return (f"{icon} {label}", "\n".join(lines) if lines else label)
+
+    def _format_fallback_progress_message(self, task_title: str, progress: int, description: str) -> tuple:
+        """格式化后备任务进度消息，返回 (title, text)"""
+        # 进度条：10格，每格10%
+        filled = int(progress / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        lines = []
+        if task_title:
+            lines.append(f"📋 {task_title}")
+        lines.append(f"⏳ `[{bar}]` {progress}%")
+        if description:
+            lines.append(f"📝 {description}")
+        return ("⬇️ 后备弹幕下载中", "\n".join(lines))
 
     # ═══════════════════════════════════════════
     # 命令实现
