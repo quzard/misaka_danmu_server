@@ -907,7 +907,7 @@ async def get_match_for_item(
                 final_title = best_match.title
                 final_season = season if season is not None else 1  # 默认为第1季
                 if title_recognition_manager:
-                    converted_title, converted_season, was_converted, _ = await title_recognition_manager.apply_storage_postprocessing(
+                    converted_title, converted_season, was_converted, _, _ = await title_recognition_manager.apply_storage_postprocessing(
                         best_match.title, season, best_match.provider
                     )
                     if was_converted:

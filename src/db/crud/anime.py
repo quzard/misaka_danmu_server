@@ -348,7 +348,7 @@ async def get_or_create_anime(session: AsyncSession, title: str, media_type: str
 
     if title_recognition_manager:
         # 先尝试用原始标题进行入库后处理（查找是否有匹配的偏移规则）
-        converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(title, season, source)
+        converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(title, season, source)
 
         if was_converted:
             original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"
@@ -726,7 +726,7 @@ async def find_anime_by_title_season_year(session: AsyncSession, title: str, sea
     logger.info(f"○ 完全匹配失败: 未找到匹配的番剧")
 
     if title_recognition_manager:
-        converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(title, season, source)
+        converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(title, season, source)
 
         if was_converted:
             original_season_str = f"S{original_season:02d}" if original_season is not None else "S??"

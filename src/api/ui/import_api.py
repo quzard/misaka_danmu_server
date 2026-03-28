@@ -95,7 +95,7 @@ async def import_from_provider(
 
     if title_recognition_manager:
         try:
-            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+            converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(
                 request_data.animeTitle, request_data.season, request_data.provider
             )
             if was_converted:
@@ -166,7 +166,7 @@ async def import_edited_episodes(
 
     if title_recognition_manager:
         try:
-            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+            converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(
                 request_data.animeTitle, request_data.season, request_data.provider
             )
             if was_converted:

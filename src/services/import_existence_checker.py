@@ -109,7 +109,7 @@ async def check_anime_existence(
 
         # 3b: 识别词转换后匹配
         if title_recognition_manager:
-            converted_title, converted_season, was_converted, _ = (
+            converted_title, converted_season, was_converted, _, _ = (
                 await title_recognition_manager.apply_storage_postprocessing(title, season, None)
             )
             if was_converted:

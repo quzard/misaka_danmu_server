@@ -123,7 +123,9 @@ async def _import_episodes_iteratively(
     is_single_episode: bool = False,
     smart_refresh: bool = False,
     is_fallback: bool = False,
-    fallback_type: Optional[str] = None
+    fallback_type: Optional[str] = None,
+    title_recognition_manager = None,
+    anime_title: Optional[str] = None,
 ):
     """
     迭代地导入分集弹幕。
@@ -182,8 +184,18 @@ async def _import_episodes_iteratively(
             # 修正：检查弹幕是否为空（None 或空列表）
             if comments is not None and len(comments) > 0:
                 try:
+                    # 应用部分集数偏移（partial_offset 规则）
+                    stored_episode_index = episode.episodeIndex
+                    if title_recognition_manager and anime_title:
+                        _, _, _, _, converted_ep = await title_recognition_manager.apply_storage_postprocessing(
+                            anime_title, episode=episode.episodeIndex
+                        )
+                        if converted_ep is not None and converted_ep != episode.episodeIndex:
+                            logger.info(f"[并发模式] 部分集数偏移: '{anime_title}' 第{episode.episodeIndex}集 => 第{converted_ep}集")
+                            stored_episode_index = converted_ep
+
                     episode_db_id = await crud.create_episode_if_not_exists(
-                        session, anime_id, source_id, episode.episodeIndex,
+                        session, anime_id, source_id, stored_episode_index,
                         episode.title, episode.url, episode.episodeId
                     )
 
@@ -192,13 +204,13 @@ async def _import_episodes_iteratively(
                         session,
                         source_id=source_id,
                         provider_episode_id=episode.episodeId,
-                        episode_index=episode.episodeIndex,
+                        episode_index=stored_episode_index,
                         new_comment_count=len(comments),
                     )
 
                     if ep_check["action"] == "skip":
                         logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) {ep_check['reason']}。")
-                        skipped_episodes_indices.append(episode.episodeIndex)
+                        skipped_episodes_indices.append(stored_episode_index)
                         continue
 
                     # action == "import" 或 "update" → 写入弹幕
@@ -210,7 +222,7 @@ async def _import_episodes_iteratively(
                     await session.commit()
 
                     total_comments_added += added_count
-                    successful_episodes_indices.append(episode.episodeIndex)
+                    successful_episodes_indices.append(stored_episode_index)
                     logger.info(f"[并发模式] 分集 '{episode.title}' (DB ID: {episode_db_id}) 写入 {added_count} 条弹幕并已提交。")
                 except Exception as e:
                     failed_episodes_count += 1
@@ -287,8 +299,18 @@ async def _import_episodes_iteratively(
                 # 修正：检查弹幕是否为空（None 或空列表）
                 if comments is not None and len(comments) > 0:
                     try:
+                        # 应用部分集数偏移（partial_offset 规则）
+                        stored_episode_index = episode.episodeIndex
+                        if title_recognition_manager and anime_title:
+                            _, _, _, _, converted_ep = await title_recognition_manager.apply_storage_postprocessing(
+                                anime_title, episode=episode.episodeIndex
+                            )
+                            if converted_ep is not None and converted_ep != episode.episodeIndex:
+                                logger.info(f"部分集数偏移: '{anime_title}' 第{episode.episodeIndex}集 => 第{converted_ep}集")
+                                stored_episode_index = converted_ep
+
                         episode_db_id = await crud.create_episode_if_not_exists(
-                            session, anime_id, source_id, episode.episodeIndex,
+                            session, anime_id, source_id, stored_episode_index,
                             episode.title, episode.url, episode.episodeId
                         )
 
@@ -297,13 +319,13 @@ async def _import_episodes_iteratively(
                             session,
                             source_id=source_id,
                             provider_episode_id=episode.episodeId,
-                            episode_index=episode.episodeIndex,
+                            episode_index=stored_episode_index,
                             new_comment_count=len(comments),
                         )
 
                         if ep_check["action"] == "skip":
                             logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) {ep_check['reason']}。")
-                            skipped_episodes_indices.append(episode.episodeIndex)
+                            skipped_episodes_indices.append(stored_episode_index)
                             continue
 
                         # action == "import" 或 "update" → 写入弹幕
@@ -315,7 +337,7 @@ async def _import_episodes_iteratively(
                         await session.commit()
 
                         total_comments_added += added_count
-                        successful_episodes_indices.append(episode.episodeIndex)
+                        successful_episodes_indices.append(stored_episode_index)
                         logger.info(f"分集 '{episode.title}' (DB ID: {episode_db_id}) 写入 {added_count} 条弹幕并已提交。")
                     except Exception as db_error:
                         # 数据库写入失败

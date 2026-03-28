@@ -480,7 +480,7 @@ class TitleRecognitionManager:
 
         return processed_text, processed_episode, processed_season, has_changed
 
-    async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
+    async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]], Optional[int]]:
         """
         应用入库后处理规则（在选择最佳匹配后执行）
 
@@ -488,17 +488,19 @@ class TitleRecognitionManager:
             text: 选择的最佳匹配标题
             season: 原始季数
             source: 数据源名称
+            episode: 当前集数（用于 partial_offset 规则）
 
         Returns:
-            Tuple[处理后的标题, 处理后的季数, 是否发生了转换, 元数据信息]
+            Tuple[处理后的标题, 处理后的季数, 是否发生了转换, 元数据信息, 处理后的集数]
         """
         await self._ensure_rules_loaded()
 
         if not text:
-            return text, season, False, None
+            return text, season, False, None, episode
 
         processed_text = text
         processed_season = season
+        processed_episode = episode
         has_changed = False
         metadata_info = None
 
@@ -529,6 +531,25 @@ class TitleRecognitionManager:
                         has_changed = True
                         logger.debug(f"入库后处理 - 应用季度偏移: {season} => {processed_season}")
 
+            elif rule.rule_type == 'partial_offset':
+                # 部分集数偏移规则：标题匹配 + 集数在范围内才偏移
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"入库后处理 - 跳过部分集数偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
+                    new_episode = self._apply_partial_episode_offset(
+                        processed_episode,
+                        rule.data['ep_range'],
+                        rule.data['ep_offset']
+                    )
+                    if new_episode != processed_episode:
+                        logger.info(f"入库后处理 - 部分集数偏移: '{rule.data['source']}' 第{processed_episode}集 => 第{new_episode}集 (范围: {rule.data['ep_range']}, 偏移: {rule.data['ep_offset']})")
+                        processed_episode = new_episode
+                        has_changed = True
+
             elif rule.rule_type == 'metadata_replace':
                 # 元数据替换规则
                 if self._exact_match(processed_text, rule.data['source']):
@@ -542,7 +563,7 @@ class TitleRecognitionManager:
                     has_changed = True
                     logger.debug(f"入库后处理 - 应用元数据替换规则: '{rule.data['source']}' => 元数据")
 
-        return processed_text, processed_season, has_changed, metadata_info
+        return processed_text, processed_season, has_changed, metadata_info, processed_episode
 
     async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
