@@ -249,10 +249,15 @@ async def search_anime_for_dandan(
                 elif res.get('startDate'):
                     start_date_str = res.get('startDate').isoformat()
 
+                # 并行搜索标注：库内结果加 (并行 库内 年：XXXX)
+                base_title = res.get('animeTitle', '未知')
+                year_label = f" 年：{year}" if year else ""
+                labeled_title = f"{base_title}（并行 库内{year_label}）"
+
                 library_animes.append(DandanSearchAnimeItem(
                     animeId=res['animeId'],
                     bangumiId=str(res.get('bangumiId') or res['animeId']),
-                    animeTitle=res.get('animeTitle', '未知'),
+                    animeTitle=labeled_title,
                     type=dandan_type,
                     typeDescription=dandan_type_desc,
                     imageUrl=res.get('imageUrl') or "",
@@ -263,12 +268,22 @@ async def search_anime_for_dandan(
                     isFavorited=False,
                 ))
 
-            # 合并：库内结果在前，后备搜索结果在后（去掉同源重复的）
-            library_titles = {a.animeTitle for a in library_animes}
-            merged_animes = library_animes + [
-                a for a in fallback_response.animes
-                # 后备搜索标题通常带 [provider] 前缀，不会与库内标题重复
-            ]
+            # 后备搜索结果加 (并行 源：XXX 年：XXXX) 标注
+            labeled_fallback = []
+            for a in fallback_response.animes:
+                year_label = f" 年：{a.year}" if a.year else ""
+                # 从 typeDescription 或标题中提取 provider 信息
+                provider_label = ""
+                if a.animeTitle.startswith('['):
+                    end_bracket = a.animeTitle.find(']')
+                    if end_bracket > 0:
+                        provider_label = f" 源：{a.animeTitle[1:end_bracket]}"
+                labeled_fallback.append(a.model_copy(update={
+                    'animeTitle': f"{a.animeTitle}（并行{provider_label}{year_label}）"
+                }))
+
+            # 合并：库内结果在前，后备搜索结果在后
+            merged_animes = library_animes + labeled_fallback
             logger.info(f"并行搜索合并: 库内 {len(library_animes)} 个 + 后备 {len(fallback_response.animes)} 个 = {len(merged_animes)} 个结果")
             return DandanSearchAnimeResponse(animes=merged_animes)
 

@@ -500,7 +500,7 @@ async def search_implementation(
             )
 
         grouped_animes[anime_id].episodes.append(
-            DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=res['episodeTitle'])
+            DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=res['episodeTitle'], isLibrary=True, episodeIndex=res.get('episodeIndex'))
         )
 
     # ─── 并行搜索：从源站补充库内缺失的分集 ───
@@ -512,6 +512,42 @@ async def search_implementation(
         await _merge_source_episodes(
             session, grouped_animes, scraper_manager, config_manager
         )
+
+        # 为并行搜索结果的 animeTitle 加集数区分标注
+        for anime_info in grouped_animes.values():
+            if not anime_info.isParallelResult:
+                continue
+            library_indices = sorted([
+                ep.episodeIndex
+                for ep in anime_info.episodes if ep.isLibrary and ep.episodeIndex is not None
+            ])
+            source_indices = sorted([
+                ep.episodeIndex
+                for ep in anime_info.episodes if not ep.isLibrary and ep.episodeIndex is not None
+            ])
+
+            def format_indices(indices):
+                """将集数列表格式化为紧凑字符串，连续区间用'-'表示"""
+                if not indices:
+                    return ""
+                result = []
+                start = prev = indices[0]
+                for idx in indices[1:]:
+                    if idx == prev + 1:
+                        prev = idx
+                    else:
+                        result.append(f"{start}-{prev}" if start != prev else str(start))
+                        start = prev = idx
+                result.append(f"{start}-{prev}" if start != prev else str(start))
+                return ",".join(result)
+
+            parts = []
+            if library_indices:
+                parts.append(f"库内：{format_indices(library_indices)}")
+            if source_indices:
+                parts.append(f"搜索：{format_indices(source_indices)}")
+            if parts:
+                anime_info.animeTitle = anime_info.animeTitle + "（" + "）（".join(parts) + "）"
 
     return DandanSearchEpisodesResponse(animes=list(grouped_animes.values()))
 
@@ -602,10 +638,17 @@ async def _merge_source_episodes(
                     anime_info.episodes.append(
                         DandanEpisodeInfo(
                             episodeId=virtual_ep_id,
-                            episodeTitle=ep.title or f"第{ep.episodeIndex}集"
+                            episodeTitle=ep.title or f"第{ep.episodeIndex}集",
+                            isLibrary=False,  # 标记为源站补充分集
+                            episodeIndex=ep.episodeIndex
                         )
                     )
                     existing_episode_ids.add(virtual_ep_id)
+
+                # 标记该 anime 为并行搜索结果
+                anime_info.isParallelResult = True
+                anime_info.parallelProvider = provider
+                anime_info.parallelYear = anime_obj.year
 
                 # 创建映射缓存（整部剧级别），让 /comment/{虚拟episodeId} 能找到源信息
                 virtual_anime_base = int(f"25{anime_id:06d}{source_order:02d}0000")
