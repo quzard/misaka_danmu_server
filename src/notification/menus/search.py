@@ -63,6 +63,35 @@ class SearchMenuMixin:
             keyword = raw_keyword
         if not self.scraper_manager:
             return CommandResult(success=False, text="搜索服务未就绪。")
+        # 进度消息 message_id（由调用方通过 send_quick 发出，或 cmd_search 首次更新时创建）
+        edit_mid: list = [kw.get("edit_message_id")]  # 用列表包裹，方便闭包写入
+        chat_id = kw.get("chat_id")
+
+        async def _search_progress(progress: int, description: str):
+            """实时更新 TG 搜索进度条（edit 已有消息）"""
+            _desc_map = {
+                "获取别名...": "正在获取别名...",
+                "执行全网搜索...": "正在搜索各弹幕源...",
+                "搜索完成...": "整理搜索结果...",
+                "过滤搜索结果...": "过滤无关结果...",
+                "排序搜索结果...": "按优先级排序...",
+            }
+            desc = _desc_map.get(description, description)
+            filled = int(progress / 10)
+            bar = "█" * filled + "░" * (10 - filled)
+            text = f"`[{bar}]` {progress}%\n• {desc}"
+            msg_id_out: list = []
+            await channel.send_message(
+                title="🔍 搜索中",
+                text=text,
+                chat_id=chat_id,
+                edit_message_id=edit_mid[0],
+                _msg_id_out=msg_id_out,
+            )
+            # 首次 send 时记录 message_id，后续复用
+            if msg_id_out and not edit_mid[0]:
+                edit_mid[0] = msg_id_out[0]
+
         try:
             async with self._session_factory() as session:
                 from src.services.search import unified_search
@@ -72,7 +101,7 @@ class SearchMenuMixin:
                     scraper_manager=self.scraper_manager,
                     use_title_filtering=True,
                     use_source_priority_sorting=True,
-                    progress_callback=None,
+                    progress_callback=_search_progress,
                 )
             if not results:
                 return CommandResult(text=f"🔍 未找到与「{keyword}」相关的结果。")
@@ -107,8 +136,8 @@ class SearchMenuMixin:
             if parsed_episode is not None:
                 suffix += f"E{parsed_episode}"
             display_keyword = keyword + suffix if suffix else keyword
-            edit_mid = kw.get("edit_message_id")
-            return self._build_search_page(serialized, display_keyword, 0, edit_message_id=edit_mid)
+            edit_mid[0] = edit_mid[0] or kw.get("edit_message_id")
+            return self._build_search_page(serialized, display_keyword, 0, edit_message_id=edit_mid[0])
         except Exception as e:
             logger.error(f"搜索失败: {e}", exc_info=True)
             return CommandResult(success=False, text=f"搜索出错: {e}")
