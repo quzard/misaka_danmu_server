@@ -168,6 +168,7 @@ from .episode import (
     fetch_merged_comments,
     add_comments_from_xml,
     check_duplicate_import,
+    get_episode_fetched_at,
 )
 
 # Source模块
@@ -443,6 +444,7 @@ __all__ = [
     'fetch_merged_comments',
     'add_comments_from_xml',
     'check_duplicate_import',
+    'get_episode_fetched_at',
     # Source
     'check_source_exists_by_media_id',
     'get_anime_id_by_source_media_id',

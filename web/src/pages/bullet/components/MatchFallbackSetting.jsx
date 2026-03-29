@@ -1,4 +1,4 @@
-import { Card, Form, Switch, Input, Button, Space, Tooltip, Checkbox } from 'antd'
+import { Card, Form, Switch, Input, Button, Space, Tooltip, Checkbox, InputNumber } from 'antd'
 import { useEffect, useState } from 'react'
 import { getMatchFallback, setMatchFallback, getMatchFallbackBlacklist, setMatchFallbackBlacklist, getMatchFallbackTokens, setMatchFallbackTokens, getTokenList, getSearchFallback, setSearchFallback, getConfig, setConfig } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
@@ -18,7 +18,7 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes, preDownloadRes, parallelSearchRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes, preDownloadRes, parallelSearchRes, autoRefreshRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
         getMatchFallbackTokens(),
@@ -26,7 +26,8 @@ export const MatchFallbackSetting = () => {
         getSearchFallback(),
         getConfig('externalApiFallbackEnabled'),
         getConfig('preDownloadNextEpisodeEnabled'),
-        getConfig('parallelSearchEnabled')
+        getConfig('parallelSearchEnabled'),
+        getConfig('danmakuAutoRefreshDays')
       ])
       setTokenList(tokenListRes.data || [])
 
@@ -45,7 +46,8 @@ export const MatchFallbackSetting = () => {
         searchFallbackEnabled: searchFallbackRes.data.value === 'true',
         externalApiFallbackEnabled: externalApiFallbackRes.data?.value === 'true',
         preDownloadNextEpisodeEnabled: preDownloadRes.data?.value === 'true',
-        parallelSearchEnabled: parallelSearchRes.data?.value === 'true'
+        parallelSearchEnabled: parallelSearchRes.data?.value === 'true',
+        danmakuAutoRefreshDays: parseInt(autoRefreshRes.data?.value || '0', 10) || 0
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -92,6 +94,10 @@ export const MatchFallbackSetting = () => {
         await setConfig('parallelSearchEnabled', String(changedValues.parallelSearchEnabled))
         messageApi.success('并行搜索设置已保存')
       }
+      if ('danmakuAutoRefreshDays' in changedValues) {
+        await setConfig('danmakuAutoRefreshDays', String(changedValues.danmakuAutoRefreshDays ?? 0))
+        messageApi.success('弹幕自动刷新设置已保存')
+      }
       // 黑名单不自动保存，需要点击保存按钮
     } catch (error) {
       messageApi.error('保存设置失败')
@@ -137,6 +143,8 @@ export const MatchFallbackSetting = () => {
           searchFallbackEnabled: false,
           externalApiFallbackEnabled: false,
           preDownloadNextEpisodeEnabled: false,
+          parallelSearchEnabled: false,
+          danmakuAutoRefreshDays: 0,
           matchFallbackBlacklist: '',
           matchFallbackTokens: []
         }}
@@ -179,55 +187,76 @@ export const MatchFallbackSetting = () => {
                   const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
 
                   return (
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                      <Form.Item
-                        name="externalApiFallbackEnabled"
-                        label={
-                          <div className="flex items-center gap-2">
-                            <span>启用顺延机制</span>
-                            <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                        }
-                        valuePropName="checked"
-                        style={{ flex: 1 }}
-                      >
-                        <Switch disabled={isFallbackDisabled} />
-                      </Form.Item>
+                    <>
+                      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', marginBottom: '16px' }}>
+                        <Form.Item
+                          name="externalApiFallbackEnabled"
+                          label={
+                            <div className="flex items-center gap-2">
+                              <span>启用顺延机制</span>
+                              <Tooltip title="当选中的源没有有效分集时（如只有预告片被过滤掉），自动尝试下一个候选源，提高导入成功率。关闭此选项时，将使用传统的单源选择模式。">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                          }
+                          valuePropName="checked"
+                          style={{ flex: 1 }}
+                        >
+                          <Switch disabled={isFallbackDisabled} />
+                        </Form.Item>
 
-                      <Form.Item
-                        name="preDownloadNextEpisodeEnabled"
-                        label={
-                          <div className="flex items-center gap-2">
-                            <span>启用预下载</span>
-                            <Tooltip title="启用后，当播放当前集时，系统会自动在后台下载下一集的弹幕（如果下一集存在且没有弹幕）。需要启用匹配后备或后备搜索。">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                        }
-                        valuePropName="checked"
-                        style={{ flex: 1 }}
-                      >
-                        <Switch disabled={isFallbackDisabled} />
-                      </Form.Item>
+                        <Form.Item
+                          name="preDownloadNextEpisodeEnabled"
+                          label={
+                            <div className="flex items-center gap-2">
+                              <span>启用预下载</span>
+                              <Tooltip title="启用后，当播放当前集时，系统会自动在后台下载下一集的弹幕（如果下一集存在且没有弹幕）。需要启用匹配后备或后备搜索。">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                          }
+                          valuePropName="checked"
+                          style={{ flex: 1 }}
+                        >
+                          <Switch disabled={isFallbackDisabled} />
+                        </Form.Item>
+                      </div>
 
-                      <Form.Item
-                        name="parallelSearchEnabled"
-                        label={
-                          <div className="flex items-center gap-2">
-                            <span>启用并行搜索</span>
-                            <Tooltip title="启用后，搜索弹幕时会同时检索本地库和在线源站，将库内已有的分集和源站补充的分集合并为完整列表返回。例如库内只有1-5集，源站有25集，搜索结果将展示完整的1-25集。需要启用后备搜索。">
-                              <QuestionCircleOutlined />
-                            </Tooltip>
-                          </div>
-                        }
-                        valuePropName="checked"
-                        style={{ flex: 1 }}
-                      >
-                        <Switch disabled={isFallbackDisabled} />
-                      </Form.Item>
-                    </div>
+                      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                        <Form.Item
+                          name="parallelSearchEnabled"
+                          label={
+                            <div className="flex items-center gap-2">
+                              <span>启用并行搜索</span>
+                              <Tooltip title="启用后，搜索弹幕时会同时检索本地库和在线源站，将库内已有的分集和源站补充的分集合并为完整列表返回。例如库内只有1-5集，源站有25集，搜索结果将展示完整的1-25集。需要启用后备搜索。">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                          }
+                          valuePropName="checked"
+                          style={{ flex: 1 }}
+                        >
+                          <Switch disabled={isFallbackDisabled} />
+                        </Form.Item>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                        <Form.Item
+                          name="danmakuAutoRefreshDays"
+                          label={
+                            <div className="flex items-center gap-2">
+                              <span>弹幕自动刷新间隔（天）</span>
+                              <Tooltip title="当播放客户端请求弹幕时，若距上次获取超过设定天数，将自动触发弹幕刷新。设为 0 则禁用此功能。">
+                                <QuestionCircleOutlined />
+                              </Tooltip>
+                            </div>
+                          }
+                          style={{ flex: 1 }}
+                        >
+                          <InputNumber min={0} max={365} precision={0} style={{ width: '100%' }} placeholder="0（禁用）" />
+                        </Form.Item>
+                      </div>
+                    </>
                   )
                 }}
               </Form.Item>
@@ -348,6 +377,20 @@ export const MatchFallbackSetting = () => {
                     </Form.Item>
                   )
                 }}
+              </Form.Item>
+
+              <Form.Item
+                name="danmakuAutoRefreshDays"
+                label={
+                  <div className="flex items-center gap-2">
+                    <span>弹幕自动刷新间隔（天）</span>
+                    <Tooltip title="当播放客户端请求弹幕时，若距上次获取超过设定天数，将自动触发弹幕刷新。设为 0 则禁用此功能。">
+                      <QuestionCircleOutlined />
+                    </Tooltip>
+                  </div>
+                }
+              >
+                <InputNumber min={0} max={365} precision={0} style={{ width: '100%' }} placeholder="0（禁用）" />
               </Form.Item>
 
             </>
