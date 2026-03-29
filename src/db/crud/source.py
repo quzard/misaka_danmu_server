@@ -125,6 +125,7 @@ async def get_anime_sources(session: AsyncSession, anime_id: int) -> List[Dict[s
             AnimeSource.id.label("sourceId"),
             AnimeSource.providerName.label("providerName"),
             AnimeSource.mediaId.label("mediaId"),
+            AnimeSource.sourceOrder.label("sourceOrder"),
             AnimeSource.isFavorited.label("isFavorited"),
             AnimeSource.incrementalRefreshEnabled.label("incrementalRefreshEnabled"),
             AnimeSource.isFinished.label("isFinished"),

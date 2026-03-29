@@ -205,6 +205,22 @@ export const MatchFallbackSetting = () => {
                       >
                         <Switch disabled={isFallbackDisabled} />
                       </Form.Item>
+
+                      <Form.Item
+                        name="parallelSearchEnabled"
+                        label={
+                          <div className="flex items-center gap-2">
+                            <span>启用并行搜索</span>
+                            <Tooltip title="启用后，搜索弹幕时会同时检索本地库和在线源站，将库内已有的分集和源站补充的分集合并为完整列表返回。例如库内只有1-5集，源站有25集，搜索结果将展示完整的1-25集。需要启用后备搜索。">
+                              <QuestionCircleOutlined />
+                            </Tooltip>
+                          </div>
+                        }
+                        valuePropName="checked"
+                        style={{ flex: 1 }}
+                      >
+                        <Switch disabled={isFallbackDisabled} />
+                      </Form.Item>
                     </div>
                   )
                 }}
@@ -283,6 +299,38 @@ export const MatchFallbackSetting = () => {
                         <div className="flex items-center gap-2">
                           <span>启用预下载</span>
                           <Tooltip title="启用后，当播放当前集时，系统会自动在后台下载下一集的弹幕（如果下一集存在且没有弹幕）。需要启用匹配后备或后备搜索。">
+                            <QuestionCircleOutlined />
+                          </Tooltip>
+                        </div>
+                      }
+                      valuePropName="checked"
+                      style={isMobile ? {} : { flex: 1 }}
+                    >
+                      <Switch disabled={isFallbackDisabled} />
+                    </Form.Item>
+                  )
+                }}
+              </Form.Item>
+
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) =>
+                  prevValues.matchFallbackEnabled !== currentValues.matchFallbackEnabled ||
+                  prevValues.searchFallbackEnabled !== currentValues.searchFallbackEnabled
+                }
+              >
+                {({ getFieldValue }) => {
+                  const matchFallbackEnabled = getFieldValue('matchFallbackEnabled')
+                  const searchFallbackEnabled = getFieldValue('searchFallbackEnabled')
+                  const isFallbackDisabled = !matchFallbackEnabled && !searchFallbackEnabled
+
+                  return (
+                    <Form.Item
+                      name="parallelSearchEnabled"
+                      label={
+                        <div className="flex items-center gap-2">
+                          <span>启用并行搜索</span>
+                          <Tooltip title="启用后，搜索弹幕时会同时检索本地库和在线源站，将库内已有的分集和源站补充的分集合并为完整列表返回。需要启用后备搜索。">
                             <QuestionCircleOutlined />
                           </Tooltip>
                         </div>

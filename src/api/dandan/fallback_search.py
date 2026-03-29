@@ -450,9 +450,14 @@ async def execute_fallback_search_task(
 async def search_implementation(
     search_term: str,
     episode: Optional[str],
-    session: AsyncSession
+    session: AsyncSession,
+    scraper_manager=None,
+    config_manager=None,
+    rate_limiter=None,
 ) -> DandanSearchEpisodesResponse:
-    """搜索接口的通用实现，避免代码重复。"""
+    """搜索接口的通用实现，避免代码重复。
+    当启用并行搜索时，还会从源站补充库内缺失的分集。
+    """
     search_term = search_term.strip()
     if not search_term:
         raise HTTPException(
@@ -498,5 +503,137 @@ async def search_implementation(
             DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=res['episodeTitle'])
         )
 
+    # ─── 并行搜索：从源站补充库内缺失的分集 ───
+    parallel_search_enabled = False
+    if config_manager and scraper_manager:
+        parallel_search_enabled = (await config_manager.get("parallelSearchEnabled", "false")).lower() == 'true'
+
+    if parallel_search_enabled and grouped_animes:
+        await _merge_source_episodes(
+            session, grouped_animes, scraper_manager, config_manager
+        )
+
     return DandanSearchEpisodesResponse(animes=list(grouped_animes.values()))
 
+
+
+async def _merge_source_episodes(
+    session: AsyncSession,
+    grouped_animes: Dict[int, DandanAnimeInfo],
+    scraper_manager: ScraperManager,
+    config_manager: ConfigManager,
+):
+    """
+    并行搜索核心逻辑：从源站获取完整分集列表，补充库内缺失的分集。
+
+    对每个库内 anime 的每个 source：
+    1. 获取库内已有的分集 episodeIndex 集合
+    2. 调用 scraper.get_episodes(mediaId) 获取源站完整分集列表
+    3. 缺失的分集用虚拟 episodeId 补充
+    4. 创建映射缓存，让 /comment/{虚拟id} 能找到正确的源
+    """
+    from sqlalchemy import select
+    from src.db.orm_models import AnimeSource, Episode, Anime
+    from src.core.cache import get_cache_backend
+
+    for anime_id, anime_info in list(grouped_animes.items()):
+        try:
+            # 获取该 anime 的所有 source
+            sources = await crud.get_anime_sources(session, anime_id)
+            if not sources:
+                continue
+
+            # 获取 anime 基本信息
+            anime_stmt = select(Anime).where(Anime.id == anime_id)
+            anime_result = await session.execute(anime_stmt)
+            anime_obj = anime_result.scalar_one_or_none()
+            if not anime_obj:
+                continue
+
+            # 收集库内已有的 episodeId（从 episodes 列表里提取）
+            existing_episode_ids = {ep.episodeId for ep in anime_info.episodes}
+
+            for source in sources:
+                source_id = source['sourceId']
+                provider = source['providerName']
+                media_id = source['mediaId']
+                source_order = source.get('sourceOrder', 1)
+
+                # 获取库内该 source 下已有的分集 episodeIndex
+                ep_stmt = select(Episode.episodeIndex).where(Episode.sourceId == source_id)
+                ep_result = await session.execute(ep_stmt)
+                existing_indices = {row[0] for row in ep_result.fetchall()}
+
+                # 从源站获取完整分集列表
+                try:
+                    scraper = scraper_manager.get_scraper(provider)
+                    if not scraper:
+                        logger.warning(f"[并行搜索] 无法获取 {provider} 的 scraper")
+                        continue
+
+                    source_episodes = await scraper.get_episodes(media_id)
+                    if not source_episodes:
+                        logger.debug(f"[并行搜索] {provider} 源站无分集: mediaId={media_id}")
+                        continue
+
+                    logger.info(f"[并行搜索] {provider} 源站返回 {len(source_episodes)} 个分集，库内已有 {len(existing_indices)} 个")
+
+                except Exception as e:
+                    logger.warning(f"[并行搜索] 从 {provider} 获取分集列表失败: {e}")
+                    continue
+
+                # 找出缺失的分集
+                missing_episodes = []
+                for ep in source_episodes:
+                    if ep.episodeIndex not in existing_indices:
+                        # 生成虚拟 episodeId（与入库格式完全一致）
+                        virtual_ep_id = int(f"25{anime_id:06d}{source_order:02d}{ep.episodeIndex:04d}")
+                        if virtual_ep_id not in existing_episode_ids:
+                            missing_episodes.append((virtual_ep_id, ep))
+
+                if not missing_episodes:
+                    logger.debug(f"[并行搜索] {provider} 无缺失分集")
+                    continue
+
+                logger.info(f"[并行搜索] {provider} 补充 {len(missing_episodes)} 个缺失分集")
+
+                # 补充缺失分集到结果中
+                for virtual_ep_id, ep in missing_episodes:
+                    anime_info.episodes.append(
+                        DandanEpisodeInfo(
+                            episodeId=virtual_ep_id,
+                            episodeTitle=ep.title or f"第{ep.episodeIndex}集"
+                        )
+                    )
+                    existing_episode_ids.add(virtual_ep_id)
+
+                # 创建映射缓存（整部剧级别），让 /comment/{虚拟episodeId} 能找到源信息
+                virtual_anime_base = int(f"25{anime_id:06d}{source_order:02d}0000")
+                fallback_series_key = f"fallback_episode_{virtual_anime_base}"
+
+                cache_data = {
+                    "real_anime_id": anime_id,
+                    "provider": provider,
+                    "mediaId": media_id,
+                    "final_title": anime_obj.title,
+                    "final_season": anime_obj.season or 1,
+                    "media_type": anime_obj.type or "tvseries",
+                    "imageUrl": anime_obj.imageUrl,
+                    "year": anime_obj.year,
+                }
+
+                # 写入缓存（先内存缓存，再数据库缓存）
+                try:
+                    _backend = get_cache_backend()
+                    if _backend is not None:
+                        await _backend.set(fallback_series_key, cache_data, ttl=10800, region="default")
+                    await crud.set_cache(session, fallback_series_key, cache_data, ttl=10800)
+                    logger.debug(f"[并行搜索] 已创建映射缓存: {fallback_series_key}")
+                except Exception as e:
+                    logger.warning(f"[并行搜索] 创建映射缓存失败: {e}")
+
+            # 按 episodeId 排序分集列表
+            anime_info.episodes.sort(key=lambda ep: ep.episodeId)
+
+        except Exception as e:
+            logger.error(f"[并行搜索] 处理 anime_id={anime_id} 时出错: {e}", exc_info=True)

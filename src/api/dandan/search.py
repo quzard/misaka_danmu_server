@@ -61,14 +61,23 @@ async def search_episodes_for_dandan(
     anime: str = Query(..., description="节目名称"),
     episode: Optional[str] = Query(None, description="分集标题 (通常是数字)"),
     token: str = Depends(get_token_from_path),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    config_manager: ConfigManager = Depends(get_config_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ):
     """
     模拟 dandanplay 的 /api/v2/search/episodes 接口。
     它会搜索 **本地弹幕库** 中的番剧和分集信息。
+    当启用并行搜索时，还会从源站补充缺失的分集。
     """
     search_term = anime.strip()
-    return await search_implementation(search_term, episode, session)
+    return await search_implementation(
+        search_term, episode, session,
+        scraper_manager=scraper_manager,
+        config_manager=config_manager,
+        rate_limiter=rate_limiter,
+    )
 
 
 @search_router.get(
@@ -128,7 +137,14 @@ async def search_anime_for_dandan(
 
     # 如果指定了具体集数，需要检查该集数是否存在
     should_trigger_fallback = False
-    if db_results and episode_to_search is not None:
+
+    # 并行搜索：开关开启时总是触发后备搜索
+    parallel_search_enabled = (await config_manager.get("parallelSearchEnabled", "false")).lower() == 'true'
+    if parallel_search_enabled:
+        should_trigger_fallback = True
+        logger.info(f"并行搜索已启用，将同时搜索库内和在线源站")
+
+    if not should_trigger_fallback and db_results and episode_to_search is not None:
         # 检查是否存在指定的集数
         episode_exists = False
         for anime_result in db_results:
@@ -214,11 +230,49 @@ async def search_anime_for_dandan(
         # 创建一个临时的ai_matcher_manager用于传递（实际会在协程工厂中重新创建）
         ai_matcher_manager_local = AIMatcherManager(config_manager=config_manager)
 
-        return await handle_fallback_search(
+        fallback_response = await handle_fallback_search(
             search_title_for_fallback, token, session, scraper_manager,
             metadata_manager, config_manager, rate_limiter, title_recognition_manager,
             task_manager, ai_matcher_manager_local
         )
+
+        # 并行搜索：将库内结果和后备搜索结果合并返回
+        if parallel_search_enabled and db_results and fallback_response.animes:
+            library_animes = []
+            for res in db_results:
+                dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
+                dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+                year = res.get('year')
+                start_date_str = None
+                if year:
+                    start_date_str = datetime(year, 1, 1, tzinfo=get_app_timezone()).isoformat()
+                elif res.get('startDate'):
+                    start_date_str = res.get('startDate').isoformat()
+
+                library_animes.append(DandanSearchAnimeItem(
+                    animeId=res['animeId'],
+                    bangumiId=str(res.get('bangumiId') or res['animeId']),
+                    animeTitle=res.get('animeTitle', '未知'),
+                    type=dandan_type,
+                    typeDescription=dandan_type_desc,
+                    imageUrl=res.get('imageUrl') or "",
+                    startDate=start_date_str,
+                    year=year,
+                    episodeCount=res.get('episodeCount', 0),
+                    rating=0.0,
+                    isFavorited=False,
+                ))
+
+            # 合并：库内结果在前，后备搜索结果在后（去掉同源重复的）
+            library_titles = {a.animeTitle for a in library_animes}
+            merged_animes = library_animes + [
+                a for a in fallback_response.animes
+                # 后备搜索标题通常带 [provider] 前缀，不会与库内标题重复
+            ]
+            logger.info(f"并行搜索合并: 库内 {len(library_animes)} 个 + 后备 {len(fallback_response.animes)} 个 = {len(merged_animes)} 个结果")
+            return DandanSearchAnimeResponse(animes=merged_animes)
+
+        return fallback_response
 
     # 本地库无结果且未启用后备搜索，返回空结果
     return DandanSearchAnimeResponse(animes=[])

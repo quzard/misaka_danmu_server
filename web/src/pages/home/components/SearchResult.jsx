@@ -4,6 +4,7 @@ import {
   getTmdbSearch,
   importDanmu,
   importEdit,
+  previewEpisodeOffset,
   getSearchResult,
   getAnimeLibrary,
 } from '../../../apis'
@@ -112,6 +113,7 @@ export const SearchResult = () => {
   const [episodeOrder, setEpisodeOrder] = useState('asc') // 新增：排序状态
   const [editMediaType, setEditMediaType] = useState('tv_series') // 编辑导入：媒体类型
   const [editSeason, setEditSeason] = useState(1) // 编辑导入：季度
+  const [offsetPreviewMap, setOffsetPreviewMap] = useState({}) // 集数偏移预览映射 {原始集数: 偏移后集数}
 
   // 重整分集导入子弹窗状态
   const [reshuffleOpen, setReshuffleOpen] = useState(false)
@@ -407,6 +409,7 @@ export const SearchResult = () => {
       setEditAnimeTitle('')
       setEditMediaType('tv_series')
       setEditSeason(1)
+      setOffsetPreviewMap({})
     }
   }
 
@@ -1249,6 +1252,23 @@ export const SearchResult = () => {
                               setEditItem(item)
                               setEditMediaType(item.type || 'tv_series')
                               setEditSeason(item.season ?? 1)
+
+                              // 获取集数偏移预览（如果有 partial_offset 规则）
+                              const title = item.title
+                              const episodeIndices = res.data.map(ep => ep.episodeIndex)
+                              if (title && episodeIndices.length > 0) {
+                                try {
+                                  const offsetRes = await previewEpisodeOffset({
+                                    animeTitle: title,
+                                    episodeIndices,
+                                  })
+                                  setOffsetPreviewMap(offsetRes.data?.offsetMap || {})
+                                } catch {
+                                  setOffsetPreviewMap({})
+                                }
+                              } else {
+                                setOffsetPreviewMap({})
+                              }
                               // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
                               const endValue = item.episodeCount > 0 ? item.episodeCount : 1
                               setRange([1, endValue])
@@ -1671,6 +1691,7 @@ export const SearchResult = () => {
                       handleDelete={() => handleDelete(item)}
                       handleEditTitle={value => handleEditTitle(item, value)}
                       handleEditIndex={value => handleEditIndex(item, value)}
+                      offsetTarget={offsetPreviewMap[item.episodeIndex]}
                     />
                   )}
                 />
@@ -1859,6 +1880,7 @@ const SortableItem = ({
   handleDelete,
   handleEditTitle,
   handleEditIndex,
+  offsetTarget,
 }) => {
   const {
     attributes,
@@ -1917,6 +1939,16 @@ const SortableItem = ({
             onFocus={() => setIsNumberFocused(true)}
             onBlur={() => setIsNumberFocused(false)}
           />
+          {offsetTarget != null && (
+            <span style={{
+              color: '#52c41a',
+              fontSize: 12,
+              whiteSpace: 'nowrap',
+              fontWeight: 500,
+            }}>
+              → {offsetTarget}
+            </span>
+          )}
           <Input
             ref={inputRef}
             style={{
