@@ -252,6 +252,7 @@ class NotificationService(
         if not conv:
             return None  # 没有活跃对话，忽略
         state = conv.state
+        logger.debug(f"[文本输入] user={user_id} state={state} text={text[:50]}")
         text_handler_map = {
             "token_name_input": self._text_token_name,
             "auto_keyword_input": self._text_auto_keyword,

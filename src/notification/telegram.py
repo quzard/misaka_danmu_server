@@ -340,6 +340,12 @@ class TelegramChannel(BaseNotificationChannel):
         result: CommandResult = await self.service.handle_text_input(
             text, user_id, self, chat_id=chat_id
         )
+        if result is None:
+            # 无活跃对话状态，记录调试信息
+            conv = self.service.get_conversation(user_id)
+            if conv:
+                self.logger.warning(f"[文本处理] 用户 {user_id} 状态 '{conv.state}' 无匹配处理器")
+            return
         if result and result.text:
             self._render_result(result, chat_id, reply_to_message_id=message.message_id)
 
@@ -415,14 +421,26 @@ class TelegramChannel(BaseNotificationChannel):
 
                 if cover_url:
                     self._log_raw("⬆ 发送图文消息", {"chat_id": chat_id, "photo": cover_url, "text": result.text[:200]})
-                    sent = self._bot.send_photo(
-                        chat_id,
-                        cover_url,
-                        caption=result.text,
-                        reply_markup=markup,
-                        parse_mode=parse_mode,
-                        reply_to_message_id=reply_to_message_id,
-                    )
+                    # TG caption 最大 1024 字符，超长时截断
+                    caption_text = result.text[:1024] if len(result.text) > 1024 else result.text
+                    try:
+                        sent = self._bot.send_photo(
+                            chat_id,
+                            cover_url,
+                            caption=caption_text,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            reply_to_message_id=reply_to_message_id,
+                        )
+                    except Exception as photo_err:
+                        self.logger.warning(f"send_photo 失败，降级为纯文本: {photo_err}")
+                        sent = self._bot.send_message(
+                            chat_id,
+                            result.text,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            reply_to_message_id=reply_to_message_id,
+                        )
                 else:
                     # 发送纯文本消息
                     self._log_raw("⬆ 发送消息", {"chat_id": chat_id, "text": result.text[:200]})
@@ -440,11 +458,14 @@ class TelegramChannel(BaseNotificationChannel):
                     )
         except Exception as e:
             self.logger.error(f"渲染消息失败: {e}")
-            # 降级为纯文本
+            # 降级为纯文本（保留按钮）
             try:
-                self._bot.send_message(chat_id, result.text)
+                self._bot.send_message(chat_id, result.text, reply_markup=markup)
             except Exception:
-                pass
+                try:
+                    self._bot.send_message(chat_id, result.text)
+                except Exception:
+                    pass
 
     def _start_polling(self):
         """在后台线程中启动长轮询"""
