@@ -39,14 +39,24 @@ class SearchMenuMixin:
 
     async def cmd_search(self, args: str, user_id: str, channel, **kw) -> CommandResult:
         if not args or not args.strip():
-            return CommandResult(success=False, text=(
-                "请提供搜索关键词。\n\n"
-                "用法: /search <关键词>\n"
-                "示例:\n"
-                "  /search 刀剑神域 — 搜索并整季导入\n"
-                "  /search 刀剑神域 S01 — 指定第1季导入\n"
-                "  /search 刀剑神域 S01E10 — 仅导入第1季第10集"
-            ))
+            return CommandResult(
+                success=False,
+                text=(
+                    "请提供搜索关键词。\n\n"
+                    "用法: /search <关键词>\n"
+                    "示例:\n"
+                    "  /search 刀剑神域 — 搜索并整季导入\n"
+                    "  /search 刀剑神域 S01 — 指定第1季导入\n"
+                    "  /search 刀剑神域 S01E10 — 仅导入第1季第10集"
+                ),
+                reply_markup=[
+                    [
+                        {"text": "🔍 直接搜索", "callback_data": "search_input:any"},
+                        {"text": "📅 指定季", "callback_data": "search_input:season"},
+                        {"text": "🎯 指定季集", "callback_data": "search_input:episode"},
+                    ]
+                ],
+            )
         raw_keyword = args.strip()
         keyword, parsed_season, parsed_episode = self._parse_season_episode(raw_keyword)
         if not keyword:
@@ -103,7 +113,8 @@ class SearchMenuMixin:
             return CommandResult(success=False, text=f"搜索出错: {e}")
 
     def _build_search_page(self, results: list, keyword: str, page: int,
-                           edit_message_id: int = None) -> CommandResult:
+                           edit_message_id: int = None,
+                           parsed_season=None, parsed_episode=None) -> CommandResult:
         total = len(results)
         start = page * PAGE_SIZE
         end = min(start + PAGE_SIZE, total)
@@ -118,11 +129,11 @@ class SearchMenuMixin:
             year_str = f" ({r['year']})" if r.get('year') else ""
             ep_str = f" {r.get('episodeCount', '?')}集" if r.get('episodeCount') else ""
             lines.append(f"{idx+1}. [{r['provider']}] {r['title']}{year_str}{ep_str}")
-            row = [
-                {"text": f"📥 导入 {idx+1}", "callback_data": f"search_import:{idx}"},
-                {"text": f"✏️ 编辑 {idx+1}", "callback_data": f"search_edit:{idx}"},
-            ]
-            buttons.append(row)
+            # 每条结果只显示「选择」按钮，点击后进入操作面板
+            buttons.append([{
+                "text": f"🎯 选择 {idx+1}",
+                "callback_data": f"search_select:{idx}",
+            }])
             articles.append({
                 "title": f"{idx+1}. {r['title']}{year_str}{ep_str}",
                 "description": f"[{r['provider']}]  回复 {idx+1} 导入",
@@ -155,6 +166,164 @@ class SearchMenuMixin:
             conv.data.get("keyword", ""),
             page,
             edit_message_id=kw.get("message_id"),
+        )
+
+    def _build_select_panel(self, item: dict, idx: int, parsed_season=None,
+                             parsed_episode=None, edit_message_id=None) -> CommandResult:
+        """构建单条搜索结果的操作面板"""
+        title = item.get("title", "未知")
+        provider = item.get("provider", "未知源")
+        year_str = f" ({item['year']})" if item.get('year') else ""
+        ep_str = f" {item.get('episodeCount', '?')}集" if item.get('episodeCount') else ""
+        text = (
+            f"🎯 *已选择目标*\n"
+            f"• 标题: {title}{year_str}\n"
+            f"• 来源: {provider}{ep_str}\n\n"
+            f"请选择导入方式："
+        )
+        if parsed_episode is not None:
+            # 场景3：带季集
+            s = f"S{parsed_season:02d}" if parsed_season is not None else "S01"
+            e_label = f"{s}E{parsed_episode:02d}" if isinstance(parsed_episode, int) else f"{s}E{parsed_episode}"
+            action_row = [
+                {"text": f"📥 导入 {e_label}", "callback_data": f"search_import:{idx}"},
+                {"text": "✏️ 编辑", "callback_data": f"search_edit:{idx}"},
+            ]
+        elif parsed_season is not None:
+            # 场景2：带季
+            action_row = [
+                {"text": f"📥 整季导入 S{parsed_season:02d}", "callback_data": f"search_import:{idx}"},
+                {"text": "🎯 单集导入", "callback_data": f"search_ep_input:{idx}"},
+                {"text": "✏️ 编辑", "callback_data": f"search_edit:{idx}"},
+            ]
+        else:
+            # 场景1：纯关键词
+            action_row = [
+                {"text": "📥 整季导入", "callback_data": f"search_import:{idx}"},
+                {"text": "📅 指定季", "callback_data": f"search_season_input:{idx}"},
+                {"text": "✏️ 编辑", "callback_data": f"search_edit:{idx}"},
+            ]
+        back_row = [{"text": "⬅️ 返回列表", "callback_data": "search_back:0"}]
+        return CommandResult(
+            text=text,
+            reply_markup=[action_row, back_row],
+            edit_message_id=edit_message_id,
+        )
+
+    async def cb_search_select(self, params, user_id, channel, **kw):
+        """选择某条搜索结果 → 进入操作面板"""
+        idx = int(params[0]) if params else 0
+        conv = self.get_conversation(user_id)
+        if not conv or conv.state != "search_results":
+            return CommandResult(text="", answer_callback_text="搜索已过期，请重新搜索")
+        results = conv.data.get("results", [])
+        if idx >= len(results):
+            return CommandResult(text="", answer_callback_text="无效的选择")
+        item = results[idx]
+        parsed_season = conv.data.get("parsed_season")
+        parsed_episode = conv.data.get("parsed_episode")
+        # 记录当前选中的 idx，供后续操作使用
+        conv.data["selected_idx"] = idx
+        return self._build_select_panel(
+            item, idx,
+            parsed_season=parsed_season,
+            parsed_episode=parsed_episode,
+            edit_message_id=kw.get("message_id"),
+        )
+
+    async def cb_search_back(self, params, user_id, channel, **kw):
+        """从操作面板返回搜索结果列表"""
+        page = int(params[0]) if params else 0
+        conv = self.get_conversation(user_id)
+        if not conv or conv.state != "search_results":
+            return CommandResult(text="", answer_callback_text="搜索已过期，请重新搜索")
+        return self._build_search_page(
+            conv.data.get("results", []),
+            conv.data.get("keyword", ""),
+            page,
+            edit_message_id=kw.get("message_id"),
+            parsed_season=conv.data.get("parsed_season"),
+            parsed_episode=conv.data.get("parsed_episode"),
+        )
+
+    async def cb_search_season_input(self, params, user_id, channel, **kw):
+        """场景1：点击「📅 指定季」→ 等待用户输入季数"""
+        idx = int(params[0]) if params else 0
+        conv = self.get_conversation(user_id)
+        if not conv or conv.state != "search_results":
+            return CommandResult(text="", answer_callback_text="搜索已过期")
+        conv.data["selected_idx"] = idx
+        results = conv.data.get("results", [])
+        title = results[idx].get("title", "未知") if idx < len(results) else "未知"
+        self.set_conversation(user_id, "search_season_input",
+                              conv.data, chat_id=kw.get("chat_id"))
+        return CommandResult(
+            text=f"📅 指定季导入「{title}」\n请输入季数（如: 1、2）：",
+            edit_message_id=kw.get("message_id"),
+        )
+
+    async def cb_search_ep_input(self, params, user_id, channel, **kw):
+        """场景2：点击「🎯 单集导入」→ 等待用户输入集数"""
+        idx = int(params[0]) if params else 0
+        conv = self.get_conversation(user_id)
+        if not conv or conv.state != "search_results":
+            return CommandResult(text="", answer_callback_text="搜索已过期")
+        conv.data["selected_idx"] = idx
+        results = conv.data.get("results", [])
+        title = results[idx].get("title", "未知") if idx < len(results) else "未知"
+        season = conv.data.get("parsed_season", 1)
+        self.set_conversation(user_id, "search_ep_input",
+                              conv.data, chat_id=kw.get("chat_id"))
+        return CommandResult(
+            text=f"🎯 单集导入「{title}」S{season:02d}\n请输入集数（如: 1、10）：",
+            edit_message_id=kw.get("message_id"),
+        )
+
+    async def _text_search_season_input(self, text: str, user_id: str, channel, **kw):
+        """场景1：输入季数 → 更新 parsed_season 后提交导入"""
+        conv = self.get_conversation(user_id)
+        if not conv:
+            return CommandResult(text="操作已过期。")
+        try:
+            season = int(text.strip())
+        except ValueError:
+            return CommandResult(text="⚠️ 请输入数字季数，如: 1")
+        idx = conv.data.get("selected_idx", 0)
+        results = conv.data.get("results", [])
+        if idx >= len(results):
+            self.clear_conversation(user_id)
+            return CommandResult(text="无效的选择")
+        item = results[idx]
+        title = item.get("title", "未知")
+        self.clear_conversation(user_id)
+        return await self._submit_auto_import(
+            search_type="keyword", search_term=title,
+            media_type=item.get("type"), season=season,
+            episode=None,
+        )
+
+    async def _text_search_ep_input(self, text: str, user_id: str, channel, **kw):
+        """场景2：输入集数 → 更新 parsed_episode 后提交导入"""
+        conv = self.get_conversation(user_id)
+        if not conv:
+            return CommandResult(text="操作已过期。")
+        try:
+            episode = int(text.strip())
+        except ValueError:
+            return CommandResult(text="⚠️ 请输入数字集数，如: 10")
+        idx = conv.data.get("selected_idx", 0)
+        results = conv.data.get("results", [])
+        if idx >= len(results):
+            self.clear_conversation(user_id)
+            return CommandResult(text="无效的选择")
+        item = results[idx]
+        title = item.get("title", "未知")
+        season = conv.data.get("parsed_season", 1)
+        self.clear_conversation(user_id)
+        return await self._submit_auto_import(
+            search_type="keyword", search_term=title,
+            media_type=item.get("type"), season=season,
+            episode=episode,
         )
 
     async def cb_search_import(self, params, user_id, channel, **kw):
@@ -489,26 +658,44 @@ class SearchMenuMixin:
             edit_message_id=kw.get("message_id"),
         )
 
-    async def _text_search_notify_season(self, text: str, user_id: str, channel, **kw):
-        """指定季输入 → 用 S{N} 触发搜索"""
-        conv = self.get_conversation(user_id)
-        if not conv:
-            return CommandResult(text="操作已过期。")
-        search_term = conv.data.get("search_term", "")
-        self.clear_conversation(user_id)
-        try:
-            season = int(text.strip())
-        except ValueError:
-            return CommandResult(text="⚠️ 请输入数字季数，如: 1")
-        return await self.cmd_search(f"{search_term} S{season:02d}", user_id, channel, **kw)
+    # ── /search 无参数快捷按钮回调 ──
 
-    async def _text_search_notify_episode(self, text: str, user_id: str, channel, **kw):
-        """指定季集输入 → 用 S{N}E{N} 或 S{N} 触发搜索"""
-        conv = self.get_conversation(user_id)
-        if not conv:
-            return CommandResult(text="操作已过期。")
-        search_term = conv.data.get("search_term", "")
+    async def cb_search_input(self, params, user_id, channel, **kw):
+        """处理 /search 无参数时三个快捷按钮"""
+        mode = params[0] if params else "any"
+        mode_map = {
+            "any": ("search_keyword_input", "请输入搜索关键词："),
+            "season": ("search_keyword_season_input", "请输入关键词和季数（如: 刀剑神域 1）："),
+            "episode": ("search_keyword_episode_input", "请输入关键词和季集（如: 刀剑神域 S01E05）："),
+        }
+        state, prompt = mode_map.get(mode, mode_map["any"])
+        self.set_conversation(user_id, state, {"mode": mode}, chat_id=kw.get("chat_id"))
+        return CommandResult(
+            text=prompt,
+            edit_message_id=kw.get("message_id"),
+        )
+
+    async def _text_search_keyword_input(self, text: str, user_id: str, channel, **kw):
+        """直接搜索关键词输入"""
         self.clear_conversation(user_id)
-        season_ep = text.strip()
-        return await self.cmd_search(f"{search_term} {season_ep}", user_id, channel, **kw)
+        return await self.cmd_search(text.strip(), user_id, channel, **kw)
+
+    async def _text_search_keyword_season_input(self, text: str, user_id: str, channel, **kw):
+        """搜索关键词+季数输入，格式: 关键词 季数数字"""
+        self.clear_conversation(user_id)
+        parts = text.strip().rsplit(None, 1)
+        if len(parts) == 2:
+            keyword, season_raw = parts
+            try:
+                season = int(season_raw)
+                return await self.cmd_search(f"{keyword} S{season:02d}", user_id, channel, **kw)
+            except ValueError:
+                pass
+        # 无法解析则直接当关键词搜索
+        return await self.cmd_search(text.strip(), user_id, channel, **kw)
+
+    async def _text_search_keyword_episode_input(self, text: str, user_id: str, channel, **kw):
+        """搜索关键词+季集输入，格式: 关键词 S01E05"""
+        self.clear_conversation(user_id)
+        return await self.cmd_search(text.strip(), user_id, channel, **kw)
 

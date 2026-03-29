@@ -189,13 +189,19 @@ class NotificationService(
             "token_validity": self.cb_token_validity,
             # search
             "search_page": self.cb_search_page,
+            "search_select": self.cb_search_select,
+            "search_back": self.cb_search_back,
             "search_import": self.cb_search_import,
             "search_episodes": self.cb_search_episodes,
+            "search_season_input": self.cb_search_season_input,
+            "search_ep_input": self.cb_search_ep_input,
             "ep_page": self.cb_episode_page,
             # search notify 快捷按钮（后备任务完成通知）
             "search_notify": self.cb_search_notify,
             "search_notify_season": self.cb_search_notify_season,
             "search_notify_episode": self.cb_search_notify_episode,
+            # search 无参数快捷按钮
+            "search_input": self.cb_search_input,
             # search → edit import
             "search_edit": self.cb_search_edit,
             "edit_ep_toggle": self.cb_edit_ep_toggle,
@@ -259,6 +265,13 @@ class NotificationService(
             # 后备任务通知快捷按钮的文本输入
             "search_notify_season_input": self._text_search_notify_season,
             "search_notify_episode_input": self._text_search_notify_episode,
+            # /search 无参数快捷按钮的文本输入
+            "search_keyword_input": self._text_search_keyword_input,
+            "search_keyword_season_input": self._text_search_keyword_season_input,
+            "search_keyword_episode_input": self._text_search_keyword_episode_input,
+            # 搜索结果操作面板的文本输入
+            "search_season_input": self._text_search_season_input,
+            "search_ep_input": self._text_search_ep_input,
         }
         handler = text_handler_map.get(state)
         if not handler:
