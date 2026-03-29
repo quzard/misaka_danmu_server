@@ -248,11 +248,13 @@ class NotificationService(
     async def handle_text_input(self, text: str, user_id: str,
                                  channel, **kwargs) -> Optional[CommandResult]:
         """处理对话状态机中的文本输入"""
+        logger.info(f"[文本输入] user={user_id} text={text[:50]} conversations={list(self._conversations.keys())}")
         conv = self.get_conversation(user_id)
         if not conv:
+            logger.info(f"[文本输入] user={user_id} 无活跃对话，忽略")
             return None  # 没有活跃对话，忽略
         state = conv.state
-        logger.debug(f"[文本输入] user={user_id} state={state} text={text[:50]}")
+        logger.info(f"[文本输入] user={user_id} state={state}")
         text_handler_map = {
             "token_name_input": self._text_token_name,
             "auto_keyword_input": self._text_auto_keyword,
