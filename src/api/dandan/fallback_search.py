@@ -142,8 +142,15 @@ async def handle_fallback_search(
     # 提交后备搜索任务
     try:
         task_title = f"后备搜索: {search_term}"
+        # 查询 token 名字，写入 task_parameters 供通知格式化使用
+        try:
+            token_obj = await crud.get_api_token_by_token_str(session, token)
+            token_name = token_obj["name"] if token_obj else token[:8]
+        except Exception:
+            token_name = token[:8]
         task_id, done_event = await task_manager.submit_task(
-            fallback_search_coro_factory, task_title, run_immediately=True, queue_type="fallback"
+            fallback_search_coro_factory, task_title, run_immediately=True, queue_type="fallback",
+            task_parameters={"token_name": token_name, "search_term": search_term}
         )
         logger.info(f"后备搜索任务已提交: {task_id}")
     except Exception as e:

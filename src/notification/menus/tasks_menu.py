@@ -4,6 +4,7 @@
 """
 import re
 import logging
+from src.db import crud
 from src.notification.base import CommandResult
 
 logger = logging.getLogger(__name__)
@@ -40,37 +41,12 @@ class TasksMenuMixin:
     async def cb_tasks_refresh(self, params, user_id, channel, **kw):
         return await self._build_tasks_result(edit_message_id=kw.get("message_id"))
 
-    async def cb_noop(self, params, user_id, channel, **kw):
-        return CommandResult(text="", answer_callback_text="")
-
-    async def cb_help_cmd(self, params, user_id, channel, **kw):
-        """帮助页内联按钮 — 点击后触发对应命令"""
-        cmd = params[0] if params else ""
-        handler_map = {
-            "search": self.cmd_search,
-            "auto": self.cmd_auto,
-            "url": self.cmd_url,
-            "refresh": self.cmd_refresh,
-            "tokens": self.cmd_list_tokens,
-            "tasks": self.cmd_list_tasks,
-            "cache": self.cmd_cache,
-        }
-        handler = handler_map.get(cmd)
-        if not handler:
-            return CommandResult(text="", answer_callback_text="未知命令")
-        self.clear_conversation(user_id)
-        result = await handler("", user_id, channel, **kw)
-        result.answer_callback_text = ""
-        result.edit_message_id = kw.get("message_id")
-        return result
-
     async def cb_task_detail(self, params, user_id, channel, **kw):
         """查看单个任务的实时状态，支持追踪子任务链"""
         task_id = params[0] if params else ""
         if not task_id:
             return CommandResult(text="", answer_callback_text="缺少任务ID")
         try:
-            from src.db import crud
             async with self._session_factory() as session:
                 detail = await crud.get_task_details_from_history(session, task_id)
             if not detail:
