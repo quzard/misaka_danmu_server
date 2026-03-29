@@ -18,14 +18,15 @@ export const MatchFallbackSetting = () => {
   const fetchSettings = async () => {
     try {
       setLoading(true)
-      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes, preDownloadRes] = await Promise.all([
+      const [fallbackRes, blacklistRes, tokensRes, tokenListRes, searchFallbackRes, externalApiFallbackRes, preDownloadRes, parallelSearchRes] = await Promise.all([
         getMatchFallback(),
         getMatchFallbackBlacklist(),
         getMatchFallbackTokens(),
         getTokenList(),
         getSearchFallback(),
         getConfig('externalApiFallbackEnabled'),
-        getConfig('preDownloadNextEpisodeEnabled')
+        getConfig('preDownloadNextEpisodeEnabled'),
+        getConfig('parallelSearchEnabled')
       ])
       setTokenList(tokenListRes.data || [])
 
@@ -43,7 +44,8 @@ export const MatchFallbackSetting = () => {
         matchFallbackTokens: selectedTokens,
         searchFallbackEnabled: searchFallbackRes.data.value === 'true',
         externalApiFallbackEnabled: externalApiFallbackRes.data?.value === 'true',
-        preDownloadNextEpisodeEnabled: preDownloadRes.data?.value === 'true'
+        preDownloadNextEpisodeEnabled: preDownloadRes.data?.value === 'true',
+        parallelSearchEnabled: parallelSearchRes.data?.value === 'true'
       })
     } catch (error) {
       messageApi.error('获取设置失败')
@@ -85,6 +87,10 @@ export const MatchFallbackSetting = () => {
       if ('preDownloadNextEpisodeEnabled' in changedValues) {
         await setConfig('preDownloadNextEpisodeEnabled', String(changedValues.preDownloadNextEpisodeEnabled))
         messageApi.success('预下载设置已保存')
+      }
+      if ('parallelSearchEnabled' in changedValues) {
+        await setConfig('parallelSearchEnabled', String(changedValues.parallelSearchEnabled))
+        messageApi.success('并行搜索设置已保存')
       }
       // 黑名单不自动保存，需要点击保存按钮
     } catch (error) {
