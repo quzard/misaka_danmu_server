@@ -565,6 +565,69 @@ class TitleRecognitionManager:
 
         return processed_text, processed_season, has_changed, metadata_info, processed_episode
 
+    async def reverse_episode_offset(self, text: str, stored_episode: int, source: Optional[str] = None) -> int:
+        """
+        将已偏移存储的集数反向还原为源站原始集数（用于预下载场景）
+
+        例如：规则 ep_range=60-99, ep_offset=+7
+        存储的第68集 → 源站第61集
+
+        Args:
+            text: 番剧标题
+            stored_episode: 数据库中存储的集数（已偏移后）
+            source: 数据源名称
+
+        Returns:
+            源站实际集数，如果无匹配规则则返回 stored_episode 原值
+        """
+        await self._ensure_rules_loaded()
+
+        if not text:
+            return stored_episode
+
+        for rule in self.recognition_rules:
+            if rule.stage != 'postprocess' or rule.rule_type != 'partial_offset':
+                continue
+
+            if not self._exact_match(text, rule.data['source']):
+                continue
+
+            rule_source = rule.data.get('source_restriction')
+            if rule_source and rule_source != 'all' and source and rule_source != source:
+                continue
+
+            ep_offset = rule.data['ep_offset'].strip()
+            ep_range = rule.data['ep_range']
+
+            # 计算反向偏移量
+            try:
+                if ep_offset.upper().startswith('EP'):
+                    # EP 表达式无法简单反向，跳过
+                    continue
+                elif ep_offset.startswith('+'):
+                    delta = int(ep_offset[1:])
+                    source_episode = stored_episode - delta
+                elif ep_offset.startswith('-'):
+                    delta = int(ep_offset[1:])
+                    source_episode = stored_episode + delta
+                else:
+                    delta = int(ep_offset)
+                    source_episode = stored_episode - delta
+
+                source_episode = max(1, source_episode)
+
+                # 验证反向还原后的源站集数是否在规则范围内
+                ep_start, ep_end = ep_range
+                in_range = source_episode >= ep_start and (ep_end is None or source_episode <= ep_end)
+                if in_range:
+                    logger.debug(f"预下载反向偏移: '{text}' 存储第{stored_episode}集 => 源站第{source_episode}集")
+                    return source_episode
+            except Exception as e:
+                logger.warning(f"预下载反向偏移计算失败: stored_episode={stored_episode}, offset={ep_offset}, 错误: {e}")
+
+        return stored_episode
+
+
     async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
         应用标题识别词转换 - 参考MoviePilot格式

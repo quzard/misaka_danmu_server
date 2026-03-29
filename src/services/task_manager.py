@@ -685,7 +685,10 @@ class TaskManager:
                 self.logger.error(f"任务进度更新失败 (ID: {task.task_id}): {e}", exc_info=False)
 
             # 进度未完成时触发 TG 进度通知（TG 会 edit 已有消息，其他渠道跳过进度推送）
-            if self._notification_service and progress < 100:
+            # management 队列（定时任务）只在首次（progress==0）发进度通知，避免多条进度消息
+            is_management_task = queue_type == "management"
+            should_send_progress = progress < 100 and (not is_management_task or int(progress) == 0)
+            if self._notification_service and should_send_progress:
                 try:
                     await self._notification_service.emit_task_progress(
                         task_id=task.task_id,

@@ -52,6 +52,7 @@ from .dependencies import (
     get_rate_limiter,
     get_scraper_manager,
 )
+from src.api.control.dependencies import get_title_recognition_manager
 
 # 从主文件导入预下载和刷新等待函数（这些函数依赖较多，暂时保留在主文件中）
 # 注意：这是临时方案，后续可以考虑将这些函数移到单独的模块
@@ -212,7 +213,8 @@ async def get_comments_for_dandan(
     config_manager: ConfigManager = Depends(get_config_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager),
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
@@ -232,7 +234,7 @@ async def get_comments_for_dandan(
     if comments_data:
         predownload_task = asyncio.create_task(try_predownload_next_episode(
             episodeId, request.app.state.db_session_factory, config_manager, task_manager,
-            scraper_manager, rate_limiter
+            scraper_manager, rate_limiter, title_recognition_manager
         ))
 
         # 添加异常处理回调

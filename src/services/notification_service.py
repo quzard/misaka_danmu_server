@@ -448,11 +448,21 @@ class NotificationService(
 
         # ── 定时任务 ──────────────────────────────────────
         if event_type in ("scheduled_task_complete", "scheduled_task_failed"):
+            # 支持多行消息：按换行拆分，使用树形符号
+            if msg_short:
+                msg_lines = [l for l in msg_short.splitlines() if l.strip()]
+                if len(msg_lines) <= 1:
+                    detail_lines = [f"  └─ 📋 {msg_short}"]
+                else:
+                    detail_lines = [f"  ├─ 📋 {l}" for l in msg_lines[:-1]]
+                    detail_lines.append(f"  └─ 📋 {msg_lines[-1]}")
+            else:
+                detail_lines = []
             lines = [
                 "⚙️ *执行结果*",
                 f"• 任务: {task_title}" if task_title else "",
                 f"• 状态: {icon} {'已完成' if is_success else '执行失败'}",
-                f"  └─ 📋 {msg_short}" if msg_short else "",
+                *detail_lines,
                 f"• 时间: {finished_at}" if finished_at else "",
                 f"• TaskID: `{task_id[:8]}…`" if task_id else "",
             ]
