@@ -113,7 +113,6 @@ export const SearchResult = () => {
   const [episodeOrder, setEpisodeOrder] = useState('asc') // 新增：排序状态
   const [editMediaType, setEditMediaType] = useState('tv_series') // 编辑导入：媒体类型
   const [editSeason, setEditSeason] = useState(1) // 编辑导入：季度
-  const [offsetPreviewMap, setOffsetPreviewMap] = useState({}) // 集数偏移预览映射 {原始集数: 偏移后集数}
 
   // 重整分集导入子弹窗状态
   const [reshuffleOpen, setReshuffleOpen] = useState(false)
@@ -409,7 +408,6 @@ export const SearchResult = () => {
       setEditAnimeTitle('')
       setEditMediaType('tv_series')
       setEditSeason(1)
-      setOffsetPreviewMap({})
     }
   }
 
@@ -1247,28 +1245,34 @@ export const SearchResult = () => {
                               }
 
                               const res = await getEditEpisodes(params)
-                              setEditEpisodeList(res.data)
+                              let episodes = res.data
                               setEditImportOpen(true)
                               setEditItem(item)
                               setEditMediaType(item.type || 'tv_series')
                               setEditSeason(item.season ?? 1)
 
-                              // 获取集数偏移预览（如果有 partial_offset 规则）
+                              // 应用集数偏移（根据自定义识别词的 partial_offset 规则）
                               const title = item.title
-                              const episodeIndices = res.data.map(ep => ep.episodeIndex)
+                              const episodeIndices = episodes.map(ep => ep.episodeIndex)
                               if (title && episodeIndices.length > 0) {
                                 try {
                                   const offsetRes = await previewEpisodeOffset({
                                     animeTitle: title,
                                     episodeIndices,
                                   })
-                                  setOffsetPreviewMap(offsetRes.data?.offsetMap || {})
+                                  const offsetMap = offsetRes.data?.offsetMap || {}
+                                  if (Object.keys(offsetMap).length > 0) {
+                                    // 直接修改分集列表中的 episodeIndex
+                                    episodes = episodes.map(ep => {
+                                      const newIndex = offsetMap[ep.episodeIndex]
+                                      return newIndex != null ? { ...ep, episodeIndex: newIndex } : ep
+                                    })
+                                  }
                                 } catch {
-                                  setOffsetPreviewMap({})
+                                  // 偏移预览失败，使用原始集数
                                 }
-                              } else {
-                                setOffsetPreviewMap({})
                               }
+                              setEditEpisodeList(episodes)
                               // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
                               const endValue = item.episodeCount > 0 ? item.episodeCount : 1
                               setRange([1, endValue])
@@ -1691,7 +1695,6 @@ export const SearchResult = () => {
                       handleDelete={() => handleDelete(item)}
                       handleEditTitle={value => handleEditTitle(item, value)}
                       handleEditIndex={value => handleEditIndex(item, value)}
-                      offsetTarget={offsetPreviewMap[item.episodeIndex]}
                     />
                   )}
                 />
@@ -1880,7 +1883,6 @@ const SortableItem = ({
   handleDelete,
   handleEditTitle,
   handleEditIndex,
-  offsetTarget,
 }) => {
   const {
     attributes,
@@ -1939,16 +1941,6 @@ const SortableItem = ({
             onFocus={() => setIsNumberFocused(true)}
             onBlur={() => setIsNumberFocused(false)}
           />
-          {offsetTarget != null && (
-            <span style={{
-              color: '#52c41a',
-              fontSize: 12,
-              whiteSpace: 'nowrap',
-              fontWeight: 500,
-            }}>
-              → {offsetTarget}
-            </span>
-          )}
           <Input
             ref={inputRef}
             style={{

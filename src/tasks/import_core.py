@@ -754,8 +754,8 @@ async def edited_import_task(
             source_id=source_id,
             first_episode_comments=first_episode_comments,
             config_manager=config_manager,
-            title_recognition_manager=title_recognition_manager,  # 传递识别词管理器（用于 partial_offset）
-            anime_title=request_data.animeTitle,  # 传递番剧标题（用于 partial_offset 规则匹配）
+            # 注意：edited_import_task 不传 title_recognition_manager/anime_title
+            # 因为前端编辑导入时已通过 preview-offset API 应用了 partial_offset 偏移
         )
     except RateLimitExceededError as e:
         # 单源配额已满，转为任务暂停，释放 worker 给其他源
