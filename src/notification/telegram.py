@@ -575,6 +575,20 @@ class TelegramChannel(BaseNotificationChannel):
             except Exception:
                 pass
 
+    async def send_quick(self, text: str, chat_id=None) -> Optional[int]:
+        """发送一条快速消息，返回 message_id 供后续 edit 使用"""
+        if not self._bot:
+            return None
+        target = chat_id or self.config.get("chat_id", "")
+        if not target:
+            return None
+        try:
+            sent = self._bot.send_message(target, text)
+            return sent.message_id if sent else None
+        except Exception as e:
+            self.logger.warning(f"send_quick 失败: {e}")
+            return None
+
     async def test_connection(self) -> Dict[str, Any]:
         bot_token = self.config.get("bot_token", "")
         if not bot_token:

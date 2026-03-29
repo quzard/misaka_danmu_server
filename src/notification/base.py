@@ -159,6 +159,12 @@ class BaseNotificationChannel(ABC):
         """
         return False
 
+    async def send_quick(self, text: str, chat_id=None) -> Optional[int]:
+        """发送一条快速消息并返回 message_id（用于后续 edit）。
+        不支持的渠道返回 None。子类可覆写实现。
+        """
+        return None
+
     @staticmethod
     @abstractmethod
     def get_config_schema() -> list:

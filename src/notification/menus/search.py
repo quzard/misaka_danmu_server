@@ -107,7 +107,8 @@ class SearchMenuMixin:
             if parsed_episode is not None:
                 suffix += f"E{parsed_episode}"
             display_keyword = keyword + suffix if suffix else keyword
-            return self._build_search_page(serialized, display_keyword, 0)
+            edit_mid = kw.get("edit_message_id")
+            return self._build_search_page(serialized, display_keyword, 0, edit_message_id=edit_mid)
         except Exception as e:
             logger.error(f"搜索失败: {e}", exc_info=True)
             return CommandResult(success=False, text=f"搜索出错: {e}")
@@ -678,11 +679,19 @@ class SearchMenuMixin:
     async def _text_search_keyword_input(self, text: str, user_id: str, channel, **kw):
         """直接搜索关键词输入"""
         self.clear_conversation(user_id)
+        chat_id = kw.get("chat_id")
+        mid = await channel.send_quick("🔍 搜索中，请稍候...", chat_id=chat_id)
+        if mid:
+            kw = {**kw, "edit_message_id": mid}
         return await self.cmd_search(text.strip(), user_id, channel, **kw)
 
     async def _text_search_keyword_season_input(self, text: str, user_id: str, channel, **kw):
         """搜索关键词+季数输入，格式: 关键词 季数数字"""
         self.clear_conversation(user_id)
+        chat_id = kw.get("chat_id")
+        mid = await channel.send_quick("🔍 搜索中，请稍候...", chat_id=chat_id)
+        if mid:
+            kw = {**kw, "edit_message_id": mid}
         parts = text.strip().rsplit(None, 1)
         if len(parts) == 2:
             keyword, season_raw = parts
@@ -697,5 +706,31 @@ class SearchMenuMixin:
     async def _text_search_keyword_episode_input(self, text: str, user_id: str, channel, **kw):
         """搜索关键词+季集输入，格式: 关键词 S01E05"""
         self.clear_conversation(user_id)
+        chat_id = kw.get("chat_id")
+        mid = await channel.send_quick("🔍 搜索中，请稍候...", chat_id=chat_id)
+        if mid:
+            kw = {**kw, "edit_message_id": mid}
         return await self.cmd_search(text.strip(), user_id, channel, **kw)
+
+    async def _text_search_notify_season(self, text: str, user_id: str, channel, **kw):
+        """后备任务通知 指定季输入 → 用 S{N} 触发搜索"""
+        conv = self.get_conversation(user_id)
+        if not conv:
+            return CommandResult(text="操作已过期。")
+        search_term = conv.data.get("search_term", "")
+        self.clear_conversation(user_id)
+        try:
+            season = int(text.strip())
+        except ValueError:
+            return CommandResult(text="⚠️ 请输入数字季数，如: 1")
+        return await self.cmd_search(f"{search_term} S{season:02d}", user_id, channel, **kw)
+
+    async def _text_search_notify_episode(self, text: str, user_id: str, channel, **kw):
+        """后备任务通知 指定季集输入 → 用 S{N}E{N} 触发搜索"""
+        conv = self.get_conversation(user_id)
+        if not conv:
+            return CommandResult(text="操作已过期。")
+        search_term = conv.data.get("search_term", "")
+        self.clear_conversation(user_id)
+        return await self.cmd_search(f"{search_term} {text.strip()}", user_id, channel, **kw)
 
