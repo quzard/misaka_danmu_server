@@ -481,6 +481,11 @@ class TelegramChannel(BaseNotificationChannel):
         if self._polling_thread and self._polling_thread.is_alive():
             return
 
+        # 压制 telebot / urllib3 的 SSL 瞬断噪音日志（这类错误 infinity_polling 会自动重试）
+        import logging as _logging
+        _logging.getLogger("urllib3.connectionpool").setLevel(_logging.CRITICAL)
+        _logging.getLogger("telebot").setLevel(_logging.WARNING)
+
         def polling_worker():
             self.logger.info("Telegram 轮询已启动")
             try:
@@ -488,7 +493,12 @@ class TelegramChannel(BaseNotificationChannel):
                 self._bot.infinity_polling(timeout=30, long_polling_timeout=30)
             except Exception as e:
                 if self._running:
-                    self.logger.error(f"Telegram 轮询异常退出: {e}")
+                    err_str = str(e).lower()
+                    # SSL 瞬断 / 网络超时属于可恢复的瞬态错误，降级为 WARNING
+                    if any(k in err_str for k in ("ssl", "eof", "timeout", "connectionpool", "max retries")):
+                        self.logger.warning(f"Telegram 轮询网络瞬断（将自动重试）: {type(e).__name__}")
+                    else:
+                        self.logger.error(f"Telegram 轮询异常退出: {e}")
 
         self._polling_thread = threading.Thread(
             target=polling_worker,
