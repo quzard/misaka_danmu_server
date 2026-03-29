@@ -459,6 +459,12 @@ class TelegramChannel(BaseNotificationChannel):
                     self.service.update_conversation_message_id(
                         str(chat_id), sent.message_id
                     )
+                # 如果携带 task_id，把 message_id 预注册到进度跟踪表
+                # 这样 emit_task_progress 就能 edit 该消息而非新建
+                if result.task_id and sent and hasattr(self.service, '_task_progress_tg_msg'):
+                    self.service._task_progress_tg_msg.setdefault(
+                        result.task_id, {}
+                    )[self.channel_id] = sent.message_id
         except Exception as e:
             self.logger.error(f"渲染消息失败: {e}")
             # 降级为纯文本（保留按钮）
