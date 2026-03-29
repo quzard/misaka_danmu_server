@@ -45,6 +45,7 @@ from .fallback_search import (
     handle_fallback_search,
     search_implementation,
 )
+from .helpers import format_episode_ranges
 
 logger = logging.getLogger(__name__)
 
@@ -237,69 +238,51 @@ async def search_anime_for_dandan(
         )
 
         # 并行搜索：将库内结果和后备搜索结果合并返回
-        if parallel_search_enabled and db_results and fallback_response.animes:
-            library_animes = []
-            for res in db_results:
-                dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
-                dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
-                year = res.get('year')
-                start_date_str = None
-                if year:
-                    start_date_str = datetime(year, 1, 1, tzinfo=get_app_timezone()).isoformat()
-                elif res.get('startDate'):
-                    start_date_str = res.get('startDate').isoformat()
-
-                # 并行搜索：库内结果的 typeDescription 加「并行 库内」前缀及集数
-                lib_ep_count = res.get('episodeCount', 0)
-                ep_count_label = f"（库内：{lib_ep_count}集）" if lib_ep_count > 0 else ""
-                labeled_type_desc = f"并行 库内 {dandan_type_desc}{ep_count_label}"
-
-                library_animes.append(DandanSearchAnimeItem(
-                    animeId=res['animeId'],
-                    bangumiId=str(res.get('bangumiId') or res['animeId']),
-                    animeTitle=res.get('animeTitle', '未知'),
-                    type=dandan_type,
-                    typeDescription=labeled_type_desc,
-                    imageUrl=res.get('imageUrl') or "",
-                    startDate=start_date_str,
-                    year=year,
-                    episodeCount=res.get('episodeCount', 0),
-                    rating=0.0,
-                    isFavorited=False,
-                ))
-
-            # 后备搜索结果：在原有「来源：XXX 年份：XXXX」括号前加「并行 」标注
-            # 同时在 typeDescription 里追加（搜索：N集）信息
+        if parallel_search_enabled and fallback_response.animes:
+            # 对后备结果逐一判断：该标题在库内是否有集数
+            # 只有「库内有 + 搜索有」的才标注「并行」
             labeled_fallback = []
-            for a in fallback_response.animes:
-                # animeTitle 格式为 "标题 （来源：XXX 年份：XXXX）"
-                # 将「（来源：」替换为「（并行 来源：」
-                new_title = a.animeTitle.replace('（来源：', '（并行 来源：')
+            has_parallel_result = False
 
-                # 计算搜索补充集数：源站总集数 - 库内已有集数
-                new_type_desc = a.typeDescription
+            for a in fallback_response.animes:
+                # 提取后备结果的原始标题（去掉「来源：XXX 年份：XXX」括号）
+                raw_title = a.animeTitle
+                bracket_pos = raw_title.find('（来源：')
+                if bracket_pos > 0:
+                    raw_title = raw_title[:bracket_pos].strip()
+
+                # 查库内已有集数
                 try:
-                    # 提取后备结果的原始标题（去掉来源括号）
-                    raw_title = a.animeTitle
-                    bracket_pos = raw_title.find('（来源：')
-                    if bracket_pos > 0:
-                        raw_title = raw_title[:bracket_pos].strip()
                     library_eps = await crud.get_episode_indices_by_anime_title(session, raw_title)
                     library_count = len(library_eps)
-                    source_count = (a.episodeCount or 0) - library_count
-                    if source_count > 0:
-                        new_type_desc = f"{a.typeDescription}（搜索：{source_count}集）"
                 except Exception:
-                    pass
+                    library_eps = []
+                    library_count = 0
 
-                labeled_fallback.append(a.model_copy(update={
-                    'animeTitle': new_title,
-                    'typeDescription': new_type_desc,
-                }))
+                source_total = a.episodeCount or 0
+                search_count = max(0, source_total - library_count)
 
-            # 合并：库内结果在前，后备搜索结果在后
-            merged_animes = library_animes + labeled_fallback
-            logger.info(f"并行搜索合并: 库内 {len(library_animes)} 个 + 后备 {len(fallback_response.animes)} 个 = {len(merged_animes)} 个结果")
+                if library_count > 0:
+                    # 有库内 + 有搜索：标注「并行」
+                    has_parallel_result = True
+                    new_title = a.animeTitle.replace('（来源：', '（并行 来源：')
+                    # 重建 typeDescription：类型 + 库内集数 + 搜索集数
+                    base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(a.type, a.typeDescription)
+                    library_label = f"（库内：{format_episode_ranges(sorted(library_eps))}）" if library_eps else ""
+                    search_label = f"（搜索：{search_count}集）" if search_count > 0 else ""
+                    new_type_desc = f"{base_type_desc}{library_label}{search_label}"
+                    labeled_fallback.append(a.model_copy(update={
+                        'animeTitle': new_title,
+                        'typeDescription': new_type_desc,
+                    }))
+                else:
+                    # 无库内，保持原样不标注
+                    labeled_fallback.append(a)
+
+            # 并行搜索时不单独列出库内条目（后备结果已包含库内信息）
+            # 直接返回标注后的后备结果
+            merged_animes = labeled_fallback
+            logger.info(f"并行搜索: 后备 {len(fallback_response.animes)} 个结果，其中 {sum(1 for a in labeled_fallback if '并行' in a.animeTitle)} 个有库内+搜索标注")
             return DandanSearchAnimeResponse(animes=merged_animes)
 
         return fallback_response
