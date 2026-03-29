@@ -249,17 +249,17 @@ async def search_anime_for_dandan(
                 elif res.get('startDate'):
                     start_date_str = res.get('startDate').isoformat()
 
-                # 并行搜索标注：库内结果加 (并行 库内 年：XXXX)
-                base_title = res.get('animeTitle', '未知')
-                year_label = f" 年：{year}" if year else ""
-                labeled_title = f"{base_title}（并行 库内{year_label}）"
+                # 并行搜索：库内结果的 typeDescription 加「并行 库内」前缀及集数
+                lib_ep_count = res.get('episodeCount', 0)
+                ep_count_label = f"（库内：{lib_ep_count}集）" if lib_ep_count > 0 else ""
+                labeled_type_desc = f"并行 库内 {dandan_type_desc}{ep_count_label}"
 
                 library_animes.append(DandanSearchAnimeItem(
                     animeId=res['animeId'],
                     bangumiId=str(res.get('bangumiId') or res['animeId']),
-                    animeTitle=labeled_title,
+                    animeTitle=res.get('animeTitle', '未知'),
                     type=dandan_type,
-                    typeDescription=dandan_type_desc,
+                    typeDescription=labeled_type_desc,
                     imageUrl=res.get('imageUrl') or "",
                     startDate=start_date_str,
                     year=year,
@@ -268,18 +268,33 @@ async def search_anime_for_dandan(
                     isFavorited=False,
                 ))
 
-            # 后备搜索结果加 (并行 源：XXX 年：XXXX) 标注
+            # 后备搜索结果：在原有「来源：XXX 年份：XXXX」括号前加「并行 」标注
+            # 同时在 typeDescription 里追加（搜索：N集）信息
             labeled_fallback = []
             for a in fallback_response.animes:
-                year_label = f" 年：{a.year}" if a.year else ""
-                # 从 typeDescription 或标题中提取 provider 信息
-                provider_label = ""
-                if a.animeTitle.startswith('['):
-                    end_bracket = a.animeTitle.find(']')
-                    if end_bracket > 0:
-                        provider_label = f" 源：{a.animeTitle[1:end_bracket]}"
+                # animeTitle 格式为 "标题 （来源：XXX 年份：XXXX）"
+                # 将「（来源：」替换为「（并行 来源：」
+                new_title = a.animeTitle.replace('（来源：', '（并行 来源：')
+
+                # 计算搜索补充集数：源站总集数 - 库内已有集数
+                new_type_desc = a.typeDescription
+                try:
+                    # 提取后备结果的原始标题（去掉来源括号）
+                    raw_title = a.animeTitle
+                    bracket_pos = raw_title.find('（来源：')
+                    if bracket_pos > 0:
+                        raw_title = raw_title[:bracket_pos].strip()
+                    library_eps = await crud.get_episode_indices_by_anime_title(session, raw_title)
+                    library_count = len(library_eps)
+                    source_count = (a.episodeCount or 0) - library_count
+                    if source_count > 0:
+                        new_type_desc = f"{a.typeDescription}（搜索：{source_count}集）"
+                except Exception:
+                    pass
+
                 labeled_fallback.append(a.model_copy(update={
-                    'animeTitle': f"{a.animeTitle}（并行{provider_label}{year_label}）"
+                    'animeTitle': new_title,
+                    'typeDescription': new_type_desc,
                 }))
 
             # 合并：库内结果在前，后备搜索结果在后
