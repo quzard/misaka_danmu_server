@@ -377,7 +377,7 @@ async def execute_fallback_search_task(
                 }
                 await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
-            # 检查库内是否已有相同标题的分集
+            # 检查库内是否已有相同标题的分集，写入 typeDescription
             base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
             type_description = base_type_desc
 

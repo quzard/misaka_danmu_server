@@ -260,17 +260,17 @@ async def search_anime_for_dandan(
                     library_count = 0
 
                 source_total = a.episodeCount or 0
-                search_count = max(0, source_total - library_count)
 
                 if library_count > 0:
-                    # 有库内 + 有搜索：标注「并行」
+                    # 有库内：标注「并行」，在已有 typeDescription 基础上追加（搜索：X-X）
                     has_parallel_result = True
                     new_title = a.animeTitle.replace('（来源：', '（并行 来源：')
-                    # 重建 typeDescription：类型 + 库内集数 + 搜索集数
-                    base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(a.type, a.typeDescription)
-                    library_label = f"（库内：{format_episode_ranges(sorted(library_eps))}）" if library_eps else ""
-                    search_label = f"（搜索：{search_count}集）" if search_count > 0 else ""
-                    new_type_desc = f"{base_type_desc}{library_label}{search_label}"
+                    # 计算搜索补充集数范围：源站 1~N 中，库内没有的集数
+                    library_eps_set = set(library_eps)
+                    search_eps = [i for i in range(1, source_total + 1) if i not in library_eps_set]
+                    search_label = f"（搜索：{format_episode_ranges(search_eps)}）" if search_eps else ""
+                    # typeDescription 已含「（库内：X-X）」，直接追加搜索标注
+                    new_type_desc = f"{a.typeDescription}{search_label}"
                     labeled_fallback.append(a.model_copy(update={
                         'animeTitle': new_title,
                         'typeDescription': new_type_desc,
