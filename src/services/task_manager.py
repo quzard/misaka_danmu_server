@@ -109,7 +109,7 @@ class TaskManager:
         suffix = "_success" if is_success else "_failed"
 
         # 删除任务不发通知
-        if key.startswith("delete-"):
+        if key.startswith("delete-source-") or key.startswith("delete-bulk-sources-"):
             return None
 
         # 定时任务（有 scheduled_task_id）
@@ -140,9 +140,16 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
-        # 后备下载/搜索任务
+        # 后备队列任务：按 title 前缀分发为三种独立事件
         if getattr(task, "queue_type", "") == "fallback":
-            return f"download_fallback{suffix}"
+            if title.startswith("后备搜索:"):
+                return f"fallback_search{suffix}"
+            elif title.startswith("预下载弹幕:"):
+                return f"predownload{suffix}"
+            elif title.startswith("匹配后备弹幕下载:"):
+                return f"match_fallback{suffix}"
+            else:
+                return f"fallback_search{suffix}"  # 兜底
 
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
@@ -655,8 +662,19 @@ class TaskManager:
         """为特定任务创建一个可暂停的回调闭包。"""
         queue_type = getattr(task, "queue_type", "download")
         is_fallback = queue_type == "fallback"
-        # fallback 任务用 download_fallback_complete 开关；普通任务用 task_progress 开关
-        progress_check_key = "download_fallback_complete" if is_fallback else "task_progress"
+        # fallback 任务按 title 前缀确定对应的订阅 key；普通任务用 task_progress 开关
+        if is_fallback:
+            title = task.title or ""
+            if title.startswith("后备搜索:"):
+                progress_check_key = "fallback_search_complete"
+            elif title.startswith("预下载弹幕:"):
+                progress_check_key = "predownload_complete"
+            elif title.startswith("匹配后备弹幕下载:"):
+                progress_check_key = "match_fallback_complete"
+            else:
+                progress_check_key = "fallback_search_complete"  # 兜底
+        else:
+            progress_check_key = "task_progress"
 
         async def pausable_callback(progress: int, description: str, status: Optional[TaskStatus] = None):
             # 核心暂停逻辑：在每次更新进度前，检查暂停事件。

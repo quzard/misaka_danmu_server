@@ -192,6 +192,10 @@ class NotificationService(
             "search_import": self.cb_search_import,
             "search_episodes": self.cb_search_episodes,
             "ep_page": self.cb_episode_page,
+            # search notify 快捷按钮（后备任务完成通知）
+            "search_notify": self.cb_search_notify,
+            "search_notify_season": self.cb_search_notify_season,
+            "search_notify_episode": self.cb_search_notify_episode,
             # search → edit import
             "search_edit": self.cb_search_edit,
             "edit_ep_toggle": self.cb_edit_ep_toggle,
@@ -252,6 +256,9 @@ class NotificationService(
             "refresh_episode_range": self._text_refresh_episode_range,
             "delete_episode_range": self._text_delete_episode_range,
             "edit_title_input": self._text_edit_title,
+            # 后备任务通知快捷按钮的文本输入
+            "search_notify_season_input": self._text_search_notify_season,
+            "search_notify_episode_input": self._text_search_notify_episode,
         }
         handler = text_handler_map.get(state)
         if not handler:
@@ -278,6 +285,9 @@ class NotificationService(
     # 有进度消息记录时，完成通知会 edit 已有消息（适用于所有任务类型）
     _COMPLETE_EVENT_TYPES = {
         "download_fallback_success", "download_fallback_failed",
+        "fallback_search_success", "fallback_search_failed",
+        "predownload_success", "predownload_failed",
+        "match_fallback_success", "match_fallback_failed",
         "import_success", "import_failed",
         "auto_import_success", "auto_import_failed",
         "webhook_import_success", "webhook_import_failed",
@@ -286,26 +296,36 @@ class NotificationService(
         "scheduled_task_complete", "scheduled_task_failed",
     }
 
-    # fallback 完成事件与其订阅 key 的映射
-    _FALLBACK_COMPLETE_EVENTS = {"download_fallback_success", "download_fallback_failed"}
+    # fallback 完成事件 → 订阅 check_key 的映射（dict）
+    _FALLBACK_COMPLETE_EVENTS = {
+        "download_fallback_success": "download_fallback_complete",
+        "download_fallback_failed": "download_fallback_complete",
+        "fallback_search_success": "fallback_search_complete",
+        "fallback_search_failed": "fallback_search_complete",
+        "predownload_success": "predownload_complete",
+        "predownload_failed": "predownload_complete",
+        "match_fallback_success": "match_fallback_complete",
+        "match_fallback_failed": "match_fallback_complete",
+    }
 
     async def emit_event(self, event_type: str, data: Dict[str, Any]):
         """向所有订阅了该事件的渠道发送通知"""
         if not self.notification_manager:
             return
         channels = self.notification_manager.get_all_channels()
-        is_fallback_complete = event_type in self._FALLBACK_COMPLETE_EVENTS
         is_any_complete = event_type in self._COMPLETE_EVENT_TYPES
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
-                # 检查订阅：fallback complete/failed 统一用 download_fallback_complete 开关
-                check_key = "download_fallback_complete" if is_fallback_complete else event_type
+                # 检查订阅：fallback 事件从映射表取对应的订阅 key，否则直接用 event_type
+                check_key = self._FALLBACK_COMPLETE_EVENTS.get(event_type, event_type)
                 subscribed = events_cfg.get(check_key)
                 logger.info(f"[通知] event={event_type} ch={ch_id} check_key={check_key} subscribed={subscribed}")
                 if not subscribed:
                     continue
-                title, text = self._format_event_message(event_type, data)
+                fmt_result = self._format_event_message(event_type, data)
+                title, text = fmt_result[0], fmt_result[1]
+                reply_markup = fmt_result[2] if len(fmt_result) == 3 else None
                 image_url: str = data.get("image_url", "") or ""
                 task_id: str = data.get("task_id", "")
                 # 任务完成时：若 TG 有已发进度消息，则 edit；否则发新消息
@@ -314,12 +334,13 @@ class NotificationService(
                     msg_id_out: List[int] = []
                     await channel_instance.send_message(
                         title=title, text=text, image=image_url,
-                        edit_message_id=edit_mid, _msg_id_out=msg_id_out
+                        edit_message_id=edit_mid, _msg_id_out=msg_id_out,
+                        reply_markup=reply_markup,
                     )
                     # 任务完成后清理缓存
                     self._task_progress_tg_msg.pop(task_id, None)
                 else:
-                    await channel_instance.send_message(title=title, text=text, image=image_url)
+                    await channel_instance.send_message(title=title, text=text, image=image_url, reply_markup=reply_markup)
             except Exception as e:
                 logger.error(f"渠道 {ch_id} 发送事件 {event_type} 失败: {e}")
 

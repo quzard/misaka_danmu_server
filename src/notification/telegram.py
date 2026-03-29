@@ -495,6 +495,9 @@ class TelegramChannel(BaseNotificationChannel):
         edit_message_id: Optional[int] = kwargs.get("edit_message_id")
         # _msg_id_out：调用方传入的列表，发新消息后把 message_id 写进去
         msg_id_out: Optional[list] = kwargs.get("_msg_id_out")
+        # reply_markup：内联键盘按钮（列表格式同 CommandResult.reply_markup）
+        raw_markup = kwargs.get("reply_markup")
+        markup = self._build_inline_markup(raw_markup) if raw_markup else None
         try:
             if edit_message_id:
                 # 尝试 edit 已有消息
@@ -504,6 +507,7 @@ class TelegramChannel(BaseNotificationChannel):
                         chat_id=chat_id,
                         message_id=edit_message_id,
                         parse_mode="Markdown",
+                        reply_markup=markup,
                     )
                 except Exception as edit_err:
                     err_str = str(edit_err).lower()
@@ -516,6 +520,7 @@ class TelegramChannel(BaseNotificationChannel):
                                 chat_id=chat_id,
                                 message_id=edit_message_id,
                                 parse_mode="Markdown",
+                                reply_markup=markup,
                             )
                         except Exception as cap_err:
                             if "message is not modified" not in str(cap_err).lower():
@@ -523,16 +528,16 @@ class TelegramChannel(BaseNotificationChannel):
                     else:
                         self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
                         # edit 失败时降级为发新消息
-                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                         if msg_id_out is not None and sent:
                             msg_id_out.append(sent.message_id)
             elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown")
+                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
-                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:

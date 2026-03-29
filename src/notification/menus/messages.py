@@ -24,9 +24,16 @@ class MessagesMixin:
         "scheduled_task_complete": ("定时任务完成", True),
         "scheduled_task_failed": ("定时任务失败", False),
         "system_start": ("系统启动", True),
-        # 后备下载任务
+        # 后备下载任务（旧，保留兼容）
         "download_fallback_success": ("后备弹幕下载完成", True),
         "download_fallback_failed": ("后备弹幕下载失败", False),
+        # 后备任务（拆分三种子类型）
+        "fallback_search_success": ("后备搜索完成", True),
+        "fallback_search_failed": ("后备搜索失败", False),
+        "predownload_success": ("预下载完成", True),
+        "predownload_failed": ("预下载失败", False),
+        "match_fallback_success": ("匹配后备完成", True),
+        "match_fallback_failed": ("匹配后备失败", False),
     }
 
     def _format_event_message(self, event_type: str, data: Dict[str, Any]) -> tuple:
@@ -69,9 +76,10 @@ class MessagesMixin:
             ]
             return (label, "\n".join(lines))
 
-        # ── 后备弹幕下载 ──────────────────────────────────
+        # ── 后备弹幕下载（旧，保留兼容） ────────────────────────
         if event_type in ("download_fallback_success", "download_fallback_failed"):
             token_name = data.get("token_name", "")
+            search_term = data.get("search_term", "") or task_title.replace("后备搜索: ", "").strip()
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
@@ -80,6 +88,63 @@ class MessagesMixin:
                 "⚙️ *任务执行信息*",
                 f"• TaskID: `{task_id}`" if task_id else "",
                 f"  └─ 状态: {icon} {'已完成 (100%)' if is_success else '失败'}",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+            ]
+            reply_markup = [
+                [
+                    {"text": "🔍 搜索", "callback_data": f"search_notify:{search_term}"},
+                    {"text": "📅 指定季", "callback_data": f"search_notify_season:{search_term}"},
+                    {"text": "🎯 指定季集", "callback_data": f"search_notify_episode:{search_term}"},
+                ]
+            ] if search_term else None
+            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l), reply_markup)
+
+        # ── 后备搜索 ─────────────────────────────────────────
+        if event_type in ("fallback_search_success", "fallback_search_failed"):
+            token_name = data.get("token_name", "")
+            search_term = data.get("search_term", "") or task_title.replace("后备搜索: ", "").strip()
+            lines = [
+                "📺 *媒体信息*",
+                f"• 任务: {task_title}" if task_title else "",
+                f"• 调用者: {token_name}" if token_name else "",
+                "",
+                "⚙️ *执行结果*",
+                f"• TaskID: `{task_id}`" if task_id else "",
+                f"  └─ 状态: {icon} {'已完成' if is_success else '失败'}",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+            ]
+            reply_markup = [
+                [
+                    {"text": "🔍 搜索", "callback_data": f"search_notify:{search_term}"},
+                    {"text": "📅 指定季", "callback_data": f"search_notify_season:{search_term}"},
+                    {"text": "🎯 指定季集", "callback_data": f"search_notify_episode:{search_term}"},
+                ]
+            ] if search_term else None
+            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l), reply_markup)
+
+        # ── 预下载弹幕 ───────────────────────────────────────
+        if event_type in ("predownload_success", "predownload_failed"):
+            lines = [
+                "📺 *媒体信息*",
+                f"• 任务: {task_title}" if task_title else "",
+                "",
+                "⚙️ *执行结果*",
+                f"• 状态: {icon} {'处理完成' if is_success else '处理失败'}",
+                f"  └─ 📋 {msg_short}" if msg_short else "",
+                f"• 时间: {finished_at}" if finished_at else "",
+            ]
+            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l))
+
+        # ── 匹配后备 ─────────────────────────────────────────
+        if event_type in ("match_fallback_success", "match_fallback_failed"):
+            lines = [
+                "📺 *媒体信息*",
+                f"• 任务: {task_title}" if task_title else "",
+                "",
+                "⚙️ *执行结果*",
+                f"• 状态: {icon} {'处理完成' if is_success else '处理失败'}",
                 f"  └─ 📋 {msg_short}" if msg_short else "",
                 f"• 时间: {finished_at}" if finished_at else "",
             ]
