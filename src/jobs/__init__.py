@@ -5,6 +5,7 @@ from .incremental_refresh import IncrementalRefreshJob
 from .refresh_latest_episode import RefreshLatestEpisodeJob
 from .tmdb_auto_map import TmdbAutoMapJob
 from .webhook_processor import WebhookProcessorJob
+from .danmaku_cleanup import DanmakuCleanupJob
 
 __all__ = [
     'BaseJob',
@@ -14,4 +15,5 @@ __all__ = [
     'RefreshLatestEpisodeJob',
     'TmdbAutoMapJob',
     'WebhookProcessorJob',
+    'DanmakuCleanupJob',
 ]

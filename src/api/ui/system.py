@@ -987,8 +987,11 @@ async def stream_update(
     image_name = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
     proxy_url = await config_manager.get("proxyUrl", "")
     proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+    proxy_mode = await config_manager.get("proxyMode", "none")
 
-    effective_proxy = proxy_url if proxy_enabled and proxy_url else None
+    # 兼容新版 proxyMode 和旧版 proxyEnabled 两种配置
+    use_proxy = proxy_mode == "http_socks" or (proxy_mode == "none" and proxy_enabled)
+    effective_proxy = proxy_url if use_proxy and proxy_url else None
 
     async def generate_progress():
         try:
@@ -1003,7 +1006,7 @@ async def stream_update(
                     return
 
             # 阶段 2: 使用 watchtower 更新
-            for progress in update_container_with_watchtower(container_name):
+            for progress in update_container_with_watchtower(container_name, proxy_url=effective_proxy):
                 yield f"data: {json.dumps(progress)}\n\n"
 
         except Exception as e:

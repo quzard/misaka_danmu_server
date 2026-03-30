@@ -620,7 +620,8 @@ def _format_bytes(bytes_value: int) -> str:
 
 def update_container_with_watchtower(
     container_name: str,
-    watchtower_image: str = "containrrr/watchtower"
+    watchtower_image: str = "containrrr/watchtower",
+    proxy_url: Optional[str] = None,
 ) -> Generator[Dict[str, Any], None, None]:
     """
     使用 watchtower 更新容器
@@ -628,6 +629,8 @@ def update_container_with_watchtower(
     Args:
         container_name: 要更新的容器名称
         watchtower_image: watchtower 镜像名称
+        proxy_url: HTTP/SOCKS 代理 URL（如 http://host:port 或 socks5://host:port），
+                   将作为 HTTP_PROXY/HTTPS_PROXY 环境变量传入 watchtower 容器
 
     Yields:
         更新进度信息
@@ -654,12 +657,22 @@ def update_container_with_watchtower(
         # 运行 watchtower 一次性更新
         command = ["--cleanup", "--run-once", container_name]
 
+        # 构建环境变量：clash 系代理需要通过环境变量传入 watchtower 容器
+        environment = {}
+        if proxy_url:
+            environment["HTTP_PROXY"] = proxy_url
+            environment["HTTPS_PROXY"] = proxy_url
+            environment["http_proxy"] = proxy_url
+            environment["https_proxy"] = proxy_url
+            logger.info(f"Watchtower 将使用代理: {proxy_url}")
+
         client.containers.run(
             image=watchtower_image,
             command=command,
             remove=True,
             detach=True,
-            volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}}
+            volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}},
+            environment=environment if environment else None,
         )
 
         yield {"status": "更新任务已启动，容器将在后台被重启"}

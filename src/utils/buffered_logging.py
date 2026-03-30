@@ -84,8 +84,12 @@ def flush_buffered_logs(
         '%(asctime)s [%(name)s] [%(levelname)s] - %(message)s'
     )
 
+    # 按 output_logger 的有效级别过滤，避免 DEBUG 记录在 INFO 模式下出现
+    effective_level = output_logger.getEffectiveLevel()
     lines = ["-", header]
     for record in records:
+        if record.levelno < effective_level:
+            continue
         # 临时简化 logger 名称：_buf_.sohu.135038907895424 → sohu
         original_name = record.name
         record.name = provider_name
