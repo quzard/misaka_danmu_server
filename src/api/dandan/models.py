@@ -23,6 +23,8 @@ class DandanEpisodeInfo(BaseModel):
     """dandanplay /search/episodes 接口中的分集信息模型"""
     episodeId: int
     episodeTitle: str
+    isLibrary: bool = True  # True=库内已有，False=源站补充（并行搜索）
+    episodeIndex: Optional[int] = None  # 集数索引，仅并行搜索时使用
 
 
 class DandanAnimeInfo(BaseModel):
@@ -38,6 +40,9 @@ class DandanAnimeInfo(BaseModel):
     isFavorited: bool = False
     rating: float = 0.0
     episodes: List[DandanEpisodeInfo]
+    isParallelResult: bool = False  # True=并行搜索结果（含源站补充分集）
+    parallelProvider: str = ""    # 并行搜索的来源名称
+    parallelYear: Optional[int] = None  # 并行搜索的年份
 
 
 class DandanSearchEpisodesResponse(DandanResponseBase):

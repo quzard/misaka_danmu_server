@@ -80,6 +80,8 @@ class CommandResult:
     clear_state: bool = False           # 清除当前对话状态
     # 回调查询应答文本（仅 callback_query 场景使用）
     answer_callback_text: Optional[str] = None
+    # 任务ID：发完消息后用于注册进度跟踪（telegram.py _render_result 使用）
+    task_id: Optional[str] = None
     # 图文文章列表（渠道层有能力时优先展示带图版本）
     # 每项: {"title": str, "description": str, "picurl": str, "url": str}
     articles: List[Dict[str, str]] = field(default_factory=list)
@@ -158,6 +160,12 @@ class BaseNotificationChannel(ABC):
         返回 True 表示已处理，False 表示不支持。
         """
         return False
+
+    async def send_quick(self, text: str, chat_id=None) -> Optional[int]:
+        """发送一条快速消息并返回 message_id（用于后续 edit）。
+        不支持的渠道返回 None。子类可覆写实现。
+        """
+        return None
 
     @staticmethod
     @abstractmethod

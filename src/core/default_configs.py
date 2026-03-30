@@ -106,6 +106,9 @@ def get_default_configs(settings=None, ai_prompts=None):
         # 预下载配置
         'preDownloadNextEpisodeEnabled': ('false', '是否启用预下载下一集弹幕。当播放当前集时，自动下载下一集的弹幕。需要启用匹配后备或后备搜索。'),
 
+        # 弹幕自动刷新配置
+        'danmakuAutoRefreshDays': ('0', '弹幕自动刷新间隔天数。当请求弹幕时，若弹幕获取时间超过此天数则自动触发刷新。设为 0 禁用此功能。'),
+
         # 季度映射配置
         'homeSearchEnableTmdbSeasonMapping': ('false', '是否启用主页搜索 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),
         'fallbackSearchEnableTmdbSeasonMapping': ('false', '是否启用后备搜索 TMDB季度映射。启用后，系统会通过TMDB等元数据源获取季度名称，提高多季度剧集的匹配准确率。'),

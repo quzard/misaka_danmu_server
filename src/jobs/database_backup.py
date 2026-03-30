@@ -531,8 +531,11 @@ class DatabaseBackupJob(BaseJob):
             await progress_callback(100, "备份完成")
 
             size_mb = result['size'] / (1024 * 1024)
-            final_message = f"数据库备份完成。文件: {result['filename']}, 大小: {size_mb:.2f} MB, 记录数: {result['records']}"
-            self.logger.info(final_message)
+            final_message = (
+                f"数据库备份完成。文件: {result['filename']}\n"
+                f"大小: {size_mb:.2f} MB, 记录数: {result['records']}"
+            )
+            self.logger.info(final_message.replace("\n", " | "))
             raise TaskSuccess(final_message)
 
         except TaskSuccess:

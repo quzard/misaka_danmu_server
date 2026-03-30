@@ -337,11 +337,20 @@ class TelegramChannel(BaseNotificationChannel):
         user_id = str(message.from_user.id)
         chat_id = message.chat.id
         text = (message.text or "").strip()
-        result: CommandResult = await self.service.handle_text_input(
-            text, user_id, self, chat_id=chat_id
-        )
-        if result and result.text:
-            self._render_result(result, chat_id, reply_to_message_id=message.message_id)
+        try:
+            result: CommandResult = await self.service.handle_text_input(
+                text, user_id, self, chat_id=chat_id
+            )
+            if result is None:
+                # 无活跃对话状态，记录调试信息
+                conv = self.service.get_conversation(user_id)
+                if conv:
+                    self.logger.warning(f"[文本处理] 用户 {user_id} 状态 '{conv.state}' 无匹配处理器")
+                return
+            if result and result.text:
+                self._render_result(result, chat_id, reply_to_message_id=message.message_id)
+        except Exception as e:
+            self.logger.error(f"[文本处理] 处理失败 user={user_id}: {e}", exc_info=True)
 
     # ── 渲染引擎 ──
 
@@ -415,14 +424,26 @@ class TelegramChannel(BaseNotificationChannel):
 
                 if cover_url:
                     self._log_raw("⬆ 发送图文消息", {"chat_id": chat_id, "photo": cover_url, "text": result.text[:200]})
-                    sent = self._bot.send_photo(
-                        chat_id,
-                        cover_url,
-                        caption=result.text,
-                        reply_markup=markup,
-                        parse_mode=parse_mode,
-                        reply_to_message_id=reply_to_message_id,
-                    )
+                    # TG caption 最大 1024 字符，超长时截断
+                    caption_text = result.text[:1024] if len(result.text) > 1024 else result.text
+                    try:
+                        sent = self._bot.send_photo(
+                            chat_id,
+                            cover_url,
+                            caption=caption_text,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            reply_to_message_id=reply_to_message_id,
+                        )
+                    except Exception as photo_err:
+                        self.logger.warning(f"send_photo 失败，降级为纯文本: {photo_err}")
+                        sent = self._bot.send_message(
+                            chat_id,
+                            result.text,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            reply_to_message_id=reply_to_message_id,
+                        )
                 else:
                     # 发送纯文本消息
                     self._log_raw("⬆ 发送消息", {"chat_id": chat_id, "text": result.text[:200]})
@@ -438,18 +459,32 @@ class TelegramChannel(BaseNotificationChannel):
                     self.service.update_conversation_message_id(
                         str(chat_id), sent.message_id
                     )
+                # 如果携带 task_id，把 message_id 预注册到进度跟踪表
+                # 这样 emit_task_progress 就能 edit 该消息而非新建
+                if result.task_id and sent and hasattr(self.service, '_task_progress_tg_msg'):
+                    self.service._task_progress_tg_msg.setdefault(
+                        result.task_id, {}
+                    )[self.channel_id] = sent.message_id
         except Exception as e:
             self.logger.error(f"渲染消息失败: {e}")
-            # 降级为纯文本
+            # 降级为纯文本（保留按钮）
             try:
-                self._bot.send_message(chat_id, result.text)
+                self._bot.send_message(chat_id, result.text, reply_markup=markup)
             except Exception:
-                pass
+                try:
+                    self._bot.send_message(chat_id, result.text)
+                except Exception:
+                    pass
 
     def _start_polling(self):
         """在后台线程中启动长轮询"""
         if self._polling_thread and self._polling_thread.is_alive():
             return
+
+        # 压制 telebot / urllib3 的 SSL 瞬断噪音日志（这类错误 infinity_polling 会自动重试）
+        import logging as _logging
+        _logging.getLogger("urllib3.connectionpool").setLevel(_logging.CRITICAL)
+        _logging.getLogger("telebot").setLevel(_logging.WARNING)
 
         def polling_worker():
             self.logger.info("Telegram 轮询已启动")
@@ -458,7 +493,12 @@ class TelegramChannel(BaseNotificationChannel):
                 self._bot.infinity_polling(timeout=30, long_polling_timeout=30)
             except Exception as e:
                 if self._running:
-                    self.logger.error(f"Telegram 轮询异常退出: {e}")
+                    err_str = str(e).lower()
+                    # SSL 瞬断 / 网络超时属于可恢复的瞬态错误，降级为 WARNING
+                    if any(k in err_str for k in ("ssl", "eof", "timeout", "connectionpool", "max retries")):
+                        self.logger.warning(f"Telegram 轮询网络瞬断（将自动重试）: {type(e).__name__}")
+                    else:
+                        self.logger.error(f"Telegram 轮询异常退出: {e}")
 
         self._polling_thread = threading.Thread(
             target=polling_worker,
@@ -495,6 +535,9 @@ class TelegramChannel(BaseNotificationChannel):
         edit_message_id: Optional[int] = kwargs.get("edit_message_id")
         # _msg_id_out：调用方传入的列表，发新消息后把 message_id 写进去
         msg_id_out: Optional[list] = kwargs.get("_msg_id_out")
+        # reply_markup：内联键盘按钮（列表格式同 CommandResult.reply_markup）
+        raw_markup = kwargs.get("reply_markup")
+        markup = self._build_inline_markup(raw_markup) if raw_markup else None
         try:
             if edit_message_id:
                 # 尝试 edit 已有消息
@@ -504,6 +547,7 @@ class TelegramChannel(BaseNotificationChannel):
                         chat_id=chat_id,
                         message_id=edit_message_id,
                         parse_mode="Markdown",
+                        reply_markup=markup,
                     )
                 except Exception as edit_err:
                     err_str = str(edit_err).lower()
@@ -516,6 +560,7 @@ class TelegramChannel(BaseNotificationChannel):
                                 chat_id=chat_id,
                                 message_id=edit_message_id,
                                 parse_mode="Markdown",
+                                reply_markup=markup,
                             )
                         except Exception as cap_err:
                             if "message is not modified" not in str(cap_err).lower():
@@ -523,16 +568,16 @@ class TelegramChannel(BaseNotificationChannel):
                     else:
                         self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
                         # edit 失败时降级为发新消息
-                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                         if msg_id_out is not None and sent:
                             msg_id_out.append(sent.message_id)
             elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown")
+                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
-                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown")
+                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:
@@ -545,6 +590,20 @@ class TelegramChannel(BaseNotificationChannel):
                     msg_id_out.append(sent.message_id)
             except Exception:
                 pass
+
+    async def send_quick(self, text: str, chat_id=None) -> Optional[int]:
+        """发送一条快速消息，返回 message_id 供后续 edit 使用"""
+        if not self._bot:
+            return None
+        target = chat_id or self.config.get("chat_id", "")
+        if not target:
+            return None
+        try:
+            sent = self._bot.send_message(target, text)
+            return sent.message_id if sent else None
+        except Exception as e:
+            self.logger.warning(f"send_quick 失败: {e}")
+            return None
 
     async def test_connection(self) -> Dict[str, Any]:
         bot_token = self.config.get("bot_token", "")

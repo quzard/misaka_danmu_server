@@ -52,6 +52,7 @@ from .dependencies import (
     get_rate_limiter,
     get_scraper_manager,
 )
+from src.api.control.dependencies import get_title_recognition_manager
 
 # 从主文件导入预下载和刷新等待函数（这些函数依赖较多，暂时保留在主文件中）
 # 注意：这是临时方案，后续可以考虑将这些函数移到单独的模块
@@ -212,7 +213,8 @@ async def get_comments_for_dandan(
     config_manager: ConfigManager = Depends(get_config_manager),
     scraper_manager: ScraperManager = Depends(get_scraper_manager),
     task_manager: TaskManager = Depends(get_task_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    title_recognition_manager = Depends(get_title_recognition_manager),
 ):
     """
     模拟 dandanplay 的弹幕获取接口。
@@ -227,12 +229,56 @@ async def get_comments_for_dandan(
     # 1. 优先从弹幕库获取弹幕
     comments_data = await crud.fetch_comments(session, episodeId)
 
+    # 2. 弹幕过期自动刷新检测
+    if comments_data:
+        try:
+            auto_refresh_days_str = await config_manager.get("danmakuAutoRefreshDays", "0")
+            auto_refresh_days = int(auto_refresh_days_str)
+        except (ValueError, TypeError):
+            auto_refresh_days = 0
+
+        if auto_refresh_days > 0:
+            fetched_at = await crud.get_episode_fetched_at(session, episodeId)
+            if fetched_at is not None:
+                now = get_now()
+                age_days = (now - fetched_at).total_seconds() / 86400
+                if age_days >= auto_refresh_days:
+                    unique_key = f"refresh-episode-{episodeId}"
+                    # 检查是否已有刷新任务在跑（避免重复提交）
+                    already_running = False
+                    async with task_manager._lock:
+                        already_running = unique_key in task_manager._active_unique_keys
+
+                    if not already_running:
+                        logger.info(f"[自动刷新] episodeId={episodeId} 弹幕已 {age_days:.1f} 天未更新（阈值={auto_refresh_days}天），触发自动刷新")
+                        try:
+                            _ep_id = episodeId
+                            _scraper = scraper_manager
+                            _rl = rate_limiter
+                            _cfg = config_manager
+                            await task_manager.submit_task(
+                                lambda s, cb, _eid=_ep_id, _sm=_scraper, _r=_rl, _c=_cfg: tasks.refresh_episode_task(
+                                    _eid, s, _sm, _r, cb, _c
+                                ),
+                                f"自动刷新弹幕: episodeId={episodeId}",
+                                unique_key=unique_key,
+                                run_immediately=True
+                            )
+                        except Exception as e:
+                            logger.warning(f"[自动刷新] 提交刷新任务失败: {e}")
+
+                    # 等待刷新任务完成（最多30秒），完成后重取弹幕
+                    refreshed = await wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=30.0)
+                    if refreshed:
+                        comments_data = await crud.fetch_comments(session, episodeId)
+                        logger.info(f"[自动刷新] episodeId={episodeId} 刷新完成，重新获取弹幕 {len(comments_data)} 条")
+
     # 预下载下一集弹幕 (异步,不阻塞当前响应)
     # 只有当前集已存在于数据库时才触发预下载（后备场景会在任务完成后单独触发）
     if comments_data:
         predownload_task = asyncio.create_task(try_predownload_next_episode(
             episodeId, request.app.state.db_session_factory, config_manager, task_manager,
-            scraper_manager, rate_limiter
+            scraper_manager, rate_limiter, title_recognition_manager
         ))
 
         # 添加异常处理回调

@@ -152,6 +152,9 @@ export const getInLibraryEpisodes = data =>
 /** 提交编辑导入 */
 export const importEdit = data => api.post('/api/ui/import/edited', data)
 
+/** 预览集数偏移效果 */
+export const previewEpisodeOffset = data => api.post('/api/ui/import/preview-offset', data)
+
 /** 搜索tmdb */
 export const getTmdbSearch = data =>
   api.get(

@@ -69,7 +69,8 @@ async def try_predownload_next_episode(
     config_manager: ConfigManager,
     task_manager: TaskManager,
     scraper_manager: ScraperManager,
-    rate_limiter: RateLimiter
+    rate_limiter: RateLimiter,
+    title_recognition_manager = None,
 ):
     """
     尝试预下载下一集弹幕（异步，不阻塞当前请求）
@@ -182,15 +183,28 @@ async def try_predownload_next_episode(
                         raise TaskSuccess("无法获取分集列表")
 
                     # 查找下一集
+                    # 如果有 partial_offset 规则，需要反向偏移到源站实际集数再查找
+                    source_episode_index = next_episode_index
+                    if title_recognition_manager and anime and anime.title:
+                        try:
+                            source_episode_index = await title_recognition_manager.reverse_episode_offset(
+                                anime.title, next_episode_index, provider
+                            )
+                            if source_episode_index != next_episode_index:
+                                logger.info(f"预下载反向偏移: '{anime.title}' 存储第{next_episode_index}集 => 源站第{source_episode_index}集")
+                        except Exception as e:
+                            logger.warning(f"预下载反向偏移失败，使用原始集数: {e}")
+                            source_episode_index = next_episode_index
+
                     target_episode = None
                     for ep in episodes:
-                        if ep.episodeIndex == next_episode_index:
+                        if ep.episodeIndex == source_episode_index:
                             target_episode = ep
                             break
 
                     if not target_episode:
-                        logger.info(f"预下载跳过: 源站没有第 {next_episode_index} 集 (provider={provider}, mediaId={media_id})")
-                        raise TaskSuccess(f"源站没有第 {next_episode_index} 集")
+                        logger.info(f"预下载跳过: 源站没有第 {source_episode_index} 集 (provider={provider}, mediaId={media_id})")
+                        raise TaskSuccess(f"源站没有第 {source_episode_index} 集")
 
                     provider_episode_id = target_episode.episodeId
                     episode_title = target_episode.title

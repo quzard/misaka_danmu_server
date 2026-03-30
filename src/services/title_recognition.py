@@ -480,7 +480,7 @@ class TitleRecognitionManager:
 
         return processed_text, processed_episode, processed_season, has_changed
 
-    async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]]]:
+    async def apply_storage_postprocessing(self, text: str, season: Optional[int] = None, source: Optional[str] = None, episode: Optional[int] = None) -> Tuple[str, Optional[int], bool, Optional[Dict[str, Any]], Optional[int]]:
         """
         应用入库后处理规则（在选择最佳匹配后执行）
 
@@ -488,17 +488,19 @@ class TitleRecognitionManager:
             text: 选择的最佳匹配标题
             season: 原始季数
             source: 数据源名称
+            episode: 当前集数（用于 partial_offset 规则）
 
         Returns:
-            Tuple[处理后的标题, 处理后的季数, 是否发生了转换, 元数据信息]
+            Tuple[处理后的标题, 处理后的季数, 是否发生了转换, 元数据信息, 处理后的集数]
         """
         await self._ensure_rules_loaded()
 
         if not text:
-            return text, season, False, None
+            return text, season, False, None, episode
 
         processed_text = text
         processed_season = season
+        processed_episode = episode
         has_changed = False
         metadata_info = None
 
@@ -529,6 +531,25 @@ class TitleRecognitionManager:
                         has_changed = True
                         logger.debug(f"入库后处理 - 应用季度偏移: {season} => {processed_season}")
 
+            elif rule.rule_type == 'partial_offset':
+                # 部分集数偏移规则：标题匹配 + 集数在范围内才偏移
+                if self._exact_match(processed_text, rule.data['source']):
+                    # 检查source限制
+                    rule_source = rule.data.get('source_restriction')
+                    if rule_source and rule_source != 'all' and source and rule_source != source:
+                        logger.debug(f"入库后处理 - 跳过部分集数偏移规则（源不匹配）: 规则源={rule_source}, 当前源={source}")
+                        continue
+
+                    new_episode = self._apply_partial_episode_offset(
+                        processed_episode,
+                        rule.data['ep_range'],
+                        rule.data['ep_offset']
+                    )
+                    if new_episode != processed_episode:
+                        logger.info(f"入库后处理 - 部分集数偏移: '{rule.data['source']}' 第{processed_episode}集 => 第{new_episode}集 (范围: {rule.data['ep_range']}, 偏移: {rule.data['ep_offset']})")
+                        processed_episode = new_episode
+                        has_changed = True
+
             elif rule.rule_type == 'metadata_replace':
                 # 元数据替换规则
                 if self._exact_match(processed_text, rule.data['source']):
@@ -542,7 +563,70 @@ class TitleRecognitionManager:
                     has_changed = True
                     logger.debug(f"入库后处理 - 应用元数据替换规则: '{rule.data['source']}' => 元数据")
 
-        return processed_text, processed_season, has_changed, metadata_info
+        return processed_text, processed_season, has_changed, metadata_info, processed_episode
+
+    async def reverse_episode_offset(self, text: str, stored_episode: int, source: Optional[str] = None) -> int:
+        """
+        将已偏移存储的集数反向还原为源站原始集数（用于预下载场景）
+
+        例如：规则 ep_range=60-99, ep_offset=+7
+        存储的第68集 → 源站第61集
+
+        Args:
+            text: 番剧标题
+            stored_episode: 数据库中存储的集数（已偏移后）
+            source: 数据源名称
+
+        Returns:
+            源站实际集数，如果无匹配规则则返回 stored_episode 原值
+        """
+        await self._ensure_rules_loaded()
+
+        if not text:
+            return stored_episode
+
+        for rule in self.recognition_rules:
+            if rule.stage != 'postprocess' or rule.rule_type != 'partial_offset':
+                continue
+
+            if not self._exact_match(text, rule.data['source']):
+                continue
+
+            rule_source = rule.data.get('source_restriction')
+            if rule_source and rule_source != 'all' and source and rule_source != source:
+                continue
+
+            ep_offset = rule.data['ep_offset'].strip()
+            ep_range = rule.data['ep_range']
+
+            # 计算反向偏移量
+            try:
+                if ep_offset.upper().startswith('EP'):
+                    # EP 表达式无法简单反向，跳过
+                    continue
+                elif ep_offset.startswith('+'):
+                    delta = int(ep_offset[1:])
+                    source_episode = stored_episode - delta
+                elif ep_offset.startswith('-'):
+                    delta = int(ep_offset[1:])
+                    source_episode = stored_episode + delta
+                else:
+                    delta = int(ep_offset)
+                    source_episode = stored_episode - delta
+
+                source_episode = max(1, source_episode)
+
+                # 验证反向还原后的源站集数是否在规则范围内
+                ep_start, ep_end = ep_range
+                in_range = source_episode >= ep_start and (ep_end is None or source_episode <= ep_end)
+                if in_range:
+                    logger.debug(f"预下载反向偏移: '{text}' 存储第{stored_episode}集 => 源站第{source_episode}集")
+                    return source_episode
+            except Exception as e:
+                logger.warning(f"预下载反向偏移计算失败: stored_episode={stored_episode}, offset={ep_offset}, 错误: {e}")
+
+        return stored_episode
+
 
     async def apply_title_recognition(self, text: str, episode: Optional[int] = None, season: Optional[int] = None, source: Optional[str] = None) -> Tuple[str, Optional[int], Optional[int], bool, Optional[Dict[str, Any]]]:
         """
