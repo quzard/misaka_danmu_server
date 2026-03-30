@@ -67,6 +67,7 @@ class ImportBaseMixin:
                 parse_mode="Markdown",
                 reply_markup=[[{"text": "📋 查看任务状态", "callback_data": f"task_detail:{task_id}"}]],
                 edit_message_id=edit_message_id,
+                task_id=task_id,
             )
         except Exception as e:
             logger.error(f"提交自动导入失败: {e}", exc_info=True)

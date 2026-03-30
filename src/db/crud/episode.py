@@ -664,3 +664,18 @@ async def check_duplicate_import(
 
 # update_config_value - 已迁移到 crud/config.py
 
+
+async def get_episode_fetched_at(session: AsyncSession, episode_id: int):
+    """
+    获取分集的 fetchedAt 时间戳，用于自动刷新过期检测。
+
+    Returns:
+        datetime 或 None（分集不存在时）
+    """
+    stmt = select(Episode.fetchedAt).where(Episode.id == episode_id)
+    result = await session.execute(stmt)
+    row = result.one_or_none()
+    if row is None:
+        return None
+    return row[0]
+

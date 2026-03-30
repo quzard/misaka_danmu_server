@@ -135,6 +135,16 @@ class TmdbReverseLookupConfigRequest(BaseModel):
     sources: List[str]
 
 
+class EpisodeOffsetPreviewRequest(BaseModel):
+    """集数偏移预览请求"""
+    animeTitle: str = Field(..., description="番剧标题（用于匹配识别词规则）")
+    episodeIndices: List[int] = Field(..., description="要预览偏移的集数列表")
+
+class EpisodeOffsetPreviewResponse(BaseModel):
+    """集数偏移预览响应"""
+    offsetMap: Dict[int, int] = Field(default_factory=dict, description="偏移映射 {原始集数: 偏移后集数}，只包含有变化的集数")
+    hasOffset: bool = Field(False, description="是否存在偏移规则")
+
 class ImportFromUrlRequest(BaseModel):
     """从URL导入请求 - 重构后支持动态解析"""
     url: str  # 必填：要导入的URL

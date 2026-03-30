@@ -921,7 +921,7 @@ async def auto_search_and_import_task(
         # 应用存储后处理规则
         final_title = best_match.title
         if title_recognition_manager:
-            processed_title, _, _, postprocessing_applied = await title_recognition_manager.apply_storage_postprocessing(best_match.title, season)
+            processed_title, _, _, postprocessing_applied, _ = await title_recognition_manager.apply_storage_postprocessing(best_match.title, season)
             if postprocessing_applied:
                 final_title = processed_title
                 logger.info(f"✓ 应用存储后处理: '{best_match.title}' -> '{final_title}'")

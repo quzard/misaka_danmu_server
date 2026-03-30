@@ -523,7 +523,9 @@ async def generic_import_task(
             config_manager=config_manager,
             is_single_episode=currentEpisodeIndex is not None,  # 传递是否为单集下载模式
             is_fallback=is_fallback,  # 传递后备任务标识
-            fallback_type=fallback_type  # 传递后备类型
+            fallback_type=fallback_type,  # 传递后备类型
+            title_recognition_manager=title_recognition_manager,  # 传递识别词管理器（用于 partial_offset）
+            anime_title=title_to_use,  # 传递番剧标题（用于 partial_offset 规则匹配）
         )
     except RateLimitExceededError as e:
         # 单源配额已满，转为任务暂停，释放 worker 给其他源
@@ -751,7 +753,9 @@ async def edited_import_task(
             anime_id=anime_id,
             source_id=source_id,
             first_episode_comments=first_episode_comments,
-            config_manager=config_manager
+            config_manager=config_manager,
+            # 注意：edited_import_task 不传 title_recognition_manager/anime_title
+            # 因为前端编辑导入时已通过 preview-offset API 应用了 partial_offset 偏移
         )
     except RateLimitExceededError as e:
         # 单源配额已满，转为任务暂停，释放 worker 给其他源

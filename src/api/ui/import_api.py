@@ -16,7 +16,10 @@ from src.api.dependencies import (
     get_scraper_manager, get_task_manager, get_metadata_manager,
     get_config_manager, get_rate_limiter, get_title_recognition_manager
 )
-from .models import UITaskResponse, ImportFromUrlRequest, ValidateUrlRequest, ValidateUrlResponse
+from .models import (
+    UITaskResponse, ImportFromUrlRequest, ValidateUrlRequest, ValidateUrlResponse,
+    EpisodeOffsetPreviewRequest, EpisodeOffsetPreviewResponse
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +98,7 @@ async def import_from_provider(
 
     if title_recognition_manager:
         try:
-            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+            converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(
                 request_data.animeTitle, request_data.season, request_data.provider
             )
             if was_converted:
@@ -166,7 +169,7 @@ async def import_edited_episodes(
 
     if title_recognition_manager:
         try:
-            converted_title, converted_season, was_converted, metadata_info = await title_recognition_manager.apply_storage_postprocessing(
+            converted_title, converted_season, was_converted, metadata_info, _ = await title_recognition_manager.apply_storage_postprocessing(
                 request_data.animeTitle, request_data.season, request_data.provider
             )
             if was_converted:
@@ -203,6 +206,34 @@ async def import_edited_episodes(
         logger.error(f"提交编辑后导入任务时发生未知错误: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="提交任务时发生内部错误。")
     return {"message": f"'{request_data.animeTitle}' 的编辑导入任务已提交。", "taskId": task_id}
+
+
+@router.post("/import/preview-offset", response_model=EpisodeOffsetPreviewResponse, summary="预览集数偏移效果")
+async def preview_episode_offset(
+    request_data: EpisodeOffsetPreviewRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    title_recognition_manager = Depends(get_title_recognition_manager)
+):
+    """
+    根据自定义识别词规则，预览指定标题和集数列表的偏移效果。
+    仅返回有变化的集数映射，用于编辑导入界面的偏移预览提示。
+    """
+    offset_map = {}
+    if title_recognition_manager and request_data.episodeIndices:
+        for ep_index in request_data.episodeIndices:
+            try:
+                _, _, _, _, converted_ep = await title_recognition_manager.apply_storage_postprocessing(
+                    request_data.animeTitle, episode=ep_index
+                )
+                if converted_ep is not None and converted_ep != ep_index:
+                    offset_map[ep_index] = converted_ep
+            except Exception as e:
+                logger.warning(f"预览集数偏移失败: episode={ep_index}, error={e}")
+
+    return EpisodeOffsetPreviewResponse(
+        offsetMap=offset_map,
+        hasOffset=len(offset_map) > 0
+    )
 
 
 @router.post("/validate-url", summary="校验并解析导入URL", response_model=ValidateUrlResponse)

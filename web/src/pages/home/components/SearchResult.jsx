@@ -4,6 +4,7 @@ import {
   getTmdbSearch,
   importDanmu,
   importEdit,
+  previewEpisodeOffset,
   getSearchResult,
   getAnimeLibrary,
 } from '../../../apis'
@@ -1244,11 +1245,34 @@ export const SearchResult = () => {
                               }
 
                               const res = await getEditEpisodes(params)
-                              setEditEpisodeList(res.data)
+                              let episodes = res.data
                               setEditImportOpen(true)
                               setEditItem(item)
                               setEditMediaType(item.type || 'tv_series')
                               setEditSeason(item.season ?? 1)
+
+                              // 应用集数偏移（根据自定义识别词的 partial_offset 规则）
+                              const title = item.title
+                              const episodeIndices = episodes.map(ep => ep.episodeIndex)
+                              if (title && episodeIndices.length > 0) {
+                                try {
+                                  const offsetRes = await previewEpisodeOffset({
+                                    animeTitle: title,
+                                    episodeIndices,
+                                  })
+                                  const offsetMap = offsetRes.data?.offsetMap || {}
+                                  if (Object.keys(offsetMap).length > 0) {
+                                    // 直接修改分集列表中的 episodeIndex
+                                    episodes = episodes.map(ep => {
+                                      const newIndex = offsetMap[ep.episodeIndex]
+                                      return newIndex != null ? { ...ep, episodeIndex: newIndex } : ep
+                                    })
+                                  }
+                                } catch {
+                                  // 偏移预览失败，使用原始集数
+                                }
+                              }
+                              setEditEpisodeList(episodes)
                               // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
                               const endValue = item.episodeCount > 0 ? item.episodeCount : 1
                               setRange([1, endValue])

@@ -77,9 +77,11 @@ const EVENT_GROUPS = [
     ],
   },
   {
-    label: '后备下载',
+    label: '后备任务',
     events: [
-      { label: '下载完成/失败', value: 'download_fallback_complete' },
+      { label: '后备搜索完成/失败', value: 'fallback_search_complete' },
+      { label: '预下载弹幕完成/失败', value: 'predownload_complete' },
+      { label: '匹配后备完成/失败', value: 'match_fallback_complete' },
     ],
   },
   {
