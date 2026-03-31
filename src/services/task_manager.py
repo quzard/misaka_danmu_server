@@ -140,16 +140,9 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
-        # 后备队列任务：按 title 前缀分发为三种独立事件
+        # 后备下载/搜索任务
         if getattr(task, "queue_type", "") == "fallback":
-            if title.startswith("后备搜索:"):
-                return f"fallback_search{suffix}"
-            elif title.startswith("预下载弹幕:"):
-                return f"predownload{suffix}"
-            elif title.startswith("匹配后备弹幕下载:"):
-                return f"match_fallback{suffix}"
-            else:
-                return f"fallback_search{suffix}"  # 兜底
+            return f"download_fallback{suffix}"
 
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
@@ -662,17 +655,18 @@ class TaskManager:
         """为特定任务创建一个可暂停的回调闭包。"""
         queue_type = getattr(task, "queue_type", "download")
         is_fallback = queue_type == "fallback"
-        # fallback 任务按 title 前缀确定对应的订阅 key；普通任务用 task_progress 开关
+        # fallback 任务按 title 前缀确定对应的订阅 key，与 _determine_event_type 保持一致
+        _FALLBACK_PROGRESS_KEY_MAP = {
+            "后备搜索:": "fallback_search_complete",
+            "预下载弹幕:": "predownload_complete",
+            "匹配后备弹幕下载:": "match_fallback_complete",
+        }
         if is_fallback:
             title = task.title or ""
-            if title.startswith("后备搜索:"):
-                progress_check_key = "fallback_search_complete"
-            elif title.startswith("预下载弹幕:"):
-                progress_check_key = "predownload_complete"
-            elif title.startswith("匹配后备弹幕下载:"):
-                progress_check_key = "match_fallback_complete"
-            else:
-                progress_check_key = "fallback_search_complete"  # 兜底
+            progress_check_key = next(
+                (v for k, v in _FALLBACK_PROGRESS_KEY_MAP.items() if title.startswith(k)),
+                "fallback_search_complete",  # 兜底
+            )
         else:
             progress_check_key = "task_progress"
 

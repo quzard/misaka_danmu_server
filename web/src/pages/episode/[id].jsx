@@ -966,20 +966,18 @@ export const EpisodeDetail = () => {
           sourceId: Number(id),
         })
       } else if (isXmlImport && manualImportMode === 'url') {
-        // 自定义源 URL 导入模式
+        // 自定义源 URL 导入模式：在当前自定义源下创建分集，而非新建条目
         if (!urlValidationResult?.isValid) {
           messageApi.warning('请先解析URL')
           setConfirmLoading(false)
           return
         }
-        await importFromUrl({
-          url: values.sourceUrl,
-          provider: urlValidationResult.provider,
+        await manualImportEpisode({
+          sourceId: Number(id),
+          episodeIndex: values.episodeIndex,
           title: values.title,
-          media_type: urlValidationResult.mediaType || 'tv_series',
-          season: 1,
-          episode_index: values.episodeIndex,
-          source_id: Number(id),  // 指定导入到当前源
+          sourceUrl: values.sourceUrl,
+          urlProvider: urlValidationResult.provider,  // 传入解析出的真实平台名，后端用于 scraper 调用
         })
       } else {
         // 普通手动导入（XML或非自定义源URL）
