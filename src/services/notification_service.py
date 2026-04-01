@@ -390,7 +390,6 @@ class NotificationService(
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
-                logger.info(f"[进度通知] task={task_id[:8]} ch={ch_id} check_key={check_event_key} subscribed={events_cfg.get(check_event_key)} ch_type={getattr(channel_instance, 'channel_type', '?')}")
                 if not events_cfg.get(check_event_key, False):
                     continue
                 # 仅 Telegram 支持 edit_message，其他渠道跳过进度推送（完成时才收通知）
