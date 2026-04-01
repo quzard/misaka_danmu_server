@@ -388,8 +388,8 @@ class NotificationService(
                     title=title, text=text,
                     edit_message_id=edit_mid, _msg_id_out=msg_id_out
                 )
-                # 记录新发出的 message_id（首次 send 时）
-                if msg_id_out and not edit_mid:
+                # 记录新发出的 message_id（首次 send 或 edit 失败降级后均更新缓存）
+                if msg_id_out:
                     self._task_progress_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
             except Exception as e:
                 logger.debug(f"渠道 {ch_id} 发送任务进度通知失败: {e}")

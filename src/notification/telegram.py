@@ -312,7 +312,7 @@ class TelegramChannel(BaseNotificationChannel):
             result: CommandResult = await self.service.handle_command(
                 cmd, user_id, args, self, chat_id=chat_id
             )
-        self._render_result(result, chat_id, reply_to_message_id=message.message_id)
+        await self._render_result(result, chat_id, reply_to_message_id=message.message_id)
 
     async def _handle_async_callback(self, call):
         """异步处理 InlineKeyboard 回调"""
@@ -325,12 +325,13 @@ class TelegramChannel(BaseNotificationChannel):
         )
         # 应答回调（消除 TG 客户端的加载动画）
         try:
-            self._bot.answer_callback_query(
+            await asyncio.to_thread(
+                self._bot.answer_callback_query,
                 call.id, text=result.answer_callback_text or ""
             )
         except Exception:
             pass
-        self._render_result(result, chat_id)
+        await self._render_result(result, chat_id)
 
     async def _handle_async_text(self, message):
         """异步处理普通文本消息（对话状态机中的用户输入）"""
@@ -348,7 +349,7 @@ class TelegramChannel(BaseNotificationChannel):
                     self.logger.warning(f"[文本处理] 用户 {user_id} 状态 '{conv.state}' 无匹配处理器")
                 return
             if result and result.text:
-                self._render_result(result, chat_id, reply_to_message_id=message.message_id)
+                await self._render_result(result, chat_id, reply_to_message_id=message.message_id)
         except Exception as e:
             self.logger.error(f"[文本处理] 处理失败 user={user_id}: {e}", exc_info=True)
 
@@ -368,9 +369,11 @@ class TelegramChannel(BaseNotificationChannel):
             markup.row(*btn_row)
         return markup
 
-    def _render_result(self, result: CommandResult, chat_id: int,
-                       reply_to_message_id: int = None):
-        """根据 CommandResult 渲染消息（发送新消息或编辑已有消息）"""
+    async def _render_result(self, result: CommandResult, chat_id: int,
+                             reply_to_message_id: int = None):
+        """根据 CommandResult 渲染消息（发送新消息或编辑已有消息）
+        所有 TG Bot API 调用通过 asyncio.to_thread 在线程池中执行，避免阻塞事件循环。
+        """
         if not result or not result.text:
             return
         try:
@@ -381,12 +384,10 @@ class TelegramChannel(BaseNotificationChannel):
             parse_mode = result.parse_mode
 
             if result.edit_message_id:
-                # 编辑已有消息：
-                # Telegram 区分文字消息（edit_message_text）和图片消息（edit_message_caption）
-                # 先尝试 edit_message_text，若报"no text"则原消息是图片，改用 edit_message_caption
                 self._log_raw("⬆ 编辑消息", {"chat_id": chat_id, "message_id": result.edit_message_id, "text": result.text[:200]})
                 try:
-                    self._bot.edit_message_text(
+                    await asyncio.to_thread(
+                        self._bot.edit_message_text,
                         text=result.text,
                         chat_id=chat_id,
                         message_id=result.edit_message_id,
@@ -396,12 +397,11 @@ class TelegramChannel(BaseNotificationChannel):
                 except Exception as edit_err:
                     err_str = str(edit_err).lower()
                     if "message is not modified" in err_str:
-                        # 内容未变化，Telegram 正常拒绝，静默忽略
                         pass
                     elif "no text in the message" in err_str:
-                        # 原消息是图片消息，改用 edit_message_caption
                         try:
-                            self._bot.edit_message_caption(
+                            await asyncio.to_thread(
+                                self._bot.edit_message_caption,
                                 caption=result.text,
                                 chat_id=chat_id,
                                 message_id=result.edit_message_id,
@@ -414,7 +414,6 @@ class TelegramChannel(BaseNotificationChannel):
                     else:
                         raise
             else:
-                # 有图文 articles 时，取第一张有图的封面，用 send_photo 发带图消息
                 cover_url = ""
                 if result.articles:
                     for a in result.articles:
@@ -424,10 +423,10 @@ class TelegramChannel(BaseNotificationChannel):
 
                 if cover_url:
                     self._log_raw("⬆ 发送图文消息", {"chat_id": chat_id, "photo": cover_url, "text": result.text[:200]})
-                    # TG caption 最大 1024 字符，超长时截断
                     caption_text = result.text[:1024] if len(result.text) > 1024 else result.text
                     try:
-                        sent = self._bot.send_photo(
+                        sent = await asyncio.to_thread(
+                            self._bot.send_photo,
                             chat_id,
                             cover_url,
                             caption=caption_text,
@@ -437,7 +436,8 @@ class TelegramChannel(BaseNotificationChannel):
                         )
                     except Exception as photo_err:
                         self.logger.warning(f"send_photo 失败，降级为纯文本: {photo_err}")
-                        sent = self._bot.send_message(
+                        sent = await asyncio.to_thread(
+                            self._bot.send_message,
                             chat_id,
                             result.text,
                             reply_markup=markup,
@@ -445,34 +445,30 @@ class TelegramChannel(BaseNotificationChannel):
                             reply_to_message_id=reply_to_message_id,
                         )
                 else:
-                    # 发送纯文本消息
                     self._log_raw("⬆ 发送消息", {"chat_id": chat_id, "text": result.text[:200]})
-                    sent = self._bot.send_message(
+                    sent = await asyncio.to_thread(
+                        self._bot.send_message,
                         chat_id,
                         result.text,
                         reply_markup=markup,
                         parse_mode=parse_mode,
                         reply_to_message_id=reply_to_message_id,
                     )
-                # 如果服务层需要跟踪消息ID（用于后续编辑），回写到对话状态
                 if result.next_state and sent:
                     self.service.update_conversation_message_id(
                         str(chat_id), sent.message_id
                     )
-                # 如果携带 task_id，把 message_id 预注册到进度跟踪表
-                # 这样 emit_task_progress 就能 edit 该消息而非新建
                 if result.task_id and sent and hasattr(self.service, '_task_progress_tg_msg'):
                     self.service._task_progress_tg_msg.setdefault(
                         result.task_id, {}
                     )[self.channel_id] = sent.message_id
         except Exception as e:
             self.logger.error(f"渲染消息失败: {e}")
-            # 降级为纯文本（保留按钮）
             try:
-                self._bot.send_message(chat_id, result.text, reply_markup=markup)
+                await asyncio.to_thread(self._bot.send_message, chat_id, result.text, reply_markup=markup)
             except Exception:
                 try:
-                    self._bot.send_message(chat_id, result.text)
+                    await asyncio.to_thread(self._bot.send_message, chat_id, result.text)
                 except Exception:
                     pass
 
@@ -542,7 +538,8 @@ class TelegramChannel(BaseNotificationChannel):
             if edit_message_id:
                 # 尝试 edit 已有消息
                 try:
-                    self._bot.edit_message_text(
+                    await asyncio.to_thread(
+                        self._bot.edit_message_text,
                         text=caption,
                         chat_id=chat_id,
                         message_id=edit_message_id,
@@ -555,7 +552,8 @@ class TelegramChannel(BaseNotificationChannel):
                         pass  # 内容未变化，静默忽略
                     elif "no text in the message" in err_str:
                         try:
-                            self._bot.edit_message_caption(
+                            await asyncio.to_thread(
+                                self._bot.edit_message_caption,
                                 caption=caption,
                                 chat_id=chat_id,
                                 message_id=edit_message_id,
@@ -568,16 +566,16 @@ class TelegramChannel(BaseNotificationChannel):
                     else:
                         self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
                         # edit 失败时降级为发新消息
-                        sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                         if msg_id_out is not None and sent:
                             msg_id_out.append(sent.message_id)
             elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                sent = self._bot.send_photo(chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
-                sent = self._bot.send_message(chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:
@@ -585,7 +583,7 @@ class TelegramChannel(BaseNotificationChannel):
             # 降级为纯文本
             try:
                 plain = f"{title}\n{text}" if title else text
-                sent = self._bot.send_message(chat_id, plain)
+                sent = await asyncio.to_thread(self._bot.send_message, chat_id, plain)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             except Exception:
@@ -599,7 +597,7 @@ class TelegramChannel(BaseNotificationChannel):
         if not target:
             return None
         try:
-            sent = self._bot.send_message(target, text)
+            sent = await asyncio.to_thread(self._bot.send_message, target, text)
             return sent.message_id if sent else None
         except Exception as e:
             self.logger.warning(f"send_quick 失败: {e}")
@@ -623,12 +621,13 @@ class TelegramChannel(BaseNotificationChannel):
                 telebot.apihelper.proxy = None
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
             bot = telebot.TeleBot(bot_token, threaded=False)
-            info = bot.get_me()
+            info = await asyncio.to_thread(bot.get_me)
             # 发送测试消息到配置的 chat_id
             chat_id = self.config.get("chat_id", "")
             if chat_id:
                 try:
-                    bot.send_message(
+                    await asyncio.to_thread(
+                        bot.send_message,
                         chat_id,
                         f"🔔 测试连接成功！\nBot: @{info.username} ({info.first_name})\n来自 Misaka 弹幕服务器的测试消息。\n版本：v{APP_VERSION}",
                     )

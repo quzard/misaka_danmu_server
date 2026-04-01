@@ -212,7 +212,7 @@ async def validate_aliases_with_ai(
     try:
         anime_type = "tv_series" if is_tv else "movie"
         logger.info(f"正在使用 AI 验证 '{title}' 的 {len(all_aliases)} 个别名...")
-        validated = ai_matcher.validate_aliases(
+        validated = await ai_matcher.validate_aliases(
             title=title,
             year=year,
             anime_type=anime_type,
