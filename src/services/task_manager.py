@@ -140,9 +140,19 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
-        # 后备下载/搜索任务
+        # 后备下载/搜索任务 —— 按 title 前缀细分，与 _get_progress_callback 的
+        # _FALLBACK_PROGRESS_KEY_MAP 保持一致，确保进度和完成通知使用相同的订阅 key
         if getattr(task, "queue_type", "") == "fallback":
-            return f"download_fallback{suffix}"
+            _FALLBACK_EVENT_MAP = {
+                "后备搜索:": "fallback_search",
+                "预下载弹幕:": "predownload",
+                "匹配后备弹幕下载:": "match_fallback",
+            }
+            prefix = next(
+                (v for k, v in _FALLBACK_EVENT_MAP.items() if title.startswith(k)),
+                "download_fallback",  # 兜底
+            )
+            return f"{prefix}{suffix}"
 
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
