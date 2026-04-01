@@ -80,6 +80,8 @@ def parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     }
     if result.is_movie:
         info["is_movie"] = True
+    if result.year:
+        info["year"] = result.year
     return info
 
 
@@ -607,8 +609,15 @@ async def get_match_for_item(
                     score += similarity
                     logger.debug(f"  - {result.provider} - {result.title}: 相似度{similarity} +{similarity}")
 
-                    # 3. 年份匹配 (如果有年份信息，+50分)
-                    # TODO: 从parsed_info中获取年份信息
+                    # 3. 年份匹配 (如果有年份信息，匹配+50分，不匹配-200分)
+                    parsed_year = parsed_info.get("year")
+                    if parsed_year and result.year:
+                        if str(result.year) == str(parsed_year):
+                            score += 50
+                            logger.debug(f"  - {result.provider} - {result.title}: 年份匹配({parsed_year}) +50")
+                        else:
+                            score -= 200
+                            logger.debug(f"  - {result.provider} - {result.title}: 年份不匹配({parsed_year}≠{result.year}) -200")
 
                     return score
 
@@ -856,8 +865,13 @@ async def get_match_for_item(
                                     logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
                                     continue
                                 logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
+                            else:
+                                # 非电影场景，也需要验证候选源类型匹配
+                                if candidate.type != target_type:
+                                    logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配({candidate.type}≠{target_type})，跳过")
+                                    continue
                             # 如果指定了集数，检查是否有目标集数
-                            elif episode_number is not None:
+                            if not is_movie and episode_number is not None:
                                 target_episode = None
                                 for ep in episodes:
                                     if ep.episodeIndex == episode_number:
