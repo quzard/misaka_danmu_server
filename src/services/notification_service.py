@@ -62,6 +62,10 @@ class NotificationService(
         # 同时覆盖 fallback 和普通下载任务
         self._task_progress_tg_msg: Dict[str, Dict[str, int]] = {}
 
+    def cleanup_task_progress(self, task_id: str):
+        """清理指定任务的进度消息缓存（任务结束但无需发通知时调用）"""
+        self._task_progress_tg_msg.pop(task_id, None)
+
     def set_dependencies(self, **kwargs):
         """注入系统依赖"""
         for key, value in kwargs.items():
@@ -330,6 +334,7 @@ class NotificationService(
             return
         channels = self.notification_manager.get_all_channels()
         is_any_complete = event_type in self._COMPLETE_EVENT_TYPES
+        task_id: str = data.get("task_id", "")
         for ch_id, channel_instance in channels.items():
             try:
                 events_cfg = channel_instance.config.get("__events_config", {})
@@ -337,13 +342,20 @@ class NotificationService(
                 check_key = self._FALLBACK_COMPLETE_EVENTS.get(event_type, event_type)
                 subscribed = events_cfg.get(check_key)
                 logger.info(f"[通知] event={event_type} ch={ch_id} check_key={check_key} subscribed={subscribed}")
-                if not subscribed:
+
+                # 完成事件 + 有缓存的进度消息 → 即使没订阅完成事件也要编辑进度消息
+                has_cached_progress = (
+                    is_any_complete and task_id
+                    and ch_id in self._task_progress_tg_msg.get(task_id, {})
+                )
+
+                if not subscribed and not has_cached_progress:
                     continue
+
                 fmt_result = self._format_event_message(event_type, data)
                 title, text = fmt_result[0], fmt_result[1]
                 reply_markup = fmt_result[2] if len(fmt_result) == 3 else None
                 image_url: str = data.get("image_url", "") or ""
-                task_id: str = data.get("task_id", "")
                 # 任务完成时：若 TG 有已发进度消息，则 edit；否则发新消息
                 if is_any_complete and task_id:
                     edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
@@ -353,8 +365,11 @@ class NotificationService(
                         edit_message_id=edit_mid, _msg_id_out=msg_id_out,
                         reply_markup=reply_markup,
                     )
-                    # 任务完成后清理缓存
-                    self._task_progress_tg_msg.pop(task_id, None)
+                    # 任务完成后清理该渠道的缓存
+                    if task_id in self._task_progress_tg_msg:
+                        self._task_progress_tg_msg[task_id].pop(ch_id, None)
+                        if not self._task_progress_tg_msg[task_id]:
+                            self._task_progress_tg_msg.pop(task_id, None)
                 else:
                     await channel_instance.send_message(title=title, text=text, image=image_url, reply_markup=reply_markup)
             except Exception as e:

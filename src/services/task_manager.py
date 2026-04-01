@@ -156,6 +156,8 @@ class TaskManager:
             return
         event_type = self._determine_event_type(task, is_success)
         if not event_type:
+            # 即使不需要发通知，也要清理进度消息缓存
+            self._notification_service.cleanup_task_progress(task.task_id)
             return
 
         # 1. 优先从 task_parameters 取 imageUrl（import/auto_import 任务已有）
