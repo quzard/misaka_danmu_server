@@ -363,6 +363,17 @@ async def execute_fallback_search_task(
         # 获取自定义域名
         custom_domain = await config_manager.get("customApiDomain", "")
 
+        # 【性能优化①】循环前一次性读取缓存，循环中只修改内存，循环后一次性写回
+        search_info_mapping = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if search_info_mapping and "bangumi_mapping" not in search_info_mapping:
+            search_info_mapping["bangumi_mapping"] = {}
+
+        # 【性能优化②】批量查询所有 (provider, mediaId) 的库内分集信息
+        provider_media_pairs = [(r.provider, r.mediaId) for r in sorted_results]
+        library_episodes_map = await crud.get_episode_indices_by_source_media_ids_batch(
+            session, provider_media_pairs
+        )
+
         for i, result in enumerate(sorted_results):
             current_virtual_anime_id = next_virtual_anime_id + i
             unique_bangumi_id = f"A{current_virtual_anime_id}"
@@ -370,11 +381,8 @@ async def execute_fallback_search_task(
             year_info = f" 年份：{result.year}" if result.year else ""
             title_with_source = f"{result.title} （来源：{result.provider}{year_info}）"
 
-            # 存储bangumiId到原始信息的映射
-            search_info_mapping = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+            # 存储bangumiId到原始信息的映射（仅修改内存中的dict）
             if search_info_mapping:
-                if "bangumi_mapping" not in search_info_mapping:
-                    search_info_mapping["bangumi_mapping"] = {}
                 search_info_mapping["bangumi_mapping"][unique_bangumi_id] = {
                     "provider": result.provider,
                     "media_id": result.mediaId,
@@ -382,22 +390,16 @@ async def execute_fallback_search_task(
                     "type": result.type,
                     "anime_id": current_virtual_anime_id,
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
             # 检查库内是否已有该精确源(provider+mediaId)的分集，写入 typeDescription
             base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
             type_description = base_type_desc
 
-            try:
-                existing_episodes = await crud.get_episode_indices_by_source_media_id(
-                    session, result.provider, result.mediaId
-                )
-                if existing_episodes:
-                    episode_ranges = format_episode_ranges(existing_episodes)
-                    type_description = f"{base_type_desc}（库内：{episode_ranges}）"
-            except Exception as e:
-                logger.debug(f"查询库内分集信息失败: {e}")
-                type_description = base_type_desc
+            pair_key = (result.provider, result.mediaId)
+            existing_episodes = library_episodes_map.get(pair_key, [])
+            if existing_episodes:
+                episode_ranges = format_episode_ranges(existing_episodes)
+                type_description = f"{base_type_desc}（库内：{episode_ranges}）"
 
             search_results.append(
                 DandanSearchAnimeItem(
@@ -417,12 +419,11 @@ async def execute_fallback_search_task(
 
         await progress_callback(90, "整理搜索结果...")
 
-        # 更新缓存状态为完成
-        search_info_complete = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-        if search_info_complete:
-            search_info_complete["status"] = "completed"
-            search_info_complete["results"] = [result.model_dump() for result in search_results]
-            await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_complete, FALLBACK_SEARCH_CACHE_TTL)
+        # 【性能优化①续】循环结束后一次性写回 bangumi_mapping + 更新缓存状态为完成
+        if search_info_mapping:
+            search_info_mapping["status"] = "completed"
+            search_info_mapping["results"] = [result.model_dump() for result in search_results]
+            await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
         # 将搜索结果按标题存储到缓存，供相同标题重复搜索时复用
         try:
