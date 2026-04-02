@@ -379,10 +379,13 @@ class ManualImportRequest(BaseModel):
     # 使用别名 'sourceUrl' 来兼容前端发送的字段
     url: Optional[str] = Field(None, alias='sourceUrl')
     content: Optional[str] = None
+    # 自定义源 URL 导入时，前端解析出的真实平台名（如 'bilibili'），由后端用于 scraper 调用
+    urlProvider: Optional[str] = None
 
     @model_validator(mode='after')
     def check_url_or_content(self) -> "ManualImportRequest":
-        if not self.url and not self.content:
+        # urlProvider 有值时为自定义源 URL 导入模式，url 字段即为视频 URL，满足条件
+        if not self.url and not self.content and not self.urlProvider:
             raise ValueError('必须提供 "url" 或 "content" 字段。')
         return self
 

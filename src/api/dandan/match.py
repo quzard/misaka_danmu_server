@@ -80,6 +80,8 @@ def parse_filename_for_match(filename: str) -> Optional[Dict[str, Any]]:
     }
     if result.is_movie:
         info["is_movie"] = True
+    if result.year:
+        info["year"] = result.year
     return info
 
 
@@ -607,8 +609,15 @@ async def get_match_for_item(
                     score += similarity
                     logger.debug(f"  - {result.provider} - {result.title}: 相似度{similarity} +{similarity}")
 
-                    # 3. 年份匹配 (如果有年份信息，+50分)
-                    # TODO: 从parsed_info中获取年份信息
+                    # 3. 年份匹配 (如果有年份信息，匹配+50分，不匹配-200分)
+                    parsed_year = parsed_info.get("year")
+                    if parsed_year and result.year:
+                        if str(result.year) == str(parsed_year):
+                            score += 50
+                            logger.debug(f"  - {result.provider} - {result.title}: 年份匹配({parsed_year}) +50")
+                        else:
+                            score -= 200
+                            logger.debug(f"  - {result.provider} - {result.title}: 年份不匹配({parsed_year}≠{result.year}) -200")
 
                     return score
 
@@ -856,8 +865,13 @@ async def get_match_for_item(
                                     logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
                                     continue
                                 logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
+                            else:
+                                # 非电影场景，也需要验证候选源类型匹配
+                                if candidate.type != target_type:
+                                    logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配({candidate.type}≠{target_type})，跳过")
+                                    continue
                             # 如果指定了集数，检查是否有目标集数
-                            elif episode_number is not None:
+                            if not is_movie and episode_number is not None:
                                 target_episode = None
                                 for ep in episodes:
                                     if ep.episodeIndex == episode_number:
@@ -907,13 +921,17 @@ async def get_match_for_item(
                 final_title = best_match.title
                 final_season = season if season is not None else 1  # 默认为第1季
                 if title_recognition_manager:
-                    converted_title, converted_season, was_converted, _, _ = await title_recognition_manager.apply_storage_postprocessing(
-                        best_match.title, season, best_match.provider
+                    converted_title, converted_season, was_converted, _, converted_episode = await title_recognition_manager.apply_storage_postprocessing(
+                        best_match.title, season, best_match.provider, episode=episode_number
                     )
                     if was_converted:
                         final_title = converted_title
                         final_season = converted_season if converted_season is not None else 1
                         logger.info(f"  - 应用入库后处理: '{best_match.title}' S{season or 1:02d} -> '{final_title}' S{final_season:02d}")
+                    # 无论标题/季度是否转换，都需独立检查集数偏移（partial_offset 规则）
+                    if converted_episode is not None and converted_episode != episode_number:
+                        logger.info(f"  - 应用入库后处理集数偏移: 第{episode_number}集 -> 第{converted_episode}集")
+                        episode_number = converted_episode
 
                 # 选出 best_match 后，更新任务标题以显示来源和媒体ID
                 if task_id_ref["id"]:

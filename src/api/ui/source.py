@@ -253,14 +253,17 @@ async def manual_import_episode(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
     provider_name = source_info['providerName']
-    
+
     # 修正：使用 url 或 content 字段，优先使用 content
     content_to_use = request_data.content if request_data.content is not None else request_data.url
 
-    # 仅对非自定义源验证URL
+    # urlProvider：自定义源 URL 导入时前端传入的真实平台名（如 'bilibili'）
+    url_provider = request_data.urlProvider
+
+    # 仅对非自定义源（且未提供 urlProvider 的自定义源）验证URL
     if provider_name != 'custom':
-        if not content_to_use: # Should be caught by validator, but for safety
-             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required for non-custom sources.")
+        if not content_to_use:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required for non-custom sources.")
         url_prefixes = {
             'bilibili': 'bilibili.com', 'tencent': 'v.qq.com', 'iqiyi': 'iqiyi.com', 'youku': 'youku.com',
             'mgtv': 'mgtv.com', 'acfun': 'acfun.cn', 'renren': 'rrsp.com.cn'
@@ -268,15 +271,22 @@ async def manual_import_episode(
         expected_prefix = url_prefixes.get(provider_name)
         if not expected_prefix or expected_prefix not in content_to_use:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"提供的URL与当前源 '{provider_name}' 不匹配。")
+    elif url_provider:
+        # 自定义源 URL 导入：需要提供 URL
+        if not content_to_use:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL is required for custom source URL import.")
 
-    task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{provider_name}]"
-    
+    # 任务标题：自定义源 URL 导入时显示真实平台名
+    display_provider = url_provider if (provider_name == 'custom' and url_provider) else provider_name
+    task_title = f"手动导入: {source_info['title']} - {request_data.title or f'第 {request_data.episodeIndex} 集'} - [{display_provider}]"
+
     # 生成unique_key以防止重复任务
-    unique_key = f"manual-import-{source_id}-{request_data.episodeIndex}-{provider_name}"
-    
+    unique_key = f"manual-import-{source_id}-{request_data.episodeIndex}-{display_provider}"
+
     task_coro = lambda session, callback: tasks.manual_import_task(
         sourceId=source_id, animeId=source_info['animeId'], title=request_data.title,
         episodeIndex=request_data.episodeIndex, content=content_to_use, providerName=provider_name,
+        scraperProvider=url_provider,
         progress_callback=callback, session=session, manager=scraper_manager, rate_limiter=rate_limiter
     )
     task_id, _ = await task_manager.submit_task(

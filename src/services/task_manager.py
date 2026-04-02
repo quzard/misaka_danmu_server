@@ -140,16 +140,19 @@ class TaskManager:
         if key.startswith(("ui-import-", "url-import-", "manual-import-", "batch-manual-import-", "import-")):
             return f"import{suffix}"
 
-        # 后备队列任务：按 title 前缀分发为三种独立事件
+        # 后备下载/搜索任务 —— 按 title 前缀细分，与 _get_progress_callback 的
+        # _FALLBACK_PROGRESS_KEY_MAP 保持一致，确保进度和完成通知使用相同的订阅 key
         if getattr(task, "queue_type", "") == "fallback":
-            if title.startswith("后备搜索:"):
-                return f"fallback_search{suffix}"
-            elif title.startswith("预下载弹幕:"):
-                return f"predownload{suffix}"
-            elif title.startswith("匹配后备弹幕下载:"):
-                return f"match_fallback{suffix}"
-            else:
-                return f"fallback_search{suffix}"  # 兜底
+            _FALLBACK_EVENT_MAP = {
+                "后备搜索:": "fallback_search",
+                "预下载弹幕:": "predownload",
+                "匹配后备弹幕下载:": "match_fallback",
+            }
+            prefix = next(
+                (v for k, v in _FALLBACK_EVENT_MAP.items() if title.startswith(k)),
+                "download_fallback",  # 兜底
+            )
+            return f"{prefix}{suffix}"
 
         # 兜底：有 unique_key 但未匹配到的，按导入处理
         if key:
@@ -163,6 +166,8 @@ class TaskManager:
             return
         event_type = self._determine_event_type(task, is_success)
         if not event_type:
+            # 即使不需要发通知，也要清理进度消息缓存
+            self._notification_service.cleanup_task_progress(task.task_id)
             return
 
         # 1. 优先从 task_parameters 取 imageUrl（import/auto_import 任务已有）
@@ -662,17 +667,18 @@ class TaskManager:
         """为特定任务创建一个可暂停的回调闭包。"""
         queue_type = getattr(task, "queue_type", "download")
         is_fallback = queue_type == "fallback"
-        # fallback 任务按 title 前缀确定对应的订阅 key；普通任务用 task_progress 开关
+        # fallback 任务按 title 前缀确定对应的订阅 key，与 _determine_event_type 保持一致
+        _FALLBACK_PROGRESS_KEY_MAP = {
+            "后备搜索:": "fallback_search_complete",
+            "预下载弹幕:": "predownload_complete",
+            "匹配后备弹幕下载:": "match_fallback_complete",
+        }
         if is_fallback:
             title = task.title or ""
-            if title.startswith("后备搜索:"):
-                progress_check_key = "fallback_search_complete"
-            elif title.startswith("预下载弹幕:"):
-                progress_check_key = "predownload_complete"
-            elif title.startswith("匹配后备弹幕下载:"):
-                progress_check_key = "match_fallback_complete"
-            else:
-                progress_check_key = "fallback_search_complete"  # 兜底
+            progress_check_key = next(
+                (v for k, v in _FALLBACK_PROGRESS_KEY_MAP.items() if title.startswith(k)),
+                "fallback_search_complete",  # 兜底
+            )
         else:
             progress_check_key = "task_progress"
 

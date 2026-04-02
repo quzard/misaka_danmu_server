@@ -4,6 +4,7 @@
 
 import json
 import logging
+import asyncio
 import httpx
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -511,7 +512,8 @@ class AIMatcher:
         try:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-            response = self.client.chat.completions.create(
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": self.match_prompt},
@@ -573,7 +575,8 @@ class AIMatcher:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
             full_prompt = f"{self.match_prompt}\n\n{user_prompt}"
 
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model,
                 contents=full_prompt,
                 config={
@@ -736,7 +739,8 @@ class AIMatcher:
             import json
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-            response = self.client.chat.completions.create(
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": self.recognition_prompt},
@@ -799,7 +803,8 @@ class AIMatcher:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
             full_prompt = f"{self.recognition_prompt}\n\n{user_prompt}"
 
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model,
                 contents=full_prompt,
                 config={
@@ -926,7 +931,8 @@ class AIMatcher:
 
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
 
-            response = self.client.chat.completions.create(
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": alias_expansion_prompt},
@@ -968,7 +974,8 @@ class AIMatcher:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
             full_prompt = f"{alias_expansion_prompt}\n\n{user_prompt}"
 
-            response = self.client.models.generate_content(
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
                 model=self.model,
                 contents=full_prompt,
                 config={
@@ -990,7 +997,7 @@ class AIMatcher:
             logger.error(f"Gemini别名扩展调用失败: {e}")
             return None
 
-    def validate_aliases(
+    async def validate_aliases(
         self,
         title: str,
         year: Optional[int],
@@ -1045,7 +1052,8 @@ class AIMatcher:
             # 根据提供商选择不同的调用方法
             if self.provider == "gemini":
                 full_prompt = f"{validation_prompt}\n\n{user_prompt}"
-                response = self.client.models.generate_content(
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model,
                     contents=full_prompt,
                     config={
@@ -1056,7 +1064,8 @@ class AIMatcher:
                 content = response.text
             else:
                 # OpenAI 兼容接口 (deepseek, siliconflow, openai)
-                response = self.client.chat.completions.create(
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": validation_prompt},
@@ -1299,7 +1308,8 @@ class AIMatcher:
             # 根据提供商选择不同的调用方法
             if self.provider == "gemini":
                 full_prompt = f"{system_prompt}\n\n{user_prompt}"
-                response = self.client.models.generate_content(
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model,
                     contents=full_prompt,
                     config={
@@ -1310,7 +1320,8 @@ class AIMatcher:
                 content = response.text
             else:
                 # OpenAI 兼容接口 (deepseek, siliconflow, openai)
-                response = self.client.chat.completions.create(
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},
@@ -1320,9 +1331,6 @@ class AIMatcher:
                     response_format={"type": "json_object"},
                     timeout=30
                 )
-                content = _extract_openai_content(response)
-                if content is None:
-                    return 0  # 返回第一个结果
 
             if self.log_raw_response:
                 ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
@@ -1377,14 +1385,16 @@ class AIMatcher:
 
             # 根据提供商调用不同的API
             if self.provider == "gemini":
-                response = await self.client.generate_content(
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model,
                     contents=prompt
                 )
                 ai_response = response.text.strip()
             else:
                 # OpenAI 兼容接口 (deepseek, siliconflow, openai)
-                response = await self.client.chat.completions.create(
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "你是一个专业的季度识别助手，擅长分析动漫标题中的季度信息。"},
@@ -1498,7 +1508,8 @@ class AIMatcher:
             # 根据提供商调用不同的API
             if self.provider == "gemini":
                 full_prompt = f"{system_prompt}\n\n{user_prompt}"
-                response = self.client.models.generate_content(
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content,
                     model=self.model,
                     contents=full_prompt,
                     config={
@@ -1509,7 +1520,8 @@ class AIMatcher:
                 content = response.text
             else:
                 # OpenAI 兼容接口
-                response = self.client.chat.completions.create(
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": system_prompt},

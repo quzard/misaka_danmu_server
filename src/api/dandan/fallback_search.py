@@ -211,6 +211,7 @@ async def execute_fallback_search_task(
 
     # 【性能优化】AI初始化预热：如果AI映射已启用，提前开始初始化（不阻塞）
     ai_matcher_warmup_task = None
+    fallback_search_season_mapping_enabled_check = "false"
     try:
         fallback_search_season_mapping_enabled_check = await config_manager.get("fallbackSearchEnableTmdbSeasonMapping", "false")
         if fallback_search_season_mapping_enabled_check.lower() == "true":
@@ -264,8 +265,8 @@ async def execute_fallback_search_task(
             if episode_to_filter is not None else None
         )
 
-        # 后备搜索 AI映射配置检查
-        fallback_search_season_mapping_enabled = await config_manager.get("fallbackSearchEnableTmdbSeasonMapping", "false")
+        # 【性能优化④】复用前面已查询的 AI映射配置，避免重复DB查询
+        fallback_search_season_mapping_enabled = fallback_search_season_mapping_enabled_check
         if fallback_search_season_mapping_enabled.lower() != "true":
             logger.info("○ 后备搜索 统一AI映射: 功能未启用")
 
@@ -363,6 +364,17 @@ async def execute_fallback_search_task(
         # 获取自定义域名
         custom_domain = await config_manager.get("customApiDomain", "")
 
+        # 【性能优化①】循环前一次性读取缓存，循环中只修改内存，循环后一次性写回
+        search_info_mapping = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+        if search_info_mapping and "bangumi_mapping" not in search_info_mapping:
+            search_info_mapping["bangumi_mapping"] = {}
+
+        # 【性能优化②】批量查询所有 (provider, mediaId) 的库内分集信息
+        provider_media_pairs = [(r.provider, r.mediaId) for r in sorted_results]
+        library_episodes_map = await crud.get_episode_indices_by_source_media_ids_batch(
+            session, provider_media_pairs
+        )
+
         for i, result in enumerate(sorted_results):
             current_virtual_anime_id = next_virtual_anime_id + i
             unique_bangumi_id = f"A{current_virtual_anime_id}"
@@ -370,11 +382,8 @@ async def execute_fallback_search_task(
             year_info = f" 年份：{result.year}" if result.year else ""
             title_with_source = f"{result.title} （来源：{result.provider}{year_info}）"
 
-            # 存储bangumiId到原始信息的映射
-            search_info_mapping = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+            # 存储bangumiId到原始信息的映射（仅修改内存中的dict）
             if search_info_mapping:
-                if "bangumi_mapping" not in search_info_mapping:
-                    search_info_mapping["bangumi_mapping"] = {}
                 search_info_mapping["bangumi_mapping"][unique_bangumi_id] = {
                     "provider": result.provider,
                     "media_id": result.mediaId,
@@ -382,20 +391,16 @@ async def execute_fallback_search_task(
                     "type": result.type,
                     "anime_id": current_virtual_anime_id,
                 }
-                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
-            # 检查库内是否已有相同标题的分集，写入 typeDescription
+            # 检查库内是否已有该精确源(provider+mediaId)的分集，写入 typeDescription
             base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
             type_description = base_type_desc
 
-            try:
-                existing_episodes = await crud.get_episode_indices_by_anime_title(session, result.title)
-                if existing_episodes:
-                    episode_ranges = format_episode_ranges(existing_episodes)
-                    type_description = f"{base_type_desc}（库内：{episode_ranges}）"
-            except Exception as e:
-                logger.debug(f"查询库内分集信息失败: {e}")
-                type_description = base_type_desc
+            pair_key = (result.provider, result.mediaId)
+            existing_episodes = library_episodes_map.get(pair_key, [])
+            if existing_episodes:
+                episode_ranges = format_episode_ranges(existing_episodes)
+                type_description = f"{base_type_desc}（库内：{episode_ranges}）"
 
             search_results.append(
                 DandanSearchAnimeItem(
@@ -415,12 +420,11 @@ async def execute_fallback_search_task(
 
         await progress_callback(90, "整理搜索结果...")
 
-        # 更新缓存状态为完成
-        search_info_complete = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-        if search_info_complete:
-            search_info_complete["status"] = "completed"
-            search_info_complete["results"] = [result.model_dump() for result in search_results]
-            await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_complete, FALLBACK_SEARCH_CACHE_TTL)
+        # 【性能优化①续】循环结束后一次性写回 bangumi_mapping + 更新缓存状态为完成
+        if search_info_mapping:
+            search_info_mapping["status"] = "completed"
+            search_info_mapping["results"] = [result.model_dump() for result in search_results]
+            await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
         # 将搜索结果按标题存储到缓存，供相同标题重复搜索时复用
         try:
@@ -596,34 +600,61 @@ async def _merge_source_episodes(
             # 收集库内已有的 episodeId（从 episodes 列表里提取）
             existing_episode_ids = {ep.episodeId for ep in anime_info.episodes}
 
+            # 【性能优化③】预收集所有需要查询的源，然后用 asyncio.gather 并发获取分集
+            valid_sources = []
             for source in sources:
                 source_id = source['sourceId']
                 provider = source['providerName']
                 media_id = source['mediaId']
                 source_order = source.get('sourceOrder', 1)
 
-                # 获取库内该 source 下已有的分集 episodeIndex
-                ep_stmt = select(Episode.episodeIndex).where(Episode.sourceId == source_id)
-                ep_result = await session.execute(ep_stmt)
-                existing_indices = {row[0] for row in ep_result.fetchall()}
-
-                # 从源站获取完整分集列表
-                try:
-                    scraper = scraper_manager.get_scraper(provider)
-                    if not scraper:
-                        logger.warning(f"[并行搜索] 无法获取 {provider} 的 scraper")
-                        continue
-
-                    source_episodes = await scraper.get_episodes(media_id)
-                    if not source_episodes:
-                        logger.debug(f"[并行搜索] {provider} 源站无分集: mediaId={media_id}")
-                        continue
-
-                    logger.info(f"[并行搜索] {provider} 源站返回 {len(source_episodes)} 个分集，库内已有 {len(existing_indices)} 个")
-
-                except Exception as e:
-                    logger.warning(f"[并行搜索] 从 {provider} 获取分集列表失败: {e}")
+                # 自定义源不参与并行搜索
+                if provider == 'custom':
                     continue
+
+                scraper = scraper_manager.get_scraper(provider)
+                if not scraper:
+                    logger.warning(f"[并行搜索] 无法获取 {provider} 的 scraper")
+                    continue
+
+                valid_sources.append((source_id, provider, media_id, source_order, scraper))
+
+            if not valid_sources:
+                continue
+
+            # 【性能优化⑤】批量查询所有 source 的已有分集 episodeIndex，避免逐源DB查询
+            all_source_ids = [sid for sid, _, _, _, _ in valid_sources]
+            if all_source_ids:
+                batch_ep_stmt = (
+                    select(Episode.sourceId, Episode.episodeIndex)
+                    .where(Episode.sourceId.in_(all_source_ids))
+                )
+                batch_ep_result = await session.execute(batch_ep_stmt)
+                existing_indices_map: dict = {}
+                for sid, ep_idx in batch_ep_result.fetchall():
+                    existing_indices_map.setdefault(sid, set()).add(ep_idx)
+            else:
+                existing_indices_map = {}
+
+            # 并发获取所有源的分集列表
+            fetch_tasks = [scraper.get_episodes(media_id) for _, _, media_id, _, scraper in valid_sources]
+            fetch_results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+            # 逐个处理并发结果
+            for (source_id, provider, media_id, source_order, _scraper), fetch_result in zip(valid_sources, fetch_results):
+                if isinstance(fetch_result, Exception):
+                    logger.warning(f"[并行搜索] 从 {provider} 获取分集列表失败: {fetch_result}")
+                    continue
+
+                source_episodes = fetch_result
+                if not source_episodes:
+                    logger.debug(f"[并行搜索] {provider} 源站无分集: mediaId={media_id}")
+                    continue
+
+                # 从批量查询结果中获取该 source 已有的分集 episodeIndex
+                existing_indices = existing_indices_map.get(source_id, set())
+
+                logger.info(f"[并行搜索] {provider} 源站返回 {len(source_episodes)} 个分集，库内已有 {len(existing_indices)} 个")
 
                 # 找出缺失的分集
                 missing_episodes = []
