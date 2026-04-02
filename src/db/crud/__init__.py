@@ -153,6 +153,7 @@ from .episode import (
     find_episode_by_index,
     get_episode_indices_by_anime_title,
     get_episode_indices_by_source_media_id,
+    get_episode_indices_by_source_media_ids_batch,
     find_episode_via_tmdb_mapping,
     get_related_episode_ids,
     find_episode,
