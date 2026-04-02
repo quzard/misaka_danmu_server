@@ -2,7 +2,7 @@
 <img src="web/public/images/logo.png" alt="御坂网络弹幕服务" width="128" style="border-radius: 16px;" />
 <h1 align="center" style="margin-top: 0">御坂网络弹幕服务</h1>
 <p align="center">
-<strong>自托管弹幕聚合与管理服务，兼容 dandanplay API</strong>
+<strong>自托管弹幕聚合与管理服务，兼容弹弹play API</strong>
 </p>
 
 [快速开始](https://docs.misaka10876.top/快速开始)
@@ -99,7 +99,7 @@
 
 ## 参考项目
 
- - [dandanplayapi](https://api.dandanplay.net/swagger/index.html)
+ - 已接入[弹弹play](https://www.dandanplay.com)开放平台 - [弹弹play API文档](https://api.dandanplay.net/swagger/index.html)
  - [danmuku](https://github.com/lyz05/danmaku)
  - [emby-toolkit](https://github.com/hbq0405/emby-toolkit)
  - [swagger-ui](https://github.com/swagger-api/swagger-ui)

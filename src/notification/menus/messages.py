@@ -79,7 +79,6 @@ class MessagesMixin:
         # ── 后备弹幕下载（旧，保留兼容） ────────────────────────
         if event_type in ("download_fallback_success", "download_fallback_failed"):
             token_name = data.get("token_name", "")
-            search_term = data.get("search_term", "") or task_title.replace("后备搜索: ", "").strip()
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
@@ -91,19 +90,11 @@ class MessagesMixin:
                 f"  └─ 📋 {msg_short}" if msg_short else "",
                 f"• 时间: {finished_at}" if finished_at else "",
             ]
-            reply_markup = [
-                [
-                    {"text": "🔍 搜索", "callback_data": f"search_notify:{search_term}"},
-                    {"text": "📅 指定季", "callback_data": f"search_notify_season:{search_term}"},
-                    {"text": "🎯 指定季集", "callback_data": f"search_notify_episode:{search_term}"},
-                ]
-            ] if search_term else None
-            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l), reply_markup)
+            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l))
 
         # ── 后备搜索 ─────────────────────────────────────────
         if event_type in ("fallback_search_success", "fallback_search_failed"):
             token_name = data.get("token_name", "")
-            search_term = data.get("search_term", "") or task_title.replace("后备搜索: ", "").strip()
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
@@ -115,14 +106,7 @@ class MessagesMixin:
                 f"  └─ 📋 {msg_short}" if msg_short else "",
                 f"• 时间: {finished_at}" if finished_at else "",
             ]
-            reply_markup = [
-                [
-                    {"text": "🔍 搜索", "callback_data": f"search_notify:{search_term}"},
-                    {"text": "📅 指定季", "callback_data": f"search_notify_season:{search_term}"},
-                    {"text": "🎯 指定季集", "callback_data": f"search_notify_episode:{search_term}"},
-                ]
-            ] if search_term else None
-            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l), reply_markup)
+            return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l))
 
         # ── 预下载弹幕 ───────────────────────────────────────
         if event_type in ("predownload_success", "predownload_failed"):

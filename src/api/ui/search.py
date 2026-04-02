@@ -358,6 +358,10 @@ async def search_anime_provider(
             normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
             filtered_results = []
             excluded_results = []
+
+            # 【性能优化⑥】缓存 fuzz 计算结果，避免相同 (title, alias) 对重复计算
+            similarity_cache: dict = {}
+
             for item in all_results:
                 normalized_item_title = normalize_for_filtering(item.title)
                 if not normalized_item_title: continue
@@ -366,7 +370,16 @@ async def search_anime_provider(
                 # token_set_ratio 擅长处理单词顺序不同和部分单词匹配的情况。
                 # 修正：使用 partial_ratio 来更好地匹配续作和外传 (e.g., "刀剑神域" vs "刀剑神域外传")
                 # 85 的阈值可以在保留强相关的同时，过滤掉大部分无关结果。
-                if any(fuzz.partial_ratio(normalized_item_title, alias) > 85 for alias in normalized_filter_aliases):
+                matched = False
+                for alias in normalized_filter_aliases:
+                    cache_key = (normalized_item_title, alias)
+                    if cache_key not in similarity_cache:
+                        similarity_cache[cache_key] = fuzz.partial_ratio(normalized_item_title, alias)
+                    if similarity_cache[cache_key] > 85:
+                        matched = True
+                        break
+
+                if matched:
                     filtered_results.append(item)
                 else:
                     excluded_results.append(item)

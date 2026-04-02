@@ -106,9 +106,79 @@ async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, 
         stmt = stmt.where(Anime.season == season)
 
     stmt = stmt.order_by(Episode.episodeIndex)
-    
+
     result = await session.execute(stmt)
     return result.scalars().all()
+
+
+async def get_episode_indices_by_source_media_id(session: AsyncSession, provider_name: str, media_id: str) -> List[int]:
+    """通过源提供商和媒体ID精确获取该源下所有已有的分集序号。
+
+    与 get_episode_indices_by_anime_title 不同，此函数按 provider+mediaId 精确匹配，
+    避免同名不同类型的作品被错误关联（如TV版和剧场版同名问题）。
+    """
+    stmt = (
+        select(distinct(Episode.episodeIndex))
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .where(
+            AnimeSource.providerName == provider_name,
+            AnimeSource.mediaId == media_id
+        )
+        .order_by(Episode.episodeIndex)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+
+async def get_episode_indices_by_source_media_ids_batch(
+    session: AsyncSession, pairs: List[tuple]
+) -> Dict[tuple, List[int]]:
+    """批量查询多个 (provider, mediaId) 对应的已有分集序号。
+
+    与 get_episode_indices_by_source_media_id 功能相同，但一次SQL查询搞定所有pair，
+    避免在循环中逐个查询造成N次DB I/O。
+
+    Args:
+        session: 数据库会话
+        pairs: [(provider_name, media_id), ...] 的列表
+
+    Returns:
+        {(provider_name, media_id): [episodeIndex, ...], ...}
+    """
+    if not pairs:
+        return {}
+
+    # 构建 OR 条件：(providerName=p1 AND mediaId=m1) OR (providerName=p2 AND mediaId=m2) ...
+    conditions = [
+        and_(AnimeSource.providerName == p, AnimeSource.mediaId == m)
+        for p, m in pairs
+    ]
+
+    stmt = (
+        select(
+            AnimeSource.providerName,
+            AnimeSource.mediaId,
+            Episode.episodeIndex,
+        )
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .where(or_(*conditions))
+        .order_by(AnimeSource.providerName, AnimeSource.mediaId, Episode.episodeIndex)
+        .distinct()
+    )
+
+    result = await session.execute(stmt)
+    rows = result.all()
+
+    # 按 (provider, mediaId) 分组
+    mapping: Dict[tuple, List[int]] = {}
+    for provider_name, media_id, episode_index in rows:
+        key = (provider_name, media_id)
+        if key not in mapping:
+            mapping[key] = []
+        mapping[key].append(episode_index)
+
+    return mapping
 
 
 async def find_episode_via_tmdb_mapping(
@@ -192,7 +262,7 @@ async def find_episode_via_tmdb_mapping(
                 )
             )
         )
-    
+
     stmt = stmt.order_by(AnimeSource.isFavorited.desc(), Scraper.displayOrder)
     result = await session.execute(stmt)
     return [dict(row) for row in result.mappings()]
@@ -377,11 +447,11 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
     new_web_path = None
     if episode.danmakuFilePath:
         old_absolute_path = _get_fs_path_from_web_path(episode.danmakuFilePath)
-        
+
         # 修正：新的Web路径和文件系统路径应与 tasks.py 保持一致（不包含 source_id）
         new_web_path = f"/app/config/danmaku/{episode.source.animeId}/{new_episode_id}.xml"
         new_absolute_path = DANMAKU_BASE_DIR / str(episode.source.animeId) / f"{new_episode_id}.xml"
-        
+
         if old_absolute_path and old_absolute_path.exists():
             try:
                 new_absolute_path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,16 +460,16 @@ async def update_episode_info(session: AsyncSession, episode_id: int, update_dat
             except OSError as e:
                 logger.error(f"重命名弹幕文件失败: {e}")
                 new_web_path = episode.danmakuFilePath # 如果重命名失败，则保留旧路径
-    
+
     # 4. 创建一个新的分集对象
     new_episode = Episode(
         id=new_episode_id, sourceId=episode.sourceId, episodeIndex=update_data.episodeIndex,
         title=update_data.title, sourceUrl=update_data.sourceUrl,
-        providerEpisodeId=episode.providerEpisodeId, fetchedAt=episode.fetchedAt, 
+        providerEpisodeId=episode.providerEpisodeId, fetchedAt=episode.fetchedAt,
         commentCount=episode.commentCount, danmakuFilePath=new_web_path
     )
     session.add(new_episode)
-    
+
     # 5. 删除旧的分集记录 (由于没有弹幕关联，可以直接删除)
     await session.delete(episode)
     await session.commit()
@@ -464,10 +534,10 @@ async def get_existing_episodes_for_source(
     )
     source_result = await session.execute(source_stmt)
     source = source_result.scalar_one_or_none()
-    
+
     if not source:
         return []
-    
+
     # 获取该源的所有分集
     episodes_stmt = select(orm_models.Episode).where(
         orm_models.Episode.sourceId == source.id

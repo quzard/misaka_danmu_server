@@ -17,6 +17,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_cjk_dominant(text: str) -> bool:
+    """检查文本是否主要由 CJK（中日韩）字符组成"""
+    if not text:
+        return False
+    cjk_count = sum(
+        1 for c in text
+        if '\u4e00' <= c <= '\u9fff'    # CJK统一汉字
+        or '\u3040' <= c <= '\u309f'    # 平假名
+        or '\u30a0' <= c <= '\u30ff'    # 片假名
+        or '\uac00' <= c <= '\ud7af'    # 韩文音节
+    )
+    return cjk_count > len(text) * 0.3
+
+
+def _is_cross_language(text1: str, text2: str) -> bool:
+    """检查两个文本是否跨语言（一个以CJK为主，另一个以非CJK为主）"""
+    return _is_cjk_dominant(text1) != _is_cjk_dominant(text2)
+
+
 async def unified_search(
     search_term: str,
     session: AsyncSession,
@@ -103,6 +122,10 @@ async def unified_search(
                 if use_alias_filtering:
                     # 验证缓存的别名相似度（使用核心标题进行比较）
                     for alias in cached_alias_list:
+                        # 跨语言别名（如英文搜索词对应的中文别名）免验证直接保留
+                        if _is_cross_language(core_title, alias):
+                            filter_aliases.add(alias)
+                            continue
                         similarity = fuzz.token_set_ratio(core_title, alias)
                         if similarity >= alias_similarity_threshold:
                             filter_aliases.add(alias)
@@ -166,6 +189,10 @@ async def unified_search(
         if use_alias_filtering:
             validated_aliases = set()
             for alias in all_possible_aliases:
+                # 跨语言别名（如英文搜索词对应的中文别名）免验证直接保留
+                if _is_cross_language(core_title, alias):
+                    validated_aliases.add(alias)
+                    continue
                 similarity = fuzz.token_set_ratio(core_title, alias)
                 if similarity >= alias_similarity_threshold:  # 相似度阈值
                     validated_aliases.add(alias)
@@ -218,10 +245,11 @@ async def unified_search(
                         skipped_by_length += 1
                         continue
 
-                    # 优化2: 快速预过滤 - 没有共同字符直接跳过
-                    if not set(normalized_item_title) & set(alias):
-                        skipped_by_chars += 1
-                        continue
+                    # 优化2: 快速预过滤 - 没有共同字符直接跳过（跨语言时免检）
+                    if not _is_cross_language(normalized_item_title, alias):
+                        if not set(normalized_item_title) & set(alias):
+                            skipped_by_chars += 1
+                            continue
 
                     # 优化3: 使用缓存避免重复计算
                     cache_key = (normalized_item_title, alias)
@@ -259,10 +287,11 @@ async def unified_search(
                         skipped_by_length += 1
                         continue
 
-                    # 优化2: 快速预过滤 - 没有共同字符直接跳过
-                    if not set(normalized_item_title) & set(alias):
-                        skipped_by_chars += 1
-                        continue
+                    # 优化2: 快速预过滤 - 没有共同字符直接跳过（跨语言时免检）
+                    if not _is_cross_language(normalized_item_title, alias):
+                        if not set(normalized_item_title) & set(alias):
+                            skipped_by_chars += 1
+                            continue
 
                     # 优化3: 使用缓存避免重复计算
                     cache_key = (normalized_item_title, alias)
