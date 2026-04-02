@@ -346,7 +346,35 @@ async def get_comments_for_dandan(
             imageUrl = fallback_info.get("imageUrl")
             year = fallback_info.get("year")
 
-            # 步骤1：创建或获取anime条目
+            # 步骤1：获取分集信息（先验证能拿到数据，再创建数据库条目）
+            logger.info(f"开始获取分集信息: provider={provider}, mediaId={mediaId}, episode_number={episode_number}")
+
+            # 获取scraper
+            scraper = scraper_manager.get_scraper(provider)
+            if not scraper:
+                logger.error(f"无法获取scraper: {provider}")
+                return models.CommentResponse(count=0, comments=[])
+
+            # 获取分集列表
+            try:
+                episodes_list = await scraper.get_episodes(mediaId, db_media_type=media_type)
+                if not episodes_list or len(episodes_list) < episode_number:
+                    logger.error(f"无法获取第{episode_number}集的信息，跳过创建数据库条目")
+                    return models.CommentResponse(count=0, comments=[])
+
+                # 获取目标分集信息
+                target_episode = episodes_list[episode_number - 1]
+                provider_episode_id = target_episode.episodeId
+                episode_title = target_episode.title
+                episode_url = target_episode.url
+
+                logger.info(f"获取到分集信息: title='{episode_title}', provider_episode_id='{provider_episode_id}'")
+
+            except Exception as e:
+                logger.error(f"获取分集信息失败: {e}", exc_info=True)
+                return models.CommentResponse(count=0, comments=[])
+
+            # 步骤2：分集获取成功，创建或获取anime条目
             stmt = select(Anime).where(Anime.id == real_anime_id)
             result = await session.execute(stmt)
             existing_anime = result.scalar_one_or_none()
@@ -370,44 +398,13 @@ async def get_comments_for_dandan(
             else:
                 logger.info(f"anime条目已存在: id={real_anime_id}, title='{existing_anime.title}'")
 
-            # 步骤2：创建或获取source关联
+            # 步骤3：创建或获取source关联
             source_id = await crud.link_source_to_anime(session, real_anime_id, provider, mediaId)
             logger.info(f"source_id={source_id}")
 
             # 提交anime和source创建，避免与后台任务产生锁冲突
             await session.commit()
             logger.info(f"已提交anime和source创建")
-
-            # 步骤3：获取分集信息
-            logger.info(f"开始获取分集信息: provider={provider}, mediaId={mediaId}, episode_number={episode_number}")
-
-            # 获取scraper
-            scraper = scraper_manager.get_scraper(provider)
-            if not scraper:
-                logger.error(f"无法获取scraper: {provider}")
-                await session.rollback()
-                return models.CommentResponse(count=0, comments=[])
-
-            # 获取分集列表
-            try:
-                episodes_list = await scraper.get_episodes(mediaId, db_media_type=media_type)
-                if not episodes_list or len(episodes_list) < episode_number:
-                    logger.error(f"无法获取第{episode_number}集的信息")
-                    await session.rollback()
-                    return models.CommentResponse(count=0, comments=[])
-
-                # 获取目标分集信息
-                target_episode = episodes_list[episode_number - 1]
-                provider_episode_id = target_episode.episodeId
-                episode_title = target_episode.title
-                episode_url = target_episode.url
-
-                logger.info(f"获取到分集信息: title='{episode_title}', provider_episode_id='{provider_episode_id}'")
-
-            except Exception as e:
-                logger.error(f"获取分集信息失败: {e}", exc_info=True)
-                await session.rollback()
-                return models.CommentResponse(count=0, comments=[])
 
             # 步骤4：下载弹幕 (使用task_manager提交到后备队列)
             logger.info(f"开始下载弹幕: provider_episode_id={provider_episode_id}")
