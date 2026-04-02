@@ -106,7 +106,26 @@ async def get_episode_indices_by_anime_title(session: AsyncSession, title: str, 
         stmt = stmt.where(Anime.season == season)
 
     stmt = stmt.order_by(Episode.episodeIndex)
-    
+
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def get_episode_indices_by_source_media_id(session: AsyncSession, provider_name: str, media_id: str) -> List[int]:
+    """通过源提供商和媒体ID精确获取该源下所有已有的分集序号。
+
+    与 get_episode_indices_by_anime_title 不同，此函数按 provider+mediaId 精确匹配，
+    避免同名不同类型的作品被错误关联（如TV版和剧场版同名问题）。
+    """
+    stmt = (
+        select(distinct(Episode.episodeIndex))
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .where(
+            AnimeSource.providerName == provider_name,
+            AnimeSource.mediaId == media_id
+        )
+        .order_by(Episode.episodeIndex)
+    )
     result = await session.execute(stmt)
     return result.scalars().all()
 

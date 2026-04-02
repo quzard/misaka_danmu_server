@@ -384,12 +384,14 @@ async def execute_fallback_search_task(
                 }
                 await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info_mapping, FALLBACK_SEARCH_CACHE_TTL)
 
-            # 检查库内是否已有相同标题的分集，写入 typeDescription
+            # 检查库内是否已有该精确源(provider+mediaId)的分集，写入 typeDescription
             base_type_desc = DANDAN_TYPE_DESC_MAPPING.get(result.type, "其他")
             type_description = base_type_desc
 
             try:
-                existing_episodes = await crud.get_episode_indices_by_anime_title(session, result.title)
+                existing_episodes = await crud.get_episode_indices_by_source_media_id(
+                    session, result.provider, result.mediaId
+                )
                 if existing_episodes:
                     episode_ranges = format_episode_ranges(existing_episodes)
                     type_description = f"{base_type_desc}（库内：{episode_ranges}）"
@@ -601,6 +603,10 @@ async def _merge_source_episodes(
                 provider = source['providerName']
                 media_id = source['mediaId']
                 source_order = source.get('sourceOrder', 1)
+
+                # 自定义源不参与并行搜索
+                if provider == 'custom':
+                    continue
 
                 # 获取库内该 source 下已有的分集 episodeIndex
                 ep_stmt = select(Episode.episodeIndex).where(Episode.sourceId == source_id)
