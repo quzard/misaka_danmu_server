@@ -613,10 +613,6 @@ class So360MetadataSource(BaseMetadataSource):
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
             target_site = provider_map.get(target_provider) if target_provider else None
 
-            # 2. 转换provider名称到360的site名称
-            provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }
-            target_site = provider_map.get(target_provider) if target_provider else None
-
             # 3. 优先使用搜索结果中的seriesPlaylinks (仅当平台匹配时)
             if item.seriesPlaylinks and item.seriesSite:
                 # 检查seriesSite是否匹配target_site
@@ -645,6 +641,11 @@ class So360MetadataSource(BaseMetadataSource):
             cat_id = item.cat_id or ''
             cat_name = item.cat_name or ''
 
+            # 判断是否为电影（cat_id=1 或 无seriesPlaylinks 或 seriesPlaylinks<=1集）
+            is_movie = (cat_id == '1') or (
+                not item.seriesPlaylinks or len(item.seriesPlaylinks) <= 1
+            ) and cat_id not in ('2', '3', '4')
+
             # 确定使用哪个平台
             if not target_site:
                 # 如果没有指定平台,使用第一个可用平台
@@ -654,7 +655,25 @@ class So360MetadataSource(BaseMetadataSource):
                     self.logger.warning(f"360: 没有可用的播放平台 (metadata_id={metadata_id})")
                     return []
 
-            # 5. 调用API获取分集
+            # 5. 电影：直接从playlinks取URL，不需要调episodesv2
+            if is_movie:
+                play_url = item.playlinks.get(target_site)
+                if play_url:
+                    if isinstance(play_url, str):
+                        url = self._convert_hunantv_to_mgtv(play_url)
+                    elif isinstance(play_url, list) and play_url:
+                        url = self._convert_hunantv_to_mgtv(play_url[0] if isinstance(play_url[0], str) else play_url[0].get('url', ''))
+                    elif isinstance(play_url, dict):
+                        url = self._convert_hunantv_to_mgtv(play_url.get('url', ''))
+                    else:
+                        url = ''
+                    if url:
+                        self.logger.info(f"360: 电影直接使用playlinks URL (平台={target_site})")
+                        return [(1, url)]
+                self.logger.warning(f"360: 电影在playlinks中未找到平台 {target_site} 的URL")
+                return []
+
+            # 6. 调用API获取分集（非电影）
             episode_urls: List[Tuple[int, str]] = []
 
             if cat_id == '3' or '综艺' in cat_name:
@@ -662,7 +681,7 @@ class So360MetadataSource(BaseMetadataSource):
                 ent_id = item.id
                 episode_urls = await self._get_zongyi_episodes(ent_id, target_site, item)
             else:
-                # 其他使用episodesv2接口,优先使用en_id
+                # 电视剧/动漫使用episodesv2接口,优先使用en_id
                 ent_id = item.en_id or item.id
                 episode_urls = await self._get_episodes_v2(cat_id, ent_id, target_site)
 
