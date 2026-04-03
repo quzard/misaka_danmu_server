@@ -103,6 +103,29 @@ export default function HistoryLogModal({ open, onClose }) {
     } catch { messageApi.error('复制失败') }
   }
 
+  // 从一行日志文本中提取级别名称
+  const getLineLevelName = (line) => {
+    const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
+    return m ? m[1] : 'INFO'
+  }
+
+  // 按日志级别返回边框和背景样式
+  const getLevelStyle = (levelName) => {
+    switch (levelName) {
+      case 'ERROR':
+        return { borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.06)' }
+      case 'WARNING':
+        return { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.06)' }
+      case 'DEBUG':
+        return { borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.04)' }
+      default: // INFO
+        return {}
+    }
+  }
+
+  // 隐去日志文本中的级别标签 [INFO] [WARNING] [ERROR] [DEBUG]
+  const stripLevelTag = (text) => text.replace(/\s*\[(DEBUG|INFO|WARNING|ERROR)\]\s*/, ' ')
+
   const fileOptions = [
     { label: '内存日志 (实时缓存)', value: MEMORY_LOG_KEY },
     ...logFiles.map(f => ({
@@ -164,26 +187,32 @@ export default function HistoryLogModal({ open, onClose }) {
                 <Empty description={<span className="text-gray-400">{search ? '无匹配日志' : '暂无日志'}</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
               </div>
             ) : (
-              filtered.map((line, i) => (
-                <div
-                  key={i}
-                  className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 border-primary hover:bg-base-hover-hover transition-colors`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
-                      {search ? highlightText(line, search) : line}
-                    </pre>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CopyOutlined />}
-                      className={`shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${isMobile ? 'opacity-60' : ''}`}
-                      onClick={(e) => { e.stopPropagation(); copyLogLine(line) }}
-                      title="复制日志"
-                    />
+              filtered.map((line, i) => {
+                const levelName = getLineLevelName(line)
+                const levelStyle = getLevelStyle(levelName)
+                const displayText = stripLevelTag(line)
+                return (
+                  <div
+                    key={i}
+                    className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 hover:bg-base-hover-hover transition-colors`}
+                    style={{ borderLeftColor: levelStyle.borderColor || 'var(--ant-color-primary)', backgroundColor: levelStyle.backgroundColor || undefined }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
+                        {search ? highlightText(displayText, search) : displayText}
+                      </pre>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined />}
+                        className={`shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${isMobile ? 'opacity-60' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); copyLogLine(line) }}
+                        title="复制日志"
+                      />
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
         </Card>
