@@ -68,6 +68,10 @@ class So360MetadataSource(BaseMetadataSource):
     supports_episode_urls = True  # 360源支持获取分集URL
     is_search_supplement_source = True  # 360源作为搜索补充源
 
+    configurable_fields = {
+        "searchSupplementEnabled": ("启用搜索补充", "boolean", "启用后，当弹幕源搜索无结果时，将通过360影视为其补充搜索结果"),
+    }
+
     # 360内部平台名 -> 本项目弹幕源 provider name
     PLATFORM_TO_PROVIDER: Dict[str, str] = {
         "qq": "tencent",

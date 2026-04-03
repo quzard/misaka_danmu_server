@@ -67,7 +67,7 @@ const getStatusIcon = (statusCode) => {
   }
 }
 
-const SortableItem = ({ item, index, handleChangeStatus, onConfig }) => {
+const SortableItem = ({ item, index, handleChangeStatus, onConfig, onToggleSupplement }) => {
   const {
     attributes,
     listeners,
@@ -119,6 +119,17 @@ const SortableItem = ({ item, index, handleChangeStatus, onConfig }) => {
           ) : (
             <Tag color="red">未启用</Tag>
           )}
+          {item.isSearchSupplementSource && (
+            <Tooltip title="切换搜索补充源">
+              <Tag
+                color={item.isSearchSupplementEnabled ? 'purple' : 'default'}
+                className="cursor-pointer select-none"
+                onClick={onToggleSupplement}
+              >
+                {item.isSearchSupplementEnabled ? '补充源 ✓' : '补充源 ✗'}
+              </Tag>
+            </Tooltip>
+          )}
           {item.providerName !== 'tmdb' ? (
             <Tooltip title="切换启用状态">
               <div onClick={handleChangeStatus}>
@@ -143,6 +154,7 @@ export const Metadata = () => {
   const [selectedSource, setSelectedSource] = useState(null)
   const [form] = Form.useForm()
   const [confirmLoading, setConfirmLoading] = useState(false)
+  const [configData, setConfigData] = useState(null)
 
   const messageApi = useMessage()
 
@@ -177,8 +189,10 @@ export const Metadata = () => {
     if (isModalOpen && selectedSource?.providerName) {
       // 重置表单以防显示旧数据
       form.resetFields()
+      setConfigData(null)
       getProviderConfig({ providerName: selectedSource.providerName })
         .then(res => {
+          setConfigData(res.data)
           const formValues = {
             ...res.data,
             useProxy: res.data.useProxy ?? true,
@@ -273,6 +287,27 @@ export const Metadata = () => {
     setMetaData(payload)
   }
 
+  const handleToggleSupplement = async item => {
+    const newEnabled = !item.isSearchSupplementEnabled
+    // 通过 setProviderConfig 保存到 config 表
+    try {
+      await setProviderConfig(item.providerName, {
+        searchSupplementEnabled: newEnabled,
+      })
+      // 更新本地状态
+      setList(prev =>
+        prev.map(it =>
+          it.providerName === item.providerName
+            ? { ...it, isSearchSupplementEnabled: newEnabled }
+            : it
+        )
+      )
+      messageApi.success(`${item.providerName} 补充源已${newEnabled ? '启用' : '禁用'}`)
+    } catch (error) {
+      messageApi.error(`切换失败: ${error.message || '未知错误'}`)
+    }
+  }
+
   const handleSaveSettings = async () => {
     try {
       setConfirmLoading(true)
@@ -282,8 +317,6 @@ export const Metadata = () => {
       await setProviderConfig(selectedSource.providerName, {
         useProxy: values.useProxy,
         logRawResponses: values.logRawResponses,
-        forceAuxSearchEnabled: values.forceAuxSearchEnabled,
-        episodeUrlsEnabled: values.episodeUrlsEnabled,
       })
 
       // 保存源特定配置
@@ -390,6 +423,7 @@ export const Metadata = () => {
                   item={item}
                   index={index}
                   handleChangeStatus={() => handleChangeStatus(item)}
+                  onToggleSupplement={() => handleToggleSupplement(item)}
                   onConfig={() => {
                     setSelectedSource(item)
                     setIsModalOpen(true)
@@ -456,44 +490,6 @@ export const Metadata = () => {
                         <code>config/logs/metadata_responses.log</code> 文件中，用于调试。
                       </div>
                     </div>
-                    {/* 修正：根据后端返回的 isFailoverSource 标志来决定是否显示此开关 */}
-                    {form.getFieldValue('isFailoverSource') && (
-                      <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
-                        <Form.Item
-                          name="forceAuxSearchEnabled"
-                          label="强制辅助搜索"
-                          valuePropName="checked"
-                          className="min-w-[100px] shrink-0 !mb-0"
-                        >
-                          <Switch />
-                        </Form.Item>
-                        <div
-                          className="w-full text-gray-500"
-                          title="启用后，在搜索时，此源将作为一个补充搜索源。如果其他弹幕源没有找到结果，或结果不佳，此源的结果将作为备选项显示在搜索结果中。"
-                        >
-                          启用后，此源将作为补充搜索源。当其他弹幕源结果不佳时，其结果将作为备选项显示。
-                        </div>
-                      </div>
-                    )}
-                    {/* 新增：根据后端返回的 supportsEpisodeUrls 标志来决定是否显示补充源开关 */}
-                    {form.getFieldValue('supportsEpisodeUrls') && (
-                      <div className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
-                        <Form.Item
-                          name="episodeUrlsEnabled"
-                          label="启用补充源"
-                          valuePropName="checked"
-                          className="min-w-[100px] shrink-0 !mb-0"
-                        >
-                          <Switch />
-                        </Form.Item>
-                        <div
-                          className="w-full text-gray-500"
-                          title="启用后，当弹幕源没有提供分集列表时，此元数据源可以提供分集URL作为补充。"
-                        >
-                          启用后，当弹幕源缺少分集列表时，此源可提供分集URL作为补充。
-                        </div>
-                      </div>
-                    )}
                   </div>
                 ),
               },
@@ -507,7 +503,35 @@ export const Metadata = () => {
                     {selectedSource?.providerName === 'tvdb' && <TVDBConfig form={form} />}
                     {selectedSource?.providerName === 'douban' && <DoubanConfig form={form} />}
                     {selectedSource?.providerName === 'imdb' && <ImdbConfig form={form} />}
-                    {!['bangumi', 'tmdb', 'tvdb', 'douban', 'imdb'].includes(selectedSource?.providerName) && (
+                    {/* 动态渲染 configurableFields 声明的字段 */}
+                    {configData?.configurableFields && Object.entries(configData.configurableFields).map(([key, fieldInfo]) => {
+                      // 解析字段配置（兼容元组和对象格式）
+                      const config = Array.isArray(fieldInfo)
+                        ? { label: fieldInfo[0], type: fieldInfo[1] || 'string', tooltip: fieldInfo[2] || '' }
+                        : { type: 'string', tooltip: '', ...fieldInfo }
+
+                      if (config.type === 'boolean') {
+                        return (
+                          <div key={key} className="flex items-center justify-start flex-wrap md:flex-nowrap gap-2 mb-4">
+                            <Form.Item
+                              name={key}
+                              label={config.label}
+                              valuePropName="checked"
+                              className="min-w-[100px] shrink-0 !mb-0"
+                            >
+                              <Switch />
+                            </Form.Item>
+                            {config.tooltip && (
+                              <div className="w-full text-gray-500">{config.tooltip}</div>
+                            )}
+                          </div>
+                        )
+                      }
+                      // 其他类型暂不渲染（未来可扩展）
+                      return null
+                    })}
+                    {!['bangumi', 'tmdb', 'tvdb', 'douban', 'imdb'].includes(selectedSource?.providerName)
+                      && !configData?.configurableFields && (
                       <div className="text-gray-500 text-center py-8">
                         此源暂无特定配置项
                       </div>
