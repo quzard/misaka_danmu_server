@@ -7,6 +7,20 @@ import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store'
 
+// 级别颜色配置（INFO 使用 CSS 变量跟随主题色）
+const LEVEL_COLORS = {
+  DEBUG:   { solid: '#1d4ed8', bg: 'rgba(29,78,216,0.07)' },
+  INFO:    { solid: 'var(--ant-color-primary)', bg: 'var(--ant-color-primary-bg)' },
+  WARNING: { solid: '#f59e0b', bg: 'rgba(245,158,11,0.07)' },
+  ERROR:   { solid: '#ef4444', bg: 'rgba(239,68,68,0.07)' },
+}
+
+// Segmented 按钮映射（选项值 → 颜色）
+const SEG_COLORS = { INFO: 'var(--ant-color-primary)', WARN: '#f59e0b', DEBUG: '#1d4ed8' }
+
+// 级别数值（用于过滤阈值）
+const LEVEL_VALUES = { DEBUG: 10, INFO: 20, WARNING: 30, WARN: 30, ERROR: 40 }
+
 export default function RealtimeLogModal({ open, onClose }) {
   const [logs, setLogs] = useState([])
   const [connected, setConnected] = useState(false)
@@ -81,74 +95,73 @@ export default function RealtimeLogModal({ open, onClose }) {
     }
   }
 
-  // 日志级别数值映射
-  const LEVEL_VALUES = { DEBUG: 10, INFO: 20, WARNING: 30, WARN: 30, ERROR: 40 }
-
-  // 从一行日志文本中提取级别
+  // --- 日志级别工具函数 ---
   const getLineLevel = (line) => {
     const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
     return m ? LEVEL_VALUES[m[1]] : null
   }
 
-  // 从一行日志文本中提取级别名称
   const getLineLevelName = (line) => {
     const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
     return m ? m[1] : 'INFO'
   }
 
-  // 按日志级别返回边框和背景样式
-  const getLevelStyle = (levelName) => {
-    switch (levelName) {
-      case 'ERROR':
-        return { borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.06)' }
-      case 'WARNING':
-        return { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.06)' }
-      case 'DEBUG':
-        return { borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.04)' }
-      default: // INFO
-        return {}
-    }
-  }
-
-  // 隐去日志文本中的级别标签 [INFO] [WARNING] [ERROR] [DEBUG]
   const stripLevelTag = (text) => text.replace(/\s*\[(DEBUG|INFO|WARNING|ERROR)\]\s*/, ' ')
-
-  // Segmented 按钮选中项的颜色
-  const segmentedColor = { INFO: 'var(--ant-color-primary)', WARN: '#f97316', DEBUG: '#8b5cf6' }[logLevel] || 'var(--ant-color-primary)'
 
   // 根据选中级别过滤日志条目
   const filterLog = (entry) => {
     const threshold = LEVEL_VALUES[logLevel] ?? 20
-    if (threshold <= 10) return entry // DEBUG 模式显示全部
+    if (threshold <= 10) return entry
 
     const lines = entry.split('\n')
-    // 检测是否为缓冲日志块（包含 ┌─── 或 └───）
     const isBlock = lines.some(l => l.includes('┌───') || l.includes('└───'))
 
     if (!isBlock) {
-      // 普通单行/多行日志：取第一个匹配的级别，没有标签默认 INFO
       const level = getLineLevel(entry)
       return (level ?? 20) >= threshold ? entry : null
     }
 
-    // 缓冲块：逐行过滤，保留 header/footer
     const filtered = lines.filter(l => {
       if (l.includes('┌───') || l.includes('└───') || l.trim() === '') return true
       const level = getLineLevel(l)
       return (level ?? 20) >= threshold
     })
 
-    // 如果只剩 header 和 footer，隐藏整个块
     const contentLines = filtered.filter(l => !l.includes('┌───') && !l.includes('└───') && l.trim() !== '')
     return contentLines.length > 0 ? filtered.join('\n') : null
   }
 
-  // 关键词过滤（在级别过滤之上叠加）
   const filteredLogs = useMemo(() => {
     if (!searchText.trim()) return logs
     const kw = searchText.toLowerCase()
     return logs.filter(line => line.toLowerCase().includes(kw))
   }, [logs, searchText])
+
+  const segColor = SEG_COLORS[logLevel] || 'var(--ant-color-primary)'
+
+  // --- 级别徽章 ---
+  const LevelBadge = ({ level }) => {
+    const c = LEVEL_COLORS[level] || LEVEL_COLORS.INFO
+    const label = level === 'WARNING' ? 'WARN' : level
+    return (
+      <span
+        className="inline-block shrink-0 rounded px-1.5 py-0.5 text-white font-mono leading-none"
+        style={{ fontSize: 10, backgroundColor: c.solid, opacity: 0.85 }}
+      >
+        {label}
+      </span>
+    )
+  }
+
+  // --- Segmented 节点（桌面/移动端复用） ---
+  const segmentedNode = (
+    <>
+      <style>{`.log-seg .ant-segmented-item-selected { background: ${segColor} !important; color: #fff !important; }`}</style>
+      <div className="log-seg">
+        <Segmented size="small" options={['INFO', 'WARN', 'DEBUG']} value={logLevel} onChange={setLogLevel} />
+      </div>
+    </>
+  )
 
   const titleNode = (
     <div className="flex items-center gap-2">
@@ -158,15 +171,7 @@ export default function RealtimeLogModal({ open, onClose }) {
       {!isMobile && (
         <>
           <span className="text-gray-300 mx-1">|</span>
-          <style>{`.log-seg .ant-segmented-item-selected { background: ${segmentedColor} !important; color: #fff !important; }`}</style>
-          <div className="log-seg">
-            <Segmented
-              size="small"
-              options={['INFO', 'WARN', 'DEBUG']}
-              value={logLevel}
-              onChange={setLogLevel}
-            />
-          </div>
+          {segmentedNode}
           <Input
             size="small"
             placeholder="搜索日志..."
@@ -217,14 +222,7 @@ export default function RealtimeLogModal({ open, onClose }) {
     <div className={isMobile ? 'flex-1 overflow-hidden flex flex-col gap-2' : 'flex flex-col gap-2'}>
       {isMobile && (
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="log-seg">
-            <Segmented
-              size="small"
-              options={['INFO', 'WARN', 'DEBUG']}
-              value={logLevel}
-              onChange={setLogLevel}
-            />
-          </div>
+          {segmentedNode}
           <Input
             size="small"
             placeholder="搜索日志..."
@@ -242,7 +240,7 @@ export default function RealtimeLogModal({ open, onClose }) {
           className={`${isMobile ? 'flex-1 overflow-y-auto overflow-x-hidden' : 'max-h-[60vh] overflow-y-auto overflow-x-hidden'}`}
         >
           {filteredLogs.length === 0 ? (
-            <div className="flex items-center justify-center" style={{ height: isMobile ? '40vh' : '40vh' }}>
+            <div className="flex items-center justify-center" style={{ height: '40vh' }}>
               <Empty description={<span className="text-gray-400">{logs.length === 0 ? '等待日志...' : '无匹配日志'}</span>} image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
@@ -250,18 +248,21 @@ export default function RealtimeLogModal({ open, onClose }) {
               const filtered = filterLog(line)
               if (!filtered) return null
               const levelName = getLineLevelName(filtered)
-              const levelStyle = getLevelStyle(levelName)
+              const lc = LEVEL_COLORS[levelName] || LEVEL_COLORS.INFO
               const displayText = stripLevelTag(filtered)
               return (
                 <div
                   key={i}
-                  className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 hover:bg-base-hover-hover transition-colors`}
-                  style={{ borderLeftColor: levelStyle.borderColor || 'var(--ant-color-primary)', backgroundColor: levelStyle.backgroundColor || undefined }}
+                  className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} border-l-[3px] hover:brightness-95 transition-all`}
+                  style={{ borderLeftColor: lc.solid, backgroundColor: lc.bg }}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
-                      {searchText ? highlightText(displayText, searchText) : displayText}
-                    </pre>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <LevelBadge level={levelName} />
+                      <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
+                        {searchText ? highlightText(displayText, searchText) : displayText}
+                      </pre>
+                    </div>
                     <Button
                       type="text"
                       size="small"

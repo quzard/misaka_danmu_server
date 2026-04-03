@@ -6,6 +6,14 @@ import { getLogs, getLogFiles, getLogFileContent } from '../apis'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../store'
 
+// 级别颜色配置（与 RealtimeLogModal 保持一致）
+const LEVEL_COLORS = {
+  DEBUG:   { solid: '#1d4ed8', bg: 'rgba(29,78,216,0.07)' },
+  INFO:    { solid: 'var(--ant-color-primary)', bg: 'var(--ant-color-primary-bg)' },
+  WARNING: { solid: '#f59e0b', bg: 'rgba(245,158,11,0.07)' },
+  ERROR:   { solid: '#ef4444', bg: 'rgba(239,68,68,0.07)' },
+}
+
 // 内存日志的特殊标识
 const MEMORY_LOG_KEY = '__memory__'
 
@@ -18,7 +26,6 @@ export default function HistoryLogModal({ open, onClose }) {
   const [messageApi, contextHolder] = message.useMessage()
   const isMobile = useAtomValue(isMobileAtom)
 
-  // 加载日志文件列表
   const fetchLogFiles = () => {
     getLogFiles()
       .then(res => {
@@ -28,7 +35,6 @@ export default function HistoryLogModal({ open, onClose }) {
       .catch(() => {})
   }
 
-  // 加载日志内容
   const fetchLogs = () => {
     setLoading(true)
     if (selectedFile === MEMORY_LOG_KEY) {
@@ -39,7 +45,7 @@ export default function HistoryLogModal({ open, onClose }) {
     } else {
       getLogFileContent(selectedFile)
         .then(res => setLogs(Array.isArray(res) ? res : (res?.data ?? [])))
-        .catch(() => messageApi.error('获取日志文件失败'))
+        .catch(() => messageApi.error('获取日志文件内容失败'))
         .finally(() => setLoading(false))
     }
   }
@@ -103,28 +109,26 @@ export default function HistoryLogModal({ open, onClose }) {
     } catch { messageApi.error('复制失败') }
   }
 
-  // 从一行日志文本中提取级别名称
+  // --- 日志级别工具函数 ---
   const getLineLevelName = (line) => {
     const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
     return m ? m[1] : 'INFO'
   }
 
-  // 按日志级别返回边框和背景样式
-  const getLevelStyle = (levelName) => {
-    switch (levelName) {
-      case 'ERROR':
-        return { borderColor: '#ef4444', backgroundColor: 'rgba(239,68,68,0.06)' }
-      case 'WARNING':
-        return { borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.06)' }
-      case 'DEBUG':
-        return { borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.04)' }
-      default: // INFO
-        return {}
-    }
-  }
-
-  // 隐去日志文本中的级别标签 [INFO] [WARNING] [ERROR] [DEBUG]
   const stripLevelTag = (text) => text.replace(/\s*\[(DEBUG|INFO|WARNING|ERROR)\]\s*/, ' ')
+
+  const LevelBadge = ({ level }) => {
+    const c = LEVEL_COLORS[level] || LEVEL_COLORS.INFO
+    const label = level === 'WARNING' ? 'WARN' : level
+    return (
+      <span
+        className="inline-block shrink-0 rounded px-1.5 py-0.5 text-white font-mono leading-none"
+        style={{ fontSize: 10, backgroundColor: c.solid, opacity: 0.85 }}
+      >
+        {label}
+      </span>
+    )
+  }
 
   const fileOptions = [
     { label: '内存日志 (实时缓存)', value: MEMORY_LOG_KEY },
@@ -189,18 +193,21 @@ export default function HistoryLogModal({ open, onClose }) {
             ) : (
               filtered.map((line, i) => {
                 const levelName = getLineLevelName(line)
-                const levelStyle = getLevelStyle(levelName)
+                const lc = LEVEL_COLORS[levelName] || LEVEL_COLORS.INFO
                 const displayText = stripLevelTag(line)
                 return (
                   <div
                     key={i}
-                    className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 hover:bg-base-hover-hover transition-colors`}
-                    style={{ borderLeftColor: levelStyle.borderColor || 'var(--ant-color-primary)', backgroundColor: levelStyle.backgroundColor || undefined }}
+                    className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} border-l-[3px] hover:brightness-95 transition-all`}
+                    style={{ borderLeftColor: lc.solid, backgroundColor: lc.bg }}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
-                        {search ? highlightText(displayText, search) : displayText}
-                      </pre>
+                      <div className="flex items-start gap-2 flex-1 min-w-0">
+                        <LevelBadge level={levelName} />
+                        <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
+                          {search ? highlightText(displayText, search) : displayText}
+                        </pre>
+                      </div>
                       <Button
                         type="text"
                         size="small"
@@ -262,4 +269,3 @@ function highlightText(text, keyword) {
     regex.test(part) ? <mark key={i} className="bg-yellow-300 dark:bg-yellow-600 px-0.5 rounded">{part}</mark> : part
   )
 }
-
