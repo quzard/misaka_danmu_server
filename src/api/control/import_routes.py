@@ -547,9 +547,8 @@ async def get_episodes(
 
     item_to_fetch = cached_results[result_index]
 
-    scraper = manager.get_scraper(item_to_fetch.provider)
     try:
-        return await scraper.get_episodes(item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
+        return await manager.get_episodes_routed(item_to_fetch.provider, item_to_fetch.mediaId, db_media_type=item_to_fetch.type)
     except httpx.RequestError as e:
         logger.error(f"获取分集列表时发生网络错误 (provider={item_to_fetch.provider}, media_id={item_to_fetch.mediaId}): {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=f"从 {item_to_fetch.provider} 获取分集列表时发生网络错误: {e}")

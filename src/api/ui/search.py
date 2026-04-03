@@ -607,10 +607,8 @@ async def get_episodes_for_search_result(
             except Exception as e:
                 logger.error(f"使用补充源获取分集失败: {e}", exc_info=True)
         else:
-            # 从主源获取分集列表
-            scraper = manager.get_scraper(provider)
-            # 将 db_media_type 传递给 get_episodes 以帮助需要它的刮削器（如 mgtv）
-            episodes = await scraper.get_episodes(media_id, db_media_type=media_type)
+            # 从主源获取分集列表（自动路由补充源 mediaId）
+            episodes = await manager.get_episodes_routed(provider, media_id, db_media_type=media_type)
 
         return episodes
     except httpx.RequestError as e:

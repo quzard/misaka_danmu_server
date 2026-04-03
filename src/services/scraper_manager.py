@@ -554,6 +554,90 @@ class ScraperManager:
         logging.getLogger(__name__).info(f"全局标题过滤: 从 {len(all_results)} 个结果中保留了 {len(filtered_results)} 个。")
         return filtered_results
 
+    @staticmethod
+    def parse_supplement_media_id(media_id: str) -> Optional[tuple]:
+        """解析补充源 mediaId 格式: sup_{补充源名}_{媒体ID}_{平台key}
+
+        Returns:
+            (supplement_source_name, original_media_id, platform_key) 或 None
+        """
+        if not media_id or not media_id.startswith("sup_"):
+            return None
+        parts = media_id.split("_", 3)
+        if len(parts) >= 4:
+            return (parts[1], parts[2], parts[3])
+        return None
+
+    async def get_episodes_routed(
+        self,
+        provider: str,
+        media_id: str,
+        db_media_type: Optional[str] = None,
+        target_episode_index: Optional[int] = None,
+    ) -> List[ProviderSearchInfo]:
+        """统一分集获取路由：自动识别补充源 mediaId 并路由到正确的数据源。
+
+        如果 media_id 以 'sup_' 开头，转给对应补充源的 get_episode_urls()；
+        否则走弹幕源的 get_episodes()。
+        """
+        logger = logging.getLogger(__name__)
+        parsed = self.parse_supplement_media_id(media_id)
+
+        if parsed and self.metadata_manager:
+            supplement_source_name, original_media_id, platform_key = parsed
+            logger.info(f"补充源路由: {media_id} -> 补充源={supplement_source_name}, 媒体ID={original_media_id}, 平台={platform_key}")
+
+            source = self.metadata_manager.sources.get(supplement_source_name)
+            if not source:
+                logger.warning(f"补充源 '{supplement_source_name}' 不可用")
+                return []
+
+            # 调用补充源获取分集URL
+            episode_urls = await source.get_episode_urls(original_media_id, target_provider=provider)
+            if not episode_urls:
+                logger.warning(f"补充源 '{supplement_source_name}' 未返回分集URL")
+                return []
+
+            logger.info(f"补充源 '{supplement_source_name}' 返回 {len(episode_urls)} 个分集URL")
+
+            # 尝试用弹幕源解析URL为分集信息
+            from src.db.models import ProviderEpisodeInfo
+            scraper = self.get_scraper(provider)
+            episodes = []
+            for idx, url in episode_urls:
+                try:
+                    if scraper:
+                        episode_id = await scraper.get_id_from_url(url)
+                    else:
+                        episode_id = None
+                    episodes.append(ProviderEpisodeInfo(
+                        provider=provider,
+                        episodeId=episode_id or url,
+                        title=f"第{idx}集",
+                        episodeIndex=idx,
+                        url=url
+                    ))
+                except Exception as e:
+                    logger.debug(f"补充源分集URL解析失败 (第{idx}集): {e}")
+                    episodes.append(ProviderEpisodeInfo(
+                        provider=provider,
+                        episodeId=url,
+                        title=f"第{idx}集",
+                        episodeIndex=idx,
+                        url=url
+                    ))
+            return episodes
+        else:
+            # 普通弹幕源路径
+            scraper = self.get_scraper(provider)
+            if not scraper:
+                raise ValueError(f"弹幕源 '{provider}' 不可用")
+            return await scraper.get_episodes(
+                media_id,
+                target_episode_index=target_episode_index,
+                db_media_type=db_media_type
+            )
+
     async def search_sequentially(self, keyword: str, episode_info: Optional[Dict[str, Any]] = None) -> Optional[tuple[str, List[ProviderSearchInfo]]]:
         """
         按用户定义的顺序，在已启用的搜索源上顺序搜索。
