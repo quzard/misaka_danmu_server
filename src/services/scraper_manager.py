@@ -501,12 +501,20 @@ class ScraperManager:
             (name, dur, cnt) for name, (dur, cnt) in sorted(provider_timing.items(), key=lambda x: -x[1][0])
         ]
 
-        # 通用搜索补充逻辑：对返回0结果的已启用弹幕源，调用所有补充源进行兜底
+        # 通用搜索补充逻辑：对无结果的弹幕源（含搜索返回0 + 被禁用的），调用补充源兜底
         try:
+            # 搜索了但返回0结果的源
             empty_providers = {
                 name for name, (_, cnt) in provider_timing.items()
                 if cnt == 0 and name != 'custom'
             }
+            # 被禁用的源（没有参与搜索，同样视为"无结果"）
+            disabled_providers = {
+                name for name in self.scrapers
+                if not self.scraper_settings.get(name, {}).get('isEnabled')
+                and name != 'custom'
+            }
+            empty_providers |= disabled_providers
             if empty_providers and self.metadata_manager:
                 primary_keyword = keywords[0] if keywords else ""
                 supplement_results = await self.metadata_manager.supplement_empty_search_results(
