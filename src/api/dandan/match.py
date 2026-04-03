@@ -842,6 +842,21 @@ async def get_match_for_item(
                 # 用于保存从来源端获取的剧集标题
                 matched_episode_title = None
 
+                # ===== 反向偏移：将文件名/用户传入的偏移后集号还原为源站原始集号 =====
+                # episode_number 来自文件名解析，等同于用户期望的集号（偏移后的值）
+                # 需要反向偏移才能在源站找到正确的分集
+                source_episode_number = episode_number
+                if title_recognition_manager and episode_number is not None and not is_movie:
+                    try:
+                        reversed_ep = await title_recognition_manager.reverse_episode_offset(
+                            base_title, episode_number, None  # 这里还不知道具体provider
+                        )
+                        if reversed_ep != episode_number:
+                            logger.info(f"  - 反向偏移: 文件集号{episode_number} => 源站集号{reversed_ep}")
+                            source_episode_number = reversed_ep
+                    except Exception as e:
+                        logger.warning(f"  - 反向偏移失败，使用原始集号: {e}")
+
                 if best_match is None and fallback_enabled:
                     # 顺延机制启用：依次验证候选源 (按分数从高到低)
                     logger.info(f"  - 顺延机制启用，依次验证候选源")
@@ -871,15 +886,17 @@ async def get_match_for_item(
                                     logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配({candidate.type}≠{target_type})，跳过")
                                     continue
                             # 如果指定了集数，检查是否有目标集数
-                            if not is_movie and episode_number is not None:
+                            # 使用反向偏移后的 source_episode_number 去匹配源站分集
+                            if not is_movie and source_episode_number is not None:
                                 target_episode = None
                                 for ep in episodes:
-                                    if ep.episodeIndex == episode_number:
+                                    if ep.episodeIndex == source_episode_number:
                                         target_episode = ep
                                         break
 
                                 if not target_episode:
-                                    logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {episode_number} 集，跳过")
+                                    logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {source_episode_number} 集"
+                                                   f"{f' (原始集号: {episode_number})' if source_episode_number != episode_number else ''}，跳过")
                                     continue
 
                                 # 保存来源端的剧集标题
@@ -902,33 +919,36 @@ async def get_match_for_item(
                     return
 
                 # 如果还没有获取剧集标题（非顺延机制匹配成功的情况），主动获取
-                if matched_episode_title is None and not is_movie and episode_number is not None:
+                # 使用反向偏移后的 source_episode_number 匹配源站分集
+                if matched_episode_title is None and not is_movie and source_episode_number is not None:
                     try:
                         episodes = await scraper_manager.get_episodes_routed(best_match.provider, best_match.mediaId, db_media_type=best_match.type)
                         if episodes:
                             for ep in episodes:
-                                if ep.episodeIndex == episode_number:
+                                if ep.episodeIndex == source_episode_number:
                                     matched_episode_title = ep.title
-                                    logger.info(f"  - 获取到来源端剧集标题: '{matched_episode_title}'")
+                                    logger.info(f"  - 获取到来源端剧集标题: '{matched_episode_title}'"
+                                               f"{f' (源站集号: {source_episode_number})' if source_episode_number != episode_number else ''}")
                                     break
                     except Exception as e:
                         logger.warning(f"  - 获取剧集标题失败: {e}")
 
                 # 步骤4：应用入库后处理规则
+                # 关键：传入源站原始集号(source_episode_number)，让 partial_offset 正向偏移为存储集号
                 logger.info(f"步骤4：应用入库后处理规则")
                 final_title = best_match.title
                 final_season = season if season is not None else 1  # 默认为第1季
                 if title_recognition_manager:
                     converted_title, converted_season, was_converted, _, converted_episode = await title_recognition_manager.apply_storage_postprocessing(
-                        best_match.title, season, best_match.provider, episode=episode_number
+                        best_match.title, season, best_match.provider, episode=source_episode_number
                     )
                     if was_converted:
                         final_title = converted_title
                         final_season = converted_season if converted_season is not None else 1
                         logger.info(f"  - 应用入库后处理: '{best_match.title}' S{season or 1:02d} -> '{final_title}' S{final_season:02d}")
                     # 无论标题/季度是否转换，都需独立检查集数偏移（partial_offset 规则）
-                    if converted_episode is not None and converted_episode != episode_number:
-                        logger.info(f"  - 应用入库后处理集数偏移: 第{episode_number}集 -> 第{converted_episode}集")
+                    if converted_episode is not None and converted_episode != source_episode_number:
+                        logger.info(f"  - 应用入库后处理集数偏移: 源站第{source_episode_number}集 -> 存储第{converted_episode}集")
                         episode_number = converted_episode
 
                 # 选出 best_match 后，更新任务标题以显示来源和媒体ID
