@@ -461,18 +461,17 @@ async def search_anime_provider(
                 await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800)
         else:
             await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800)
-    # 缓存补充结果
-    if supplemental_results:
-        supplemental_data = [item.model_dump() for item in supplemental_results]
-        _backend = get_cache_backend()
-        if _backend is not None:
-            try:
-                await _backend.set(supplemental_cache_key, supplemental_data, ttl=10800, region="search")
-            except Exception as e:
-                logger.warning(f"缓存后端写入失败，回退到数据库: {e}")
-                await crud.set_cache(session, supplemental_cache_key, supplemental_data, ttl_seconds=10800)
-        else:
+    # 缓存补充结果（即使为空也缓存，避免翻页时因缓存缺失而重新执行完整搜索）
+    supplemental_data = [item.model_dump() for item in supplemental_results] if supplemental_results else []
+    _backend = get_cache_backend()
+    if _backend is not None:
+        try:
+            await _backend.set(supplemental_cache_key, supplemental_data, ttl=10800, region="search")
+        except Exception as e:
+            logger.warning(f"缓存后端写入失败，回退到数据库: {e}")
             await crud.set_cache(session, supplemental_cache_key, supplemental_data, ttl_seconds=10800)
+    else:
+        await crud.set_cache(session, supplemental_cache_key, supplemental_data, ttl_seconds=10800)
     timer.step_end()
     # --- 缓存逻辑结束 ---
 
