@@ -754,7 +754,7 @@ async def webhook_search_and_dispatch_task(
                     continue
 
                 # 获取分集列表进行验证
-                episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                episodes = await manager.get_episodes_routed(candidate.provider, candidate.mediaId, db_media_type=candidate.type)
                 if not episodes:
                     logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
                     continue

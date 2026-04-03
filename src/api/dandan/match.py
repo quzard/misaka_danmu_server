@@ -854,7 +854,7 @@ async def get_match_for_item(
                                 continue
 
                             # 获取分集列表进行验证
-                            episodes = await scraper.get_episodes(candidate.mediaId, db_media_type=candidate.type)
+                            episodes = await scraper_manager.get_episodes_routed(candidate.provider, candidate.mediaId, db_media_type=candidate.type)
                             if not episodes:
                                 logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
                                 continue
@@ -904,15 +904,13 @@ async def get_match_for_item(
                 # 如果还没有获取剧集标题（非顺延机制匹配成功的情况），主动获取
                 if matched_episode_title is None and not is_movie and episode_number is not None:
                     try:
-                        scraper = scraper_manager.get_scraper(best_match.provider)
-                        if scraper:
-                            episodes = await scraper.get_episodes(best_match.mediaId, db_media_type=best_match.type)
-                            if episodes:
-                                for ep in episodes:
-                                    if ep.episodeIndex == episode_number:
-                                        matched_episode_title = ep.title
-                                        logger.info(f"  - 获取到来源端剧集标题: '{matched_episode_title}'")
-                                        break
+                        episodes = await scraper_manager.get_episodes_routed(best_match.provider, best_match.mediaId, db_media_type=best_match.type)
+                        if episodes:
+                            for ep in episodes:
+                                if ep.episodeIndex == episode_number:
+                                    matched_episode_title = ep.title
+                                    logger.info(f"  - 获取到来源端剧集标题: '{matched_episode_title}'")
+                                    break
                     except Exception as e:
                         logger.warning(f"  - 获取剧集标题失败: {e}")
 

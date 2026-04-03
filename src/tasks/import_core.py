@@ -140,8 +140,8 @@ async def generic_import_task(
     if selectedEpisodes is not None:
         target_episode_index = None
 
-    episodes = await scraper.get_episodes(
-        mediaId,
+    episodes = await manager.get_episodes_routed(
+        provider, mediaId,
         target_episode_index=target_episode_index,
         db_media_type=mediaType
     )

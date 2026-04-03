@@ -1230,23 +1230,11 @@ export const SearchResult = () => {
                               if (editLoading) return
                               setEditLoading(true)
 
-                              // 检查是否有补充源 - 查找所有以主源key开头的补充源
-                              const mainKey = `${item.provider}_${item.mediaId}`
-                              const supplement = Object.entries(supplementMap).find(([key, value]) =>
-                                key.startsWith(mainKey + '_') && value?.enabled
-                              )?.[1]
-
-                              // 构建请求参数
+                              // 构建请求参数（补充源mediaId已编码在media_id中，后端自动路由）
                               const params = {
                                 provider: item.provider,
                                 media_id: item.mediaId,
                                 media_type: item.type,
-                              }
-
-                              // 如果启用了补充源,添加补充源参数
-                              if (supplement?.enabled) {
-                                params.supplement_provider = supplement.provider
-                                params.supplement_media_id = supplement.mediaId
                               }
 
                               const res = await getEditEpisodes(params)
