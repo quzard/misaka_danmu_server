@@ -1206,6 +1206,11 @@ export const SearchResult = () => {
                                   单集获取：{searchEpisode}
                                 </Tag>
                               )}
+                              {item.supplementSource && (
+                                <Tag color="purple">
+                                  {item.supplementSource} 补充
+                                </Tag>
+                              )}
                             </div>
                             {!isMobile && <>{supplementDom(item)}</>}
                           </div>
@@ -1358,6 +1363,9 @@ export const SearchResult = () => {
                     <Tag color="volcano">年份：{item.year ?? '未知'}</Tag>
                     <Tag color="orange">季度：{item.season ?? '未知'}</Tag>
                     <Tag color="gold">总集数：{item.episodeCount ?? 0}</Tag>
+                    {item.supplementSource && (
+                      <Tag color="purple">{item.supplementSource} 补充</Tag>
+                    )}
                   </div>
                 </div>
               )

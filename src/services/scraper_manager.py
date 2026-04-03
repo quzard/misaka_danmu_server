@@ -501,6 +501,27 @@ class ScraperManager:
             (name, dur, cnt) for name, (dur, cnt) in sorted(provider_timing.items(), key=lambda x: -x[1][0])
         ]
 
+        # 通用搜索补充逻辑：对返回0结果的已启用弹幕源，调用所有补充源进行兜底
+        try:
+            empty_providers = {
+                name for name, (_, cnt) in provider_timing.items()
+                if cnt == 0 and name != 'custom'
+            }
+            if empty_providers and self.metadata_manager:
+                primary_keyword = keywords[0] if keywords else ""
+                supplement_results = await self.metadata_manager.supplement_empty_search_results(
+                    primary_keyword, empty_providers
+                )
+                for supp_item in supplement_results:
+                    unique_id = (supp_item.provider, supp_item.mediaId)
+                    if unique_id not in seen_results:
+                        all_results.append(supp_item)
+                        seen_results.add(unique_id)
+                if supplement_results:
+                    mgr_logger.info(f"搜索补充源: 补全了 {len(supplement_results)} 个搜索结果")
+        except Exception as e:
+            mgr_logger.debug(f"搜索补充源调用失败: {e}")
+
         # 新增：在此处应用全局标题过滤
         cn_pattern_str = await self.config_manager.get("search_result_global_blacklist_cn", "")
         eng_pattern_str = await self.config_manager.get("search_result_global_blacklist_eng", "")

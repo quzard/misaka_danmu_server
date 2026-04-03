@@ -327,6 +327,54 @@ class MetadataSourceManager:
 
         return {alias for alias in all_aliases if alias}, supplemental_results
 
+    async def supplement_empty_search_results(
+        self,
+        keyword: str,
+        empty_providers: Set[str]
+    ) -> List[models.ProviderSearchInfo]:
+        """调用所有启用的搜索补充源，为返回空结果的弹幕源提供兜底搜索结果。
+
+        遍历 is_search_supplement_source=True 且已启用的元数据源，
+        调用其 supplement_search() 获取补全条目。
+
+        Args:
+            keyword: 搜索关键词
+            empty_providers: 返回0结果的弹幕源名称集合
+
+        Returns:
+            以对应弹幕源 provider 名义生成的 ProviderSearchInfo 列表
+        """
+        if not empty_providers:
+            return []
+
+        supplement_sources = [
+            source for provider_name, source in self.sources.items()
+            if getattr(source, 'is_search_supplement_source', False)
+            and self.source_settings.get(provider_name, {}).get('isEnabled')
+        ]
+
+        if not supplement_sources:
+            return []
+
+        user = models.User(id=0, username="system")
+        remaining_empty = set(empty_providers)
+        all_supplements: List[models.ProviderSearchInfo] = []
+
+        # 逐个调用补充源（后续可改为并发）
+        for source in supplement_sources:
+            if not remaining_empty:
+                break
+            try:
+                results = await source.supplement_search(keyword, remaining_empty, user)
+                if results:
+                    all_supplements.extend(results)
+                    # 更新: 已有补全结果的弹幕源不再需要后续补充源补全
+                    remaining_empty -= {r.provider for r in results}
+            except Exception as e:
+                self.logger.warning(f"搜索补充源 '{source.provider_name}' 调用失败: {e}")
+
+        return all_supplements
+
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
         """获取所有元数据源及其持久化和临时状态。"""
         tasks = []

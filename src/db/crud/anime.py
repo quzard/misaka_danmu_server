@@ -871,6 +871,21 @@ async def search_animes_for_dandan(session: AsyncSession, keyword: str) -> List[
     return [dict(row) for row in result.mappings()]
 
 
+async def get_anime_ids_with_custom_source(session: AsyncSession, anime_ids: List[int]) -> List[int]:
+    """查询给定的 anime IDs 中哪些有 custom 源关联，返回有 custom 源的 anime ID 列表。"""
+    if not anime_ids:
+        return []
+    stmt = (
+        select(distinct(AnimeSource.animeId))
+        .where(
+            AnimeSource.providerName == 'custom',
+            AnimeSource.animeId.in_(anime_ids)
+        )
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]
+
+
 async def find_animes_for_matching(session: AsyncSession, title: str) -> List[Dict[str, Any]]:
     """为匹配流程查找可能的番剧，并返回其核心ID以供TMDB映射使用。"""
     title_len_expr = func.length(Anime.title)

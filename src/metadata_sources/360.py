@@ -66,6 +66,23 @@ class So360MetadataSource(BaseMetadataSource):
     is_failover_source = True
     has_force_aux_search_toggle = True
     supports_episode_urls = True  # 360源支持获取分集URL
+    is_search_supplement_source = True  # 360源作为搜索补充源
+
+    # 360内部平台名 -> 本项目弹幕源 provider name
+    PLATFORM_TO_PROVIDER: Dict[str, str] = {
+        "qq": "tencent",
+        "qiyi": "iqiyi",
+        "youku": "youku",
+        "bilibili1": "bilibili",
+        "bilibili": "bilibili",
+        "imgo": "mgtv",
+        "migu": "migu",
+        "sohu": "sohu",
+        "leshi": "le",
+        "xigua": "xigua",
+    }
+    # 反向映射: 本项目弹幕源 provider name -> 360内部平台名
+    PROVIDER_TO_PLATFORM: Dict[str, str] = {v: k for k, v in PLATFORM_TO_PROVIDER.items()}
 
     def __init__(self, session_factory, config_manager: ConfigManager, scraper_manager, cache_manager: CacheManager):
         super().__init__(session_factory, config_manager, scraper_manager, cache_manager)
@@ -862,6 +879,62 @@ class So360MetadataSource(BaseMetadataSource):
         elif 'mgtv.com' in url_lower or 'hunantv.com' in url_lower:
             return 'mgtv'
         return None
+
+    async def supplement_search(
+        self,
+        keyword: str,
+        empty_providers: Set[str],
+        user: models.User
+    ) -> List[models.ProviderSearchInfo]:
+        """360看搜索补充源：当弹幕源搜索无结果时，通过360聚合数据为对应平台提供兜底。
+
+        利用360搜索结果中的 playlinks 判断哪些平台有数据，
+        对 empty_providers 中有对应平台链接的源生成补全条目。
+        """
+        # 只对有映射关系的空结果源进行补全
+        providers_to_supplement = {p for p in empty_providers if p in self.PROVIDER_TO_PLATFORM}
+        if not providers_to_supplement:
+            return []
+
+        self.logger.info(f"360补充搜索: 尝试为 {providers_to_supplement} 补全 '{keyword}'")
+
+        try:
+            search_results = await self.search(keyword, user)
+        except Exception as e:
+            self.logger.warning(f"360补充搜索失败: {e}")
+            return []
+
+        if not search_results:
+            return []
+
+        supplement_items: List[models.ProviderSearchInfo] = []
+        supplemented_providers: Set[str] = set()
+
+        for so360_item in search_results:
+            if not so360_item.extra or 'item_data' not in so360_item.extra:
+                continue
+            item_data = so360_item.extra['item_data']
+            playlinks = item_data.get('playlinks', {}) if isinstance(item_data, dict) else {}
+
+            for provider_name in list(providers_to_supplement - supplemented_providers):
+                platform_key = self.PROVIDER_TO_PLATFORM[provider_name]
+                if platform_key in playlinks:
+                    supplement_items.append(models.ProviderSearchInfo(
+                        provider=provider_name,
+                        mediaId=f"sup_{self.provider_name}_{so360_item.id}_{platform_key}",
+                        title=so360_item.title,
+                        type=so360_item.type or 'tv_series',
+                        season=1,
+                        year=so360_item.year,
+                        imageUrl=so360_item.imageUrl,
+                        supportsEpisodeUrls=True,
+                        supplementSource=self.provider_name,
+                    ))
+                    supplemented_providers.add(provider_name)
+
+        if supplement_items:
+            self.logger.info(f"360补充搜索: 为 {supplemented_providers} 补全了 {len(supplement_items)} 个结果")
+        return supplement_items
 
     async def search_aliases(self, keyword: str, user: models.User) -> Set[str]:
         search_results = await self.search(keyword, user)

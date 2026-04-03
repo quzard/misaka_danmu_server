@@ -50,7 +50,8 @@ async def unified_search(
     max_results_per_source: Optional[int] = None,
     progress_callback: Optional[Callable] = None,
     episode_info: Optional[dict] = None,
-    alias_similarity_threshold: int = 75
+    alias_similarity_threshold: int = 75,
+    supplemental_results_out: Optional[list] = None
 ) -> List[Any]:
     """
     统一的搜索函数，用于后备搜索和匹配后备
@@ -140,7 +141,11 @@ async def unified_search(
                     from src.db import models
                     user = models.User(id=0, username="system")
                     # 使用核心标题获取别名
-                    all_possible_aliases, _ = await metadata_manager.search_supplemental_sources(core_title, user)
+                    all_possible_aliases, supp_results = await metadata_manager.search_supplemental_sources(core_title, user)
+
+                    # 将补充结果输出到调用方（如果提供了输出参数）
+                    if supplemental_results_out is not None and supp_results:
+                        supplemental_results_out.extend(supp_results)
 
                     # 缓存别名（1小时）
                     import json
