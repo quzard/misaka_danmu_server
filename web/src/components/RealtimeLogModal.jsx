@@ -81,16 +81,53 @@ export default function RealtimeLogModal({ open, onClose }) {
     }
   }
 
-  // 日志级别数值映射
-  const LEVEL_VALUES = { DEBUG: 10, INFO: 20, WARNING: 30, WARN: 30, ERROR: 40 }
-
-  // 从一行日志文本中提取级别
-  const getLineLevel = (line) => {
+  // 从一行日志文本中提取级别名称
+  const getLineLevelName = (line) => {
     const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
-    return m ? LEVEL_VALUES[m[1]] : null
+    return m ? m[1] : 'INFO'
   }
 
-  // 按级别返回边框色和背景色
+  // 各筛选级别包含的日志范围
+  // INFO: INFO + ERROR
+  // WARN: INFO + WARNING + ERROR
+  // DEBUG: 全部
+  const LEVEL_INCLUDES = {
+    INFO:  new Set(['INFO', 'ERROR']),
+    WARN:  new Set(['INFO', 'WARNING', 'ERROR']),
+    DEBUG: new Set(['DEBUG', 'INFO', 'WARNING', 'ERROR']),
+  }
+
+  // 当前选中级别对应的包含集合
+  const allowedLevels = LEVEL_INCLUDES[logLevel] || LEVEL_INCLUDES.INFO
+
+  // 判断某行日志是否应该显示
+  const isLevelAllowed = (line) => allowedLevels.has(getLineLevelName(line))
+
+  // 根据选中级别过滤日志条目
+  const filterLog = (entry) => {
+    if (logLevel === 'DEBUG') return entry // DEBUG 模式显示全部
+
+    const lines = entry.split('\n')
+    // 检测是否为缓冲日志块（包含 ┌─── 或 └───）
+    const isBlock = lines.some(l => l.includes('┌───') || l.includes('└───'))
+
+    if (!isBlock) {
+      // 普通单行/多行日志
+      return isLevelAllowed(entry) ? entry : null
+    }
+
+    // 缓冲块：逐行过滤，保留 header/footer
+    const filtered = lines.filter(l => {
+      if (l.includes('┌───') || l.includes('└───') || l.trim() === '') return true
+      return isLevelAllowed(l)
+    })
+
+    // 如果只剩 header 和 footer，隐藏整个块
+    const contentLines = filtered.filter(l => !l.includes('┌───') && !l.includes('└───') && l.trim() !== '')
+    return contentLines.length > 0 ? filtered.join('\n') : null
+  }
+
+  // 按级别返回边框色和背景色（INFO 走 className 默认）
   const getLevelColors = (line) => {
     const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
     if (!m) return {}
@@ -102,35 +139,8 @@ export default function RealtimeLogModal({ open, onClose }) {
     }
   }
 
-  // 隐去日志文本中的级别标签 [INFO] [WARNING] [ERROR] [DEBUG]
+  // 隐去日志文本中的级别标签
   const stripLevelTag = (text) => text.replace(/\s*\[(DEBUG|INFO|WARNING|ERROR)\]\s*/, ' ')
-
-  // 根据选中级别过滤日志条目
-  const filterLog = (entry) => {
-    const threshold = LEVEL_VALUES[logLevel] ?? 20
-    if (threshold <= 10) return entry // DEBUG 模式显示全部
-
-    const lines = entry.split('\n')
-    // 检测是否为缓冲日志块（包含 ┌─── 或 └───）
-    const isBlock = lines.some(l => l.includes('┌───') || l.includes('└───'))
-
-    if (!isBlock) {
-      // 普通单行/多行日志：取第一个匹配的级别，没有标签默认 INFO
-      const level = getLineLevel(entry)
-      return (level ?? 20) >= threshold ? entry : null
-    }
-
-    // 缓冲块：逐行过滤，保留 header/footer
-    const filtered = lines.filter(l => {
-      if (l.includes('┌───') || l.includes('└───') || l.trim() === '') return true
-      const level = getLineLevel(l)
-      return (level ?? 20) >= threshold
-    })
-
-    // 如果只剩 header 和 footer，隐藏整个块
-    const contentLines = filtered.filter(l => !l.includes('┌───') && !l.includes('└───') && l.trim() !== '')
-    return contentLines.length > 0 ? filtered.join('\n') : null
-  }
 
   // 关键词过滤（在级别过滤之上叠加）
   const filteredLogs = useMemo(() => {
