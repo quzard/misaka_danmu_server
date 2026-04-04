@@ -406,8 +406,7 @@ class SearchMenuMixin:
         if not self.scraper_manager:
             return CommandResult(text="", answer_callback_text="搜索服务未就绪")
         try:
-            scraper = self.scraper_manager.get_scraper(provider)
-            episodes = await scraper.get_episodes(media_id, db_media_type=item.get("type"))
+            episodes = await self.scraper_manager.get_episodes_routed(provider, media_id, db_media_type=item.get("type"))
             if not episodes:
                 return CommandResult(text="", answer_callback_text="未获取到分集列表")
             ep_list = []

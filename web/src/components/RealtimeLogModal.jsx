@@ -90,6 +90,21 @@ export default function RealtimeLogModal({ open, onClose }) {
     return m ? LEVEL_VALUES[m[1]] : null
   }
 
+  // 按级别返回边框色和背景色
+  const getLevelColors = (line) => {
+    const m = line.match(/\[(DEBUG|INFO|WARNING|ERROR)\]/)
+    if (!m) return {}
+    switch (m[1]) {
+      case 'ERROR': return { border: '#ef4444', bg: 'rgba(239,68,68,0.06)' }
+      case 'WARNING': return { border: '#f59e0b', bg: 'rgba(245,158,11,0.06)' }
+      case 'DEBUG': return { border: '#1d4ed8', bg: 'rgba(29,78,216,0.06)' }
+      default: return {}
+    }
+  }
+
+  // 隐去日志文本中的级别标签 [INFO] [WARNING] [ERROR] [DEBUG]
+  const stripLevelTag = (text) => text.replace(/\s*\[(DEBUG|INFO|WARNING|ERROR)\]\s*/, ' ')
+
   // 根据选中级别过滤日志条目
   const filterLog = (entry) => {
     const threshold = LEVEL_VALUES[logLevel] ?? 20
@@ -124,6 +139,9 @@ export default function RealtimeLogModal({ open, onClose }) {
     return logs.filter(line => line.toLowerCase().includes(kw))
   }, [logs, searchText])
 
+  // Segmented 选中项按级别变色（INFO 用 antd 默认样式）
+  const segColor = { WARN: '#f59e0b', DEBUG: '#1d4ed8' }[logLevel]
+
   const titleNode = (
     <div className="flex items-center gap-2">
       <span>实时日志</span>
@@ -132,12 +150,15 @@ export default function RealtimeLogModal({ open, onClose }) {
       {!isMobile && (
         <>
           <span className="text-gray-300 mx-1">|</span>
-          <Segmented
-            size="small"
-            options={['INFO', 'WARN', 'DEBUG']}
-            value={logLevel}
-            onChange={setLogLevel}
-          />
+          {segColor && <style key={`seg-style-${logLevel}`}>{`.log-seg .ant-segmented-item-selected { background: ${segColor} !important; color: #fff !important; }`}</style>}
+          <div className="log-seg">
+            <Segmented
+              size="small"
+              options={['INFO', 'WARN', 'DEBUG']}
+              value={logLevel}
+              onChange={setLogLevel}
+            />
+          </div>
           <Input
             size="small"
             placeholder="搜索日志..."
@@ -188,12 +209,14 @@ export default function RealtimeLogModal({ open, onClose }) {
     <div className={isMobile ? 'flex-1 overflow-hidden flex flex-col gap-2' : 'flex flex-col gap-2'}>
       {isMobile && (
         <div className="flex items-center gap-2 flex-wrap">
-          <Segmented
-            size="small"
-            options={['INFO', 'WARN', 'DEBUG']}
-            value={logLevel}
-            onChange={setLogLevel}
-          />
+          <div className="log-seg">
+            <Segmented
+              size="small"
+              options={['INFO', 'WARN', 'DEBUG']}
+              value={logLevel}
+              onChange={setLogLevel}
+            />
+          </div>
           <Input
             size="small"
             placeholder="搜索日志..."
@@ -218,14 +241,17 @@ export default function RealtimeLogModal({ open, onClose }) {
             filteredLogs.map((line, i) => {
               const filtered = filterLog(line)
               if (!filtered) return null
+              const lc = getLevelColors(filtered)
+              const displayText = stripLevelTag(filtered)
               return (
                 <div
                   key={i}
-                  className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} bg-base-hover border-l-2 border-primary hover:bg-base-hover-hover transition-colors`}
+                  className={`my-1 p-2 rounded group ${isMobile ? 'text-xs' : 'text-sm'} ${lc.border ? '' : 'bg-base-hover'} border-l-2 ${lc.border ? '' : 'border-primary'} hover:bg-base-hover-hover transition-colors`}
+                  style={{ ...(lc.border ? { borderLeftColor: lc.border } : {}), ...(lc.bg ? { backgroundColor: lc.bg } : {}) }}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <pre className="whitespace-pre-wrap break-words m-0 font-mono flex-1 min-w-0">
-                      {searchText ? highlightText(filtered, searchText) : filtered}
+                      {searchText ? highlightText(displayText, searchText) : displayText}
                     </pre>
                     <Button
                       type="text"

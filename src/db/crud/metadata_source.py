@@ -52,7 +52,7 @@ async def get_all_metadata_source_settings(session: AsyncSession) -> List[Dict[s
             "displayOrder": s.displayOrder,
             "useProxy": s.useProxy,
             "isFailoverEnabled": s.isFailoverEnabled,
-            "logRawResponses": s.logRawResponses
+            "logRawResponses": s.logRawResponses,
         }
         for s in result.scalars()
     ]

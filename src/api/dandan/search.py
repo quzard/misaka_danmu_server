@@ -316,6 +316,37 @@ async def search_anime_for_dandan(
 
             labeled_fallback.sort(key=_sort_key)
 
+            # 补充自定义源条目：从 db_results 中找到有 custom 源的 anime，追加到最后
+            if db_results:
+                db_anime_ids = [res['animeId'] for res in db_results]
+                custom_anime_ids = await crud.get_anime_ids_with_custom_source(session, db_anime_ids)
+                if custom_anime_ids:
+                    custom_anime_ids_set = set(custom_anime_ids)
+                    for res in db_results:
+                        if res['animeId'] in custom_anime_ids_set:
+                            dandan_type = DANDAN_TYPE_MAPPING.get(res.get('type'), "other")
+                            dandan_type_desc = DANDAN_TYPE_DESC_MAPPING.get(res.get('type'), "其他")
+                            year = res.get('year')
+                            start_date_str = None
+                            if year:
+                                start_date_str = datetime(year, 1, 1, tzinfo=get_app_timezone()).isoformat()
+                            elif res.get('startDate'):
+                                start_date_str = res.get('startDate').isoformat()
+                            labeled_fallback.append(DandanSearchAnimeItem(
+                                animeId=res['animeId'],
+                                bangumiId=res.get('bangumiId') or f"A{res['animeId']}",
+                                animeTitle=f"{res['animeTitle']}（自定义源）",
+                                type=dandan_type,
+                                typeDescription=dandan_type_desc,
+                                imageUrl=res.get('imageUrl'),
+                                startDate=start_date_str,
+                                year=year,
+                                episodeCount=res.get('episodeCount', 0),
+                                rating=0.0,
+                                isFavorited=False
+                            ))
+                    logger.info(f"并行搜索: 追加 {len(custom_anime_ids)} 个自定义源条目")
+
             parallel_count = sum(1 for a in labeled_fallback if '（并行' in a.animeTitle)
             logger.info(f"并行搜索: 后备 {len(fallback_response.animes)} 个结果，其中 {parallel_count} 个精确源匹配标注并行")
             return DandanSearchAnimeResponse(animes=labeled_fallback)

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from typing import Any, Dict, List, Optional
 from src._version import APP_VERSION
 
@@ -486,15 +487,30 @@ class TelegramChannel(BaseNotificationChannel):
             self.logger.info("Telegram 轮询已启动")
             try:
                 self._bot.remove_webhook()
-                self._bot.infinity_polling(timeout=30, long_polling_timeout=30)
-            except Exception as e:
-                if self._running:
-                    err_str = str(e).lower()
-                    # SSL 瞬断 / 网络超时属于可恢复的瞬态错误，降级为 WARNING
-                    if any(k in err_str for k in ("ssl", "eof", "timeout", "connectionpool", "max retries")):
-                        self.logger.warning(f"Telegram 轮询网络瞬断（将自动重试）: {type(e).__name__}")
+            except Exception:
+                pass
+
+            # 自行实现轮询循环，替代 infinity_polling 以控制日志输出
+            while self._running:
+                try:
+                    self._bot.polling(non_stop=True, timeout=30, long_polling_timeout=30, logger_level=0)
+                except Exception as e:
+                    if not self._running:
+                        break
+                    # 提取简洁的错误摘要：类型 + 核心信息（去掉嵌套的 Caused by 链）
+                    err_type = type(e).__name__
+                    err_msg = str(e)
+                    # 从嵌套异常链中提取最内层的关键信息
+                    if "Caused by" in err_msg:
+                        # 取最后一个 Caused by 后面的内容
+                        caused = err_msg.rsplit("Caused by ", 1)[-1].rstrip(")")
+                        short_msg = caused
+                    elif len(err_msg) > 200:
+                        short_msg = err_msg[:200] + "..."
                     else:
-                        self.logger.error(f"Telegram 轮询异常退出: {e}")
+                        short_msg = err_msg
+                    self.logger.warning(f"Telegram 轮询网络异常（自动重试）: {err_type}: {short_msg}")
+                    time.sleep(3)
 
         self._polling_thread = threading.Thread(
             target=polling_worker,
