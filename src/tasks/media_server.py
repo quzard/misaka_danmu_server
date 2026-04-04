@@ -143,10 +143,14 @@ async def import_media_items(
 
     await progress_callback(0, "开始导入媒体项...")
 
-    # 获取所有媒体项
-    items_stmt = select(MediaItem).where(MediaItem.id.in_(item_ids))
-    result = await session.execute(items_stmt)
-    items = result.scalars().all()
+    # 获取所有媒体项（分批查询，避免 asyncpg 的 32767 参数限制）
+    BATCH_SIZE = 30000
+    items = []
+    for i in range(0, len(item_ids), BATCH_SIZE):
+        batch_ids = item_ids[i:i + BATCH_SIZE]
+        items_stmt = select(MediaItem).where(MediaItem.id.in_(batch_ids))
+        result = await session.execute(items_stmt)
+        items.extend(result.scalars().all())
 
     if not items:
         raise ValueError("未找到要导入的媒体项")

@@ -1183,11 +1183,16 @@ async def bulk_set_sources_finished_by_anime_ids(session: AsyncSession, anime_id
     """批量设置指定番剧下所有源的完结状态，返回实际更新的记录数。"""
     if not anime_ids:
         return 0
-    stmt = (
-        update(AnimeSource)
-        .where(AnimeSource.animeId.in_(anime_ids))
-        .values(isFinished=is_finished)
-    )
-    result = await session.execute(stmt)
+    PG_BATCH = 30000
+    total_updated = 0
+    for i in range(0, len(anime_ids), PG_BATCH):
+        batch = anime_ids[i:i + PG_BATCH]
+        stmt = (
+            update(AnimeSource)
+            .where(AnimeSource.animeId.in_(batch))
+            .values(isFinished=is_finished)
+        )
+        result = await session.execute(stmt)
+        total_updated += result.rowcount
     await session.commit()
-    return result.rowcount
+    return total_updated
