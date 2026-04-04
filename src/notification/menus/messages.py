@@ -123,15 +123,37 @@ class MessagesMixin:
 
         # ── 匹配后备 ─────────────────────────────────────────
         if event_type in ("match_fallback_success", "match_fallback_failed"):
+            # 从 task_parameters 读取匹配详情
+            task_params = data.get("task_parameters", {})
+            provider = task_params.get("provider", "")
+            final_title = task_params.get("final_title", "")
+            final_season = task_params.get("final_season")
+            episode_number = task_params.get("episode_number")
+            is_movie = task_params.get("is_movie", False)
+
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
+            ]
+
+            # 显示匹配详情
+            if provider:
+                lines.append(f"• 弹幕源: {provider}")
+            if final_title:
+                lines.append(f"• 番剧: {final_title}")
+            if final_season is not None and episode_number is not None:
+                if is_movie:
+                    lines.append(f"• 类型: 电影")
+                else:
+                    lines.append(f"• 季集: S{final_season:02d}E{episode_number:02d}")
+
+            lines.extend([
                 "",
                 "⚙️ *执行结果*",
                 f"• 状态: {icon} {'处理完成' if is_success else '处理失败'}",
                 f"  └─ 📋 {msg_short}" if msg_short else "",
                 f"• 时间: {finished_at}" if finished_at else "",
-            ]
+            ])
             return (f"{icon} 后备任务{'完成' if is_success else '失败'}", "\n".join(l for l in lines if l))
 
         # ── 定时任务 ──────────────────────────────────────
