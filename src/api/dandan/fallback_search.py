@@ -62,13 +62,11 @@ async def handle_fallback_search(
     if existing_search_key:
         existing_search = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, existing_search_key)
         if existing_search and existing_search["status"] == "running":
-            elapsed_time = time.time() - existing_search["start_time"]
-            progress = min(int((elapsed_time / 60) * 100), 95)
             return DandanSearchAnimeResponse(animes=[
                 DandanSearchAnimeItem(
                     animeId=999999999, bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                    animeTitle=f"{existing_search['search_term']} 搜索正在运行",
-                    type="tvseries", typeDescription=f"{progress}%",
+                    animeTitle=f"相同的搜索任务正在进行中，请稍等",
+                    type="tvseries", typeDescription="搜索中",
                     imageUrl=image_url, startDate="2025-01-01T00:00:00+08:00",
                     year=2025, episodeCount=1, rating=0.0, isFavorited=False
                 )
@@ -96,13 +94,11 @@ async def handle_fallback_search(
         if search_info["status"] == "failed":
             return DandanSearchAnimeResponse(animes=[])
         if search_info["status"] == "running":
-            elapsed_time = time.time() - search_info["start_time"]
-            progress = min(int((elapsed_time / 60) * 100), 95)
             return DandanSearchAnimeResponse(animes=[
                 DandanSearchAnimeItem(
                     animeId=999999999, bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-                    animeTitle=f"{search_term} 搜索正在运行",
-                    type="tvseries", typeDescription=f"{progress}%",
+                    animeTitle=f"相同的搜索任务正在进行中，请稍等",
+                    type="tvseries", typeDescription="搜索中",
                     imageUrl=image_url, startDate="2025-01-01T00:00:00+08:00",
                     year=2025, episodeCount=1, rating=0.0, isFavorited=False
                 )
@@ -158,8 +154,12 @@ async def handle_fallback_search(
         search_info["status"] = "failed"
         return DandanSearchAnimeResponse(animes=[])
 
-    # 15秒等待机制
-    max_wait_time = 15.0
+    # 可配置超时等待机制
+    timeout_str = await config_manager.get("searchFallbackTimeout", "15")
+    try:
+        max_wait_time = float(timeout_str)
+    except (ValueError, TypeError):
+        max_wait_time = 15.0
     start_time = time.time()
     check_interval = 0.5
 
@@ -175,17 +175,14 @@ async def handle_fallback_search(
                 logger.warning(f"后备搜索在 {time.time() - start_time:.2f} 秒内失败")
                 return DandanSearchAnimeResponse(animes=[])
 
-    # 超过15秒仍未完成，返回进度状态
-    logger.info(f"后备搜索超过15秒未完成，返回进度状态")
-    final_search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-    elapsed_time = time.time() - search_info["start_time"]
-    progress = min(int((elapsed_time / 60) * 100), 95)
+    # 超过配置超时仍未完成，返回提示
+    logger.info(f"后备搜索超过 {max_wait_time} 秒未完成，返回搜索中提示")
 
     return DandanSearchAnimeResponse(animes=[
         DandanSearchAnimeItem(
             animeId=999999999, bangumiId=str(FALLBACK_SEARCH_BANGUMI_ID),
-            animeTitle=f"{search_term} 搜索正在运行",
-            type="tvseries", typeDescription=f"{progress}%",
+            animeTitle=f"搜索正在进行中，请稍等",
+            type="tvseries", typeDescription="搜索中",
             imageUrl=image_url, startDate="2025-01-01T00:00:00+08:00",
             year=2025, episodeCount=1, rating=0.0, isFavorited=False
         )

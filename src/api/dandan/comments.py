@@ -349,15 +349,12 @@ async def get_comments_for_dandan(
             # 步骤1：获取分集信息（先验证能拿到数据，再创建数据库条目）
             logger.info(f"开始获取分集信息: provider={provider}, mediaId={mediaId}, episode_number={episode_number}")
 
-            # 获取scraper
+            # 获取scraper（后续弹幕下载任务需要）
             scraper = scraper_manager.get_scraper(provider)
-            if not scraper:
-                logger.error(f"无法获取scraper: {provider}")
-                return models.CommentResponse(count=0, comments=[])
 
-            # 获取分集列表
+            # 获取分集列表（自动路由补充源 mediaId）
             try:
-                episodes_list = await scraper.get_episodes(mediaId, db_media_type=media_type)
+                episodes_list = await scraper_manager.get_episodes_routed(provider, mediaId, db_media_type=media_type)
                 if not episodes_list or len(episodes_list) < episode_number:
                     logger.error(f"无法获取第{episode_number}集的信息，跳过创建数据库条目")
                     return models.CommentResponse(count=0, comments=[])

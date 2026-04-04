@@ -18,6 +18,8 @@ class BaseMetadataSource(ABC):
     configurable_fields: Dict[str, Tuple[str, str, str]] = {}
     # 新增：是否支持获取分集URL (用于补充源功能)
     supports_episode_urls: bool = False
+    # 新增：是否为搜索补充源（当弹幕源搜索无结果时，可为对应平台提供兜底数据）
+    is_search_supplement_source: bool = False
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
         self._session_factory = session_factory
@@ -76,6 +78,27 @@ class BaseMetadataSource(ABC):
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
         return [] # 默认实现返回空列表
+
+    async def supplement_search(
+        self,
+        keyword: str,
+        empty_providers: Set[str],
+        user: models.User
+    ) -> List[models.ProviderSearchInfo]:
+        """当弹幕源搜索无结果时，为对应平台提供兜底搜索结果。
+
+        子类需设 is_search_supplement_source = True 并重写此方法。
+        内部维护平台名称映射，返回的 ProviderSearchInfo.provider 使用弹幕源的名称。
+
+        Args:
+            keyword: 搜索关键词
+            empty_providers: 返回0结果的弹幕源名称集合（如 {"youku", "iqiyi"}）
+            user: 系统用户
+
+        Returns:
+            以对应弹幕源 provider 名义生成的 ProviderSearchInfo 列表
+        """
+        return []
 
     async def close(self):
         """关闭所有打开的资源，例如HTTP客户端。"""

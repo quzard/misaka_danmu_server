@@ -135,13 +135,54 @@ async def generic_import_task(
 
     await progress_callback(10, "正在获取分集列表...")
 
+    # ===== 反向偏移：将 Emby/用户传入的偏移后集号还原为源站原始集号 =====
+    # Webhook/外部API 传来的 currentEpisodeIndex 和 selectedEpisodes 是偏移后的值（Emby视角），
+    # 但源站分集列表使用的是原始集号。需要先反向偏移才能在源站找到正确的分集。
+    # 入库时 _import_episodes_iteratively 中会再做正向偏移，恢复为数据库期望的偏移后值。
+    source_episode_index = currentEpisodeIndex  # 用于源站查找的集号（反向偏移后）
+    source_selected_episodes = selectedEpisodes  # 用于源站筛选的集号列表（反向偏移后）
+
+    if title_recognition_manager and title_to_use:
+        # 对单集导入的 currentEpisodeIndex 做反向偏移
+        if currentEpisodeIndex is not None:
+            try:
+                reversed_ep = await title_recognition_manager.reverse_episode_offset(
+                    title_to_use, currentEpisodeIndex, provider
+                )
+                if reversed_ep != currentEpisodeIndex:
+                    logger.info(f"反向偏移: '{title_to_use}' Emby第{currentEpisodeIndex}集 => 源站第{reversed_ep}集")
+                    source_episode_index = reversed_ep
+            except Exception as e:
+                logger.warning(f"反向偏移失败，使用原始集数: {e}")
+
+        # 对多集导入的 selectedEpisodes 做反向偏移
+        if selectedEpisodes is not None:
+            reversed_selected = []
+            for ep_idx in selectedEpisodes:
+                if ep_idx is None:
+                    reversed_selected.append(ep_idx)
+                    continue
+                try:
+                    reversed_ep = await title_recognition_manager.reverse_episode_offset(
+                        title_to_use, ep_idx, provider
+                    )
+                    reversed_selected.append(reversed_ep)
+                    if reversed_ep != ep_idx:
+                        logger.info(f"反向偏移: '{title_to_use}' selectedEpisode {ep_idx} => 源站 {reversed_ep}")
+                except Exception as e:
+                    logger.warning(f"反向偏移 selectedEpisode {ep_idx} 失败，使用原始值: {e}")
+                    reversed_selected.append(ep_idx)
+            if reversed_selected != list(selectedEpisodes):
+                logger.info(f"selectedEpisodes 反向偏移: {list(selectedEpisodes)} => {reversed_selected}")
+                source_selected_episodes = reversed_selected
+
     # 媒体库整季导入时, 需要先获取完整分集列表, 再按 selectedEpisodes 做本地筛选
-    target_episode_index = currentEpisodeIndex
+    target_episode_index = source_episode_index  # 使用反向偏移后的集号查源站
     if selectedEpisodes is not None:
         target_episode_index = None
 
-    episodes = await scraper.get_episodes(
-        mediaId,
+    episodes = await manager.get_episodes_routed(
+        provider, mediaId,
         target_episode_index=target_episode_index,
         db_media_type=mediaType
     )
@@ -260,24 +301,28 @@ async def generic_import_task(
             raise TaskSuccess("未找到任何分集信息。")
 
     # 如果是媒体库整季导入, 再按 selectedEpisodes 对分集做一次本地筛选
+    # 关键：使用反向偏移后的 source_selected_episodes 与源站集号匹配
     if selectedEpisodes is not None:
-        selected_set = {idx for idx in selectedEpisodes if idx is not None}
+        # 用反向偏移后的集号去匹配源站分集
+        source_set = {idx for idx in source_selected_episodes if idx is not None}
+        # 保留原始偏移后的集号集合（用于日志和降级逻辑中的数量计算）
+        original_selected_set = {idx for idx in selectedEpisodes if idx is not None}
         original_count = len(episodes)
-        if selected_set:
-            filtered = [ep for ep in episodes if ep.episodeIndex in selected_set]
+        if source_set:
+            filtered = [ep for ep in episodes if ep.episodeIndex in source_set]
         else:
             filtered = []
 
         if filtered:
-            # 按集号精确匹配成功（弹幕源集号与 Emby 季内集号一致）
+            # 按集号精确匹配成功（反向偏移后的源站集号匹配成功）
             episodes = filtered
             logger.info(
-                f"媒体库整季导入: 按选择的分集筛选(精确匹配), 源共有 {original_count} 集, 保留 {len(episodes)} 集: {sorted(selected_set)}"
+                f"媒体库整季导入: 按选择的分集筛选(精确匹配), 源共有 {original_count} 集, 保留 {len(episodes)} 集: {sorted(source_set)}"
             )
         else:
             # 精确匹配失败：尝试通过 TMDB 剧集组等价映射将 Emby 季内集号翻译为弹幕源绝对集号
             translated_set = set()
-            if selected_set and season:
+            if original_selected_set and season:
                 try:
                     # 先通过 tmdbId 查 anime 的 group_id
                     group_id_for_mapping = None
@@ -299,13 +344,13 @@ async def generic_import_task(
 
                     if group_id_for_mapping:
                         ep_translation = await crud.get_episode_equivalence_batch(
-                            session, group_id_for_mapping, season, list(selected_set)
+                            session, group_id_for_mapping, season, list(original_selected_set)
                         )
                         if ep_translation:
                             translated_set = set(ep_translation.values())
                             logger.info(
                                 f"媒体库整季导入: 剧集组等价映射翻译成功 (groupId={group_id_for_mapping}), "
-                                f"Emby相对集号 {sorted(selected_set)} → 弹幕源绝对集号 {sorted(translated_set)}"
+                                f"Emby相对集号 {sorted(original_selected_set)} → 弹幕源绝对集号 {sorted(translated_set)}"
                             )
                         else:
                             logger.info(
@@ -325,14 +370,14 @@ async def generic_import_task(
                     )
                 else:
                     # 翻译后仍无法匹配，降级为数量截取
-                    limit = len(selected_set)
+                    limit = len(original_selected_set)
                     episodes = episodes[:limit]
                     logger.info(
                         f"媒体库整季导入: 翻译后集号仍无匹配(翻译集号={sorted(translated_set)})，降级为按数量截取前 {limit} 集"
                     )
             else:
                 # 无法翻译，降级为按数量截取前 N 集
-                limit = len(selected_set) if selected_set else original_count
+                limit = len(original_selected_set) if original_selected_set else original_count
                 episodes = episodes[:limit]
                 logger.info(
                     f"媒体库整季导入: 无法翻译集号，降级为按数量截取前 {limit} 集, 源共有 {original_count} 集, 保留 {len(episodes)} 集"

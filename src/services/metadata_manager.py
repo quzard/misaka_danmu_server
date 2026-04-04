@@ -327,6 +327,59 @@ class MetadataSourceManager:
 
         return {alias for alias in all_aliases if alias}, supplemental_results
 
+    async def supplement_empty_search_results(
+        self,
+        keyword: str,
+        empty_providers: Set[str]
+    ) -> List[models.ProviderSearchInfo]:
+        """调用所有启用的搜索补充源，为返回空结果的弹幕源提供兜底搜索结果。
+
+        遍历 is_search_supplement_source=True 且已启用的元数据源，
+        调用其 supplement_search() 获取补全条目。
+
+        Args:
+            keyword: 搜索关键词
+            empty_providers: 返回0结果的弹幕源名称集合
+
+        Returns:
+            以对应弹幕源 provider 名义生成的 ProviderSearchInfo 列表
+        """
+        if not empty_providers:
+            return []
+
+        supplement_sources = []
+        for provider_name, source in self.sources.items():
+            if not getattr(source, 'is_search_supplement_source', False):
+                continue
+            if not self.source_settings.get(provider_name, {}).get('isEnabled'):
+                continue
+            # 从 config 表读取补充源开关（key 与 configurable_fields 声明一致）
+            enabled_str = await self._config_manager.get(f"{provider_name}_searchSupplementEnabled", "false")
+            if enabled_str.lower() == 'true':
+                supplement_sources.append(source)
+
+        if not supplement_sources:
+            return []
+
+        user = models.User(id=0, username="system")
+        remaining_empty = set(empty_providers)
+        all_supplements: List[models.ProviderSearchInfo] = []
+
+        # 逐个调用补充源（后续可改为并发）
+        for source in supplement_sources:
+            if not remaining_empty:
+                break
+            try:
+                results = await source.supplement_search(keyword, remaining_empty, user)
+                if results:
+                    all_supplements.extend(results)
+                    # 更新: 已有补全结果的弹幕源不再需要后续补充源补全
+                    remaining_empty -= {r.provider for r in results}
+            except Exception as e:
+                self.logger.warning(f"搜索补充源 '{source.provider_name}' 调用失败: {e}")
+
+        return all_supplements
+
     async def get_sources_with_status(self) -> List[Dict[str, Any]]:
         """获取所有元数据源及其持久化和临时状态。"""
         tasks = []
@@ -362,6 +415,15 @@ class MetadataSourceManager:
                 status_text = "已禁用"
                 status_code = "disabled"
 
+            source_instance = self.sources.get(provider_name)
+            is_supplement_source = getattr(source_instance, 'is_search_supplement_source', False) if source_instance else False
+
+            # 从 config 表读取补充源开关
+            supplement_enabled = False
+            if is_supplement_source:
+                enabled_str = await self._config_manager.get(f"{provider_name}_searchSupplementEnabled", "false")
+                supplement_enabled = enabled_str.lower() == 'true'
+
             full_status_list.append({
                 "providerName": provider_name,
                 "isEnabled": is_enabled,
@@ -372,6 +434,8 @@ class MetadataSourceManager:
                 "statusCode": status_code,
                 "useProxy": setting.get('useProxy', False),
                 "logRawResponses": setting.get('log_raw_responses', False),
+                "isSearchSupplementSource": is_supplement_source,
+                "isSearchSupplementEnabled": supplement_enabled,
             })
         
         return sorted(full_status_list, key=lambda x: x['displayOrder'])
@@ -553,13 +617,23 @@ class MetadataSourceManager:
         # 新增：告知前端此源是否为故障转移源，以决定是否显示“强制辅助”开关
         if source_class:
             config_values['isFailoverSource'] = getattr(source_class, 'is_failover_source', False)
-            # 新增：告知前端此源是否支持获取分集URL (补充源功能)
-            supports_episode_urls = getattr(source_class, 'supports_episode_urls', False)
-            config_values['supportsEpisodeUrls'] = supports_episode_urls
-            # 如果支持补充源，则读取其启用状态
-            if supports_episode_urls:
-                episode_urls_enabled_str = await self._config_manager.get(f"{providerName}_episode_urls_enabled", "false")
-                config_values['episodeUrlsEnabled'] = episode_urls_enabled_str.lower() == 'true'
+
+            # 返回 configurableFields 元数据，让前端动态渲染
+            cf = getattr(source_class, 'configurable_fields', {})
+            if cf:
+                config_values['configurableFields'] = cf
+                # 动态读取每个 configurable_field 的当前值
+                for field_key in cf:
+                    camel_key = field_key
+                    stored_value = await self._config_manager.get(f"{providerName}_{field_key}", "")
+                    if stored_value:
+                        # 元组或字典格式，取 type
+                        field_info = cf[field_key]
+                        field_type = field_info[1] if isinstance(field_info, (list, tuple)) else field_info.get('type', 'string')
+                        if field_type == 'boolean':
+                            config_values[camel_key] = stored_value.lower() == 'true'
+                        else:
+                            config_values[camel_key] = stored_value
 
 
         # 添加特殊逻辑：Bangumi 认证模式
@@ -597,11 +671,17 @@ class MetadataSourceManager:
             config_key = f"{providerName}_force_aux_search"
             config_fields_to_update[config_key] = force_enabled_value
 
-        # 新增：处理 episodeUrlsEnabled (补充源功能)，存储在 config 表中
-        if 'episodeUrlsEnabled' in payload:
-            episode_urls_enabled_value = str(payload.pop('episodeUrlsEnabled', False)).lower()
-            config_key = f"{providerName}_episode_urls_enabled"
-            config_fields_to_update[config_key] = episode_urls_enabled_value
+        # 动态处理 configurable_fields 中声明的字段，存储到 config 表
+        source_class = self._source_classes.get(providerName)
+        cf = getattr(source_class, 'configurable_fields', {}) if source_class else {}
+        for field_key in cf:
+            if field_key in payload:
+                value = payload.pop(field_key)
+                config_key = f"{providerName}_{field_key}"
+                if isinstance(value, bool):
+                    config_fields_to_update[config_key] = str(value).lower()
+                else:
+                    config_fields_to_update[config_key] = str(value if value is not None else "")
 
         # 2b. 识别属于 config 表的字段
         allowed_keys_map = {
