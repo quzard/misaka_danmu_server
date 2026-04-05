@@ -19,6 +19,15 @@ from typing import Optional, Dict, Any, Generator
 
 logger = logging.getLogger(__name__)
 
+
+def _format_size(size_bytes: int) -> str:
+    """将字节数格式化为人类可读的大小"""
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if abs(size_bytes) < 1024:
+            return f"{size_bytes:.1f}{unit}"
+        size_bytes /= 1024
+    return f"{size_bytes:.1f}TB"
+
 # Docker socket 路径
 DOCKER_SOCKET_PATH = "/var/run/docker.sock"
 

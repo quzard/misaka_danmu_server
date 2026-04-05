@@ -67,7 +67,7 @@ const getStatusIcon = (statusCode) => {
   }
 }
 
-const SortableItem = ({ item, index, handleChangeStatus, onConfig, onToggleSupplement }) => {
+const SortableItem = ({ item, index, handleChangeStatus, onConfig }) => {
   const {
     attributes,
     listeners,
@@ -118,17 +118,6 @@ const SortableItem = ({ item, index, handleChangeStatus, onConfig, onToggleSuppl
             <Tag color="green">已启用</Tag>
           ) : (
             <Tag color="red">未启用</Tag>
-          )}
-          {item.isSearchSupplementSource && (
-            <Tooltip title="切换搜索补充源">
-              <Tag
-                color={item.isSearchSupplementEnabled ? 'purple' : 'default'}
-                className="cursor-pointer select-none"
-                onClick={onToggleSupplement}
-              >
-                {item.isSearchSupplementEnabled ? '补充源 ✓' : '补充源 ✗'}
-              </Tag>
-            </Tooltip>
           )}
           {item.providerName !== 'tmdb' ? (
             <Tooltip title="切换启用状态">
@@ -287,27 +276,6 @@ export const Metadata = () => {
     setMetaData(payload)
   }
 
-  const handleToggleSupplement = async item => {
-    const newEnabled = !item.isSearchSupplementEnabled
-    // 通过 setProviderConfig 保存到 config 表
-    try {
-      await setProviderConfig(item.providerName, {
-        searchSupplementEnabled: newEnabled,
-      })
-      // 更新本地状态
-      setList(prev =>
-        prev.map(it =>
-          it.providerName === item.providerName
-            ? { ...it, isSearchSupplementEnabled: newEnabled }
-            : it
-        )
-      )
-      messageApi.success(`${item.providerName} 补充源已${newEnabled ? '启用' : '禁用'}`)
-    } catch (error) {
-      messageApi.error(`切换失败: ${error.message || '未知错误'}`)
-    }
-  }
-
   const handleSaveSettings = async () => {
     try {
       setConfirmLoading(true)
@@ -434,7 +402,6 @@ export const Metadata = () => {
                   item={item}
                   index={index}
                   handleChangeStatus={() => handleChangeStatus(item)}
-                  onToggleSupplement={() => handleToggleSupplement(item)}
                   onConfig={() => {
                     setSelectedSource(item)
                     setIsModalOpen(true)
