@@ -682,22 +682,21 @@ def _format_bytes(bytes_value: int) -> str:
     return f"{value:.2f} {units[unit_index]}"
 
 
-def update_container_with_watchtower(
-    container_name: str,
-    watchtower_image: str = "containrrr/watchtower",
-    proxy_url: Optional[str] = None,
+def recreate_container_with_image(
+    container_id: str,
+    new_image: str,
+    helper_image: str = "docker:cli",
 ) -> Generator[Dict[str, Any], None, None]:
     """
-    使用 watchtower 更新容器
+    通过辅助容器重建当前容器（使用新镜像，保留原有配置）。
+
+    由于无法从容器内部停止自身，会启动一个一次性的 docker:cli 辅助容器，
+    由它来执行 stop → rm → create → start 的完整流程。
 
     Args:
-        container_name: 要更新的容器名称
-        watchtower_image: watchtower 镜像名称
-        proxy_url: HTTP/SOCKS 代理 URL（如 http://host:port 或 socks5://host:port），
-                   将作为 HTTP_PROXY/HTTPS_PROXY 环境变量传入 watchtower 容器
-
-    Yields:
-        更新进度信息
+        container_id: 当前运行容器的 ID（通过 get_current_container_id 获取）
+        new_image: 要使用的新镜像名称（如 l429609201/misaka_danmu_server:latest）
+        helper_image: 辅助容器使用的镜像（需包含 docker CLI）
     """
     if not is_docker_socket_available():
         yield {"status": "Docker socket 不可用", "event": "ERROR"}
@@ -709,42 +708,110 @@ def update_container_with_watchtower(
             yield {"status": "无法获取 Docker 客户端", "event": "ERROR"}
             return
 
-        # 确保 watchtower 镜像存在
+        # 获取当前容器信息
+        yield {"status": "正在读取容器配置..."}
+        container = client.containers.get(container_id)
+        attrs = container.attrs
+        name = attrs['Name'].lstrip('/')
+        config = attrs['Config']
+        host_config = attrs['HostConfig']
+
+        logger.info(f"准备重建容器: name={name}, id={container_id[:12]}, new_image={new_image}")
+
+        # 构建 docker create 命令参数
+        create_args = []
+
+        # --restart
+        restart = host_config.get('RestartPolicy', {})
+        if restart.get('Name') and restart['Name'] != 'no':
+            policy = restart['Name']
+            if restart.get('MaximumRetryCount', 0) > 0:
+                policy += f":{restart['MaximumRetryCount']}"
+            create_args.extend(['--restart', policy])
+
+        # -p (port bindings)
+        ports = host_config.get('PortBindings') or {}
+        for container_port, bindings in ports.items():
+            for binding in (bindings or []):
+                hp = binding.get('HostPort', '')
+                hip = binding.get('HostIp', '')
+                if hip:
+                    create_args.extend(['-p', f"{hip}:{hp}:{container_port}"])
+                elif hp:
+                    create_args.extend(['-p', f"{hp}:{container_port}"])
+
+        # -v (volume binds)
+        binds = host_config.get('Binds') or []
+        for bind in binds:
+            create_args.extend(['-v', bind])
+
+        # -e (environment variables)
+        env_list = config.get('Env') or []
+        for env in env_list:
+            create_args.extend(['-e', env])
+
+        # --network
+        network_mode = host_config.get('NetworkMode', '')
+        if network_mode and network_mode not in ('default', 'bridge'):
+            create_args.extend(['--network', network_mode])
+
+        # --hostname (仅当不是容器 ID 时)
+        hostname = config.get('Hostname', '')
+        if hostname and not hostname.startswith(container_id[:12]):
+            create_args.extend(['--hostname', hostname])
+
+        # --privileged
+        if host_config.get('Privileged'):
+            create_args.append('--privileged')
+
+        # --cap-add
+        for cap in (host_config.get('CapAdd') or []):
+            create_args.extend(['--cap-add', cap])
+
+        # 构建 shell 脚本（由辅助容器执行）
+        # 使用 printf 而非 echo 避免环境变量中特殊字符问题
+        import shlex
+        quoted_args = ' '.join(shlex.quote(a) for a in create_args)
+        script = (
+            f'set -e; '
+            f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
+            f'echo "=== 停止容器 {name} ==="; '
+            f'docker stop {shlex.quote(name)} --time 10; '
+            f'echo "=== 删除旧容器 ==="; '
+            f'docker rm {shlex.quote(name)}; '
+            f'echo "=== 创建新容器 (镜像: {new_image}) ==="; '
+            f'docker create --name {shlex.quote(name)} {quoted_args} {shlex.quote(new_image)}; '
+            f'echo "=== 启动新容器 ==="; '
+            f'docker start {shlex.quote(name)}; '
+            f'echo "=== 重建完成 ==="'
+        )
+
+        logger.info(f"重建脚本: docker create --name {name} {quoted_args} {new_image}")
+
+        # 确保辅助镜像存在
         try:
-            client.images.get(watchtower_image)
+            client.images.get(helper_image)
         except NotFound:
-            yield {"status": f"正在拉取更新工具: {watchtower_image}..."}
-            client.images.pull(watchtower_image)
+            yield {"status": f"正在拉取辅助工具: {helper_image}..."}
+            client.images.pull(helper_image)
 
-        yield {"status": "正在启动更新任务..."}
+        yield {"status": f"正在启动重建任务（容器: {name}）..."}
 
-        # 运行 watchtower 一次性更新
-        command = ["--cleanup", "--run-once", container_name]
-
-        # 构建环境变量：clash 系代理需要通过环境变量传入 watchtower 容器
-        environment = {}
-        if proxy_url:
-            environment["HTTP_PROXY"] = proxy_url
-            environment["HTTPS_PROXY"] = proxy_url
-            environment["http_proxy"] = proxy_url
-            environment["https_proxy"] = proxy_url
-            logger.info(f"Watchtower 将使用代理: {proxy_url}")
-
+        # 启动辅助容器执行重建
         client.containers.run(
-            image=watchtower_image,
-            command=command,
+            image=helper_image,
+            command=["sh", "-c", script],
             remove=True,
             detach=True,
             volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}},
-            environment=environment if environment else None,
         )
 
-        yield {"status": "更新任务已启动，容器将在后台被重启"}
-        yield {"status": "请稍后刷新页面访问新版本", "event": "DONE"}
+        yield {"status": "重建任务已启动，容器将在后台被替换"}
+        yield {"status": "新容器启动后页面将自动刷新", "event": "DONE"}
 
     except NotFound:
-        yield {"status": f"找不到容器: {container_name}", "event": "ERROR"}
+        yield {"status": f"找不到容器: {container_id}", "event": "ERROR"}
     except Exception as e:
-        logger.error(f"更新容器失败: {e}")
-        yield {"status": f"更新失败: {str(e)}", "event": "ERROR"}
+        logger.error(f"重建容器失败: {e}", exc_info=True)
+        yield {"status": f"重建失败: {str(e)}", "event": "ERROR"}
 

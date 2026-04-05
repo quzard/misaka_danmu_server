@@ -635,7 +635,8 @@ from src.utils.docker_utils import (
     restart_container,
     restart_via_exit,
     pull_image_stream,
-    update_container_with_watchtower
+    recreate_container_with_image,
+    get_current_container_id,
 )
 import json
 
@@ -983,7 +984,6 @@ async def stream_update(
             yield f"data: {json.dumps({'status': 'Docker socket 不可用，无法执行更新', 'event': 'ERROR'})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    container_name = await config_manager.get("containerName", "misaka_danmu_server")
     image_name = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
     proxy_url = await config_manager.get("proxyUrl", "")
     proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
@@ -1053,35 +1053,23 @@ async def stream_update(
 
             await pull_task  # 确保线程完成
 
-            # 阶段 2: 使用 watchtower 更新（同样在线程池中执行）
-            # 获取当前容器的真实名称（config 里的名字可能不对）
-            def _get_real_container_name():
-                try:
-                    from src.utils.docker_utils import get_current_container_id, get_docker_client
-                    cid = get_current_container_id()
-                    if not cid:
-                        return container_name  # 回退到 config 值
-                    _client = get_docker_client()
-                    if not _client:
-                        return container_name
-                    _container = _client.containers.get(cid)
-                    real_name = _container.name
-                    logger.info(f"当前容器真实名称: {real_name} (ID: {cid[:12]})")
-                    return real_name
-                except Exception as e:
-                    logger.warning(f"获取容器真实名称失败: {e}, 回退使用配置名: {container_name}")
-                    return container_name
+            # 阶段 2: 通过辅助容器重建当前容器（使用新镜像）
+            def _get_current_id():
+                return get_current_container_id()
 
-            real_container_name = await asyncio.get_event_loop().run_in_executor(None, _get_real_container_name)
+            current_container_id = await asyncio.get_event_loop().run_in_executor(None, _get_current_id)
+            if not current_container_id:
+                yield f"data: {json.dumps({'status': '无法获取当前容器ID', 'event': 'ERROR'})}\n\n"
+                return
 
             queue2: asyncio.Queue = asyncio.Queue()
 
-            def _run_watchtower():
-                for progress in update_container_with_watchtower(real_container_name, proxy_url=effective_proxy):
+            def _run_recreate():
+                for progress in recreate_container_with_image(current_container_id, image_name):
                     queue2.put_nowait(progress)
                 queue2.put_nowait(sentinel)
 
-            wt_task = asyncio.get_event_loop().run_in_executor(None, _run_watchtower)
+            recreate_task = asyncio.get_event_loop().run_in_executor(None, _run_recreate)
 
             while True:
                 try:
@@ -1093,7 +1081,7 @@ async def stream_update(
                     break
                 yield f"data: {json.dumps(item)}\n\n"
 
-            await wt_task
+            await recreate_task
 
         except Exception as e:
             logger.error(f"更新过程出错: {e}")
