@@ -1266,9 +1266,13 @@ export const SearchResult = () => {
                                 }
                               }
                               setEditEpisodeList(episodes)
-                              // 修正：设置区间的结束值为总集数，如果总集数为0或不存在则为1
-                              const endValue = item.episodeCount > 0 ? item.episodeCount : 1
-                              setRange([1, endValue])
+                              // 修正：区间范围基于实际分集的 episodeIndex（兼容偏移后的集号）
+                              if (episodes.length > 0) {
+                                const indices = episodes.map(ep => ep.episodeIndex)
+                                setRange([Math.min(...indices), Math.max(...indices)])
+                              } else {
+                                setRange([1, 1])
+                              }
                             } catch (error) {
                             } finally {
                               setEditLoading(false)
