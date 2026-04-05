@@ -18,7 +18,7 @@ from thefuzz import fuzz
 
 from src.db import crud, orm_models, models, get_db_session, sync_postgres_sequence, ConfigManager
 from src.core import get_now
-from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search
+from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search, TaskSuccess
 from src.utils import (
     parse_search_keyword,
     ai_type_and_season_mapping_and_correction, title_contains_season_name,
@@ -1130,6 +1130,27 @@ async def get_match_for_item(
                 match_timer.step_end(details="匹配成功")
                 match_timer.finish()  # 打印计时报告
                 match_fallback_result["response"] = response
+                # 保存匹配详情供后续使用
+                match_fallback_result["match_details"] = {
+                    "provider": best_match.provider,
+                    "mediaId": best_match.mediaId,
+                    "final_title": final_title,
+                    "final_season": final_season,
+                    "episode_number": episode_number,
+                    "is_movie": is_movie
+                }
+                # 将匹配详情写入 task 对象的 parameters（供通知消息使用）
+                _tid = task_id_ref.get("id")
+                if _tid:
+                    task_manager.update_task_parameters(_tid, match_fallback_result["match_details"])
+                # 构造包含匹配详情的成功消息
+                if is_movie:
+                    success_msg = f"匹配成功：[{best_match.provider}] {final_title}"
+                else:
+                    success_msg = f"匹配成功：[{best_match.provider}] {final_title} S{final_season:02d}E{episode_number:02d}"
+                raise TaskSuccess(success_msg)
+            except TaskSuccess:
+                raise  # 让 TaskSuccess 穿透到任务管理器处理
             except Exception as e:
                 logger.error(f"匹配后备失败: {e}", exc_info=True)
                 match_timer.step_end(details=f"失败: {e}")
@@ -1144,7 +1165,8 @@ async def get_match_for_item(
                 match_fallback_coro_factory,
                 task_title,
                 run_immediately=True,
-                queue_type="fallback"
+                queue_type="fallback",
+                task_parameters={"file_name": item.fileName}
             )
             task_id_ref["id"] = task_id  # 赋值后 coro_factory 内部才能用来更新标题
             logger.info(f"匹配后备任务已提交: {task_id}")

@@ -398,12 +398,14 @@ class NotificationService(
                 title, text = self._format_task_progress_message(task_title, progress, description)
                 edit_mid = self._task_progress_tg_msg.get(task_id, {}).get(ch_id)
                 msg_id_out: List[int] = []
+                logger.debug(f"[进度通知] task_id={task_id[:8]} ch={ch_id} edit_mid={edit_mid} progress={progress}%")
                 await channel_instance.send_message(
                     title=title, text=text,
                     edit_message_id=edit_mid, _msg_id_out=msg_id_out
                 )
                 # 记录新发出的 message_id（首次 send 或 edit 失败降级后均更新缓存）
                 if msg_id_out:
+                    logger.debug(f"[进度通知] task_id={task_id[:8]} 新消息 msg_id={msg_id_out[0]} (edit_mid was {edit_mid})")
                     self._task_progress_tg_msg.setdefault(task_id, {})[ch_id] = msg_id_out[0]
             except Exception as e:
                 logger.debug(f"渠道 {ch_id} 发送任务进度通知失败: {e}")

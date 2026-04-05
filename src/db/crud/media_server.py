@@ -646,11 +646,18 @@ async def delete_media_item(session: AsyncSession, item_id: int) -> bool:
 
 
 async def delete_media_items_batch(session: AsyncSession, item_ids: List[int]) -> int:
-    """批量删除媒体项"""
-    stmt = delete(orm_models.MediaItem).where(orm_models.MediaItem.id.in_(item_ids))
-    result = await session.execute(stmt)
+    """批量删除媒体项（分批操作，避免 asyncpg 的 32767 参数限制）"""
+    if not item_ids:
+        return 0
+    PG_BATCH = 30000
+    total_deleted = 0
+    for i in range(0, len(item_ids), PG_BATCH):
+        batch = item_ids[i:i + PG_BATCH]
+        stmt = delete(orm_models.MediaItem).where(orm_models.MediaItem.id.in_(batch))
+        result = await session.execute(stmt)
+        total_deleted += result.rowcount
     await session.flush()
-    return result.rowcount
+    return total_deleted
 
 
 async def get_episode_ids_by_show(session: AsyncSession, server_id: int, title: str) -> List[int]:
@@ -677,13 +684,20 @@ async def get_episode_ids_by_season(session: AsyncSession, server_id: int, title
 
 
 async def mark_media_items_imported(session: AsyncSession, item_ids: List[int]) -> int:
-    """标记媒体项为已导入"""
-    stmt = update(orm_models.MediaItem).where(
-        orm_models.MediaItem.id.in_(item_ids)
-    ).values(isImported=True)
-    result = await session.execute(stmt)
+    """标记媒体项为已导入（分批操作，避免 asyncpg 的 32767 参数限制）"""
+    if not item_ids:
+        return 0
+    PG_BATCH = 30000
+    total_updated = 0
+    for i in range(0, len(item_ids), PG_BATCH):
+        batch = item_ids[i:i + PG_BATCH]
+        stmt = update(orm_models.MediaItem).where(
+            orm_models.MediaItem.id.in_(batch)
+        ).values(isImported=True)
+        result = await session.execute(stmt)
+        total_updated += result.rowcount
     await session.flush()
-    return result.rowcount
+    return total_updated
 
 
 async def get_unimported_item_ids(
