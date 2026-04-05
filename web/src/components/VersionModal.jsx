@@ -52,6 +52,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updating, setUpdating] = useState(false)
   const [updateLogs, setUpdateLogs] = useState([])
   const [updateComplete, setUpdateComplete] = useState(false)
+  const [updateUpToDate, setUpdateUpToDate] = useState(false)
   const [updateError, setUpdateError] = useState(null)
   const [updateProgress, setUpdateProgress] = useState(0)
   const [countdown, setCountdown] = useState(null)
@@ -150,6 +151,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     setUpdating(true)
     setUpdateLogs([])
     setUpdateComplete(false)
+    setUpdateUpToDate(false)
     setUpdateError(null)
     setUpdateProgress(0)
     setCountdown(null)
@@ -176,19 +178,62 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               setUpdateComplete(true)
               setUpdating(false)
               setUpdateProgress(100)
-              // 更新完成后倒计时 15 秒自动刷新（容器重启需要时间）
-              let sec = 15
-              setCountdown(sec)
-              const timer = setInterval(() => {
-                sec -= 1
-                setCountdown(sec)
-                if (sec <= 0) {
-                  clearInterval(timer)
-                  window.location.reload()
+              // 轮询检测服务恢复，而非固定倒计时
+              const waitForRestart = async () => {
+                const maxWait = 120
+                let waited = 0
+                setCountdown(-1) // 标记正在等待重启
+
+                // 辅助：替换最后一行日志（避免刷屏）
+                const updateLastLog = (msg) => {
+                  setUpdateLogs(prev => {
+                    const copy = [...prev]
+                    if (copy.length > 0 && (copy[copy.length - 1].startsWith('⏳') || copy[copy.length - 1].startsWith('✅') || copy[copy.length - 1].startsWith('⚠️'))) {
+                      copy[copy.length - 1] = msg
+                    } else {
+                      copy.push(msg)
+                    }
+                    return copy
+                  })
                 }
-              }, 1000)
+
+                // 第一阶段：等待服务停止（最多30秒）
+                for (let i = 0; i < 30; i++) {
+                  waited++
+                  updateLastLog(`⏳ 等待容器停止... (${waited}秒)`)
+                  try {
+                    const res = await fetch('/api/ui/version', { signal: AbortSignal.timeout(3000) })
+                    if (!res.ok) break
+                  } catch {
+                    break // 服务已停止
+                  }
+                  await new Promise(r => setTimeout(r, 1000))
+                }
+
+                // 第二阶段：等待服务恢复
+                for (let i = 0; i < 60; i++) {
+                  waited++
+                  setCountdown(maxWait - waited)
+                  updateLastLog(`⏳ 正在等待服务恢复... (${waited}秒)`)
+                  try {
+                    const res = await fetch('/api/ui/version', { signal: AbortSignal.timeout(3000) })
+                    if (res.ok) {
+                      updateLastLog('✅ 服务已恢复，正在刷新...')
+                      await new Promise(r => setTimeout(r, 500))
+                      window.location.reload()
+                      return
+                    }
+                  } catch { /* 还没恢复 */ }
+                  await new Promise(r => setTimeout(r, 2000))
+                }
+
+                // 超时
+                updateLastLog('⚠️ 等待超时，请手动刷新页面')
+                setCountdown(null)
+              }
+              waitForRestart()
             } else if (data.event === 'UP_TO_DATE') {
-              setUpdateComplete(true)
+              setUpdateUpToDate(true)
               setUpdating(false)
               setUpdateProgress(100)
             } else if (data.event === 'ERROR') {
@@ -356,12 +401,18 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               {(updating || updateProgress > 0) && (
                 <Progress
                   percent={updateProgress}
-                  status={updateError ? 'exception' : updateComplete ? 'success' : 'active'}
+                  status={updateError ? 'exception' : (updateComplete || updateUpToDate) ? 'success' : 'active'}
                   strokeWidth={10}
                   className="mb-3"
                 />
               )}
-              <div className="bg-gray-900 text-green-400 rounded-lg p-4 max-h-[200px] overflow-y-auto font-mono text-sm">
+              <div
+                className="rounded-lg p-4 max-h-[200px] overflow-y-auto font-mono text-sm"
+                style={{
+                  backgroundColor: 'var(--color-hover, #f5f5f5)',
+                  color: 'var(--color-text, #333)',
+                }}
+              >
                 {updateLogs.map((log, index) => (
                   <div key={index}>{log}</div>
                 ))}
@@ -370,16 +421,31 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
             </div>
           )}
 
-          {/* 更新结果 */}
+          {/* 更新结果：有新版本已更新 */}
           {updateComplete && (
             <Alert
               type="success"
               showIcon
               message="更新完成"
-              description={countdown != null
-                ? `容器正在后台重启，${countdown} 秒后自动刷新页面...`
-                : "容器将在后台重启，请稍后刷新页面"
+              description={
+                countdown === -1
+                  ? "正在等待容器停止..."
+                  : countdown != null && countdown > 0
+                    ? `正在等待服务恢复... (剩余约 ${countdown} 秒)`
+                    : "更新任务已完成，等待服务恢复后将自动刷新页面"
               }
+              className="mt-3"
+            />
+          )}
+
+          {/* 更新结果：已是最新 */}
+          {updateUpToDate && (
+            <Alert
+              type="info"
+              showIcon
+              message="无需更新"
+              description="当前镜像已是最新版本，无需操作。"
+              className="mt-3"
             />
           )}
 

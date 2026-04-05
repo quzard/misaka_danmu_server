@@ -674,7 +674,7 @@ class MetadataSourceManager:
         # 动态处理 configurable_fields 中声明的字段，存储到 config 表
         source_class = self._source_classes.get(providerName)
         cf = getattr(source_class, 'configurable_fields', {}) if source_class else {}
-        self.logger.debug(f"updateProviderConfig: provider={providerName}, source_class={'found' if source_class else 'None'}, cf_keys={list(cf.keys())}, payload_keys={list(payload.keys())}")
+        self.logger.info(f"updateProviderConfig: provider={providerName}, source_class={'found' if source_class else 'NOT FOUND'}, cf_keys={list(cf.keys())}, remaining_payload={list(payload.keys())}")
         for field_key in cf:
             if field_key in payload:
                 value = payload.pop(field_key)
