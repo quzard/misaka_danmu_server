@@ -313,10 +313,21 @@ export const Metadata = () => {
       setConfirmLoading(true)
       const values = await form.validateFields()
 
-      // 保存通用配置
+      // 收集动态字段（来自 configurableFields）
+      const dynamicPayload = {}
+      if (configData?.configurableFields) {
+        for (const key of Object.keys(configData.configurableFields)) {
+          if (values[key] !== undefined) {
+            dynamicPayload[key] = values[key]
+          }
+        }
+      }
+
+      // 保存通用配置 + 动态字段（一次请求）
       await setProviderConfig(selectedSource.providerName, {
         useProxy: values.useProxy,
         logRawResponses: values.logRawResponses,
+        ...dynamicPayload,
       })
 
       // 保存源特定配置
