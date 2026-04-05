@@ -216,6 +216,7 @@ async def try_predownload_next_episode(
                     await rate_limiter.check_fallback("search", provider)
 
                     # 下载弹幕
+                    scraper = scraper_manager.get_scraper(provider)
                     comments = await scraper.get_comments(
                         provider_episode_id,
                         progress_callback=lambda p, msg: progress_callback(30 + int(p * 0.6), msg)
