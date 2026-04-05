@@ -414,7 +414,11 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                 }}
               >
                 {updateLogs.map((log, index) => (
-                  <div key={index}>{log}</div>
+                  <div key={index}>
+                    {log.startsWith('⏳') ? (
+                      <><span className="inline-block mr-1 animate-spin">⏳</span>{log.slice(1)}</>
+                    ) : log}
+                  </div>
                 ))}
                 {updating && <Spin size="small" className="ml-2" />}
               </div>

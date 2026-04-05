@@ -1017,9 +1017,7 @@ async def stream_update(
                     break
                 yield f"data: {json.dumps(item)}\n\n"
                 if item.get("event") in ("UP_TO_DATE", "ERROR"):
-                    if item.get("event") == "UP_TO_DATE":
-                        yield f"data: {json.dumps({'status': '无需更新', 'event': 'DONE'})}\n\n"
-                    return
+                    return  # 已是最新或出错，直接结束，不再启动 watchtower
 
             await pull_task  # 确保线程完成
 
