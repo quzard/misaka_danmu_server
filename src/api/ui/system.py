@@ -1020,13 +1020,19 @@ async def stream_update(
                 if item.get("event") == "UP_TO_DATE":
                     def _check_container_image():
                         try:
-                            import docker as _docker
-                            _client = _docker.from_env()
-                            _container = _client.containers.get(container_name)
+                            from src.utils.docker_utils import get_current_container_id, get_docker_client
+                            current_id = get_current_container_id()
+                            if not current_id:
+                                logger.warning("无法获取当前容器ID，跳过镜像比较")
+                                return True
+                            _client = get_docker_client()
+                            if not _client:
+                                return True
+                            _container = _client.containers.get(current_id)
                             container_image_id = _container.image.id
                             latest_image = _client.images.get(image_name)
                             latest_image_id = latest_image.id
-                            logger.info(f"容器镜像ID: {container_image_id[:20]}..., latest镜像ID: {latest_image_id[:20]}...")
+                            logger.info(f"当前容器({current_id[:12]})镜像ID: {container_image_id[:20]}..., {image_name} 镜像ID: {latest_image_id[:20]}...")
                             return container_image_id == latest_image_id
                         except Exception as e:
                             logger.warning(f"检查容器镜像失败: {e}")
