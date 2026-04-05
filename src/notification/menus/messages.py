@@ -217,11 +217,21 @@ class MessagesMixin:
         """格式化任务进度消息，返回 (title, text)，适用于后备和普通下载任务"""
         filled = int(progress / 10)
         bar = "█" * filled + "░" * (10 - filled)
+        # 转义 Markdown 特殊字符，避免 Telegram parse_mode="Markdown" 解析失败
+        safe_title = self._escape_markdown(task_title) if task_title else ""
+        safe_desc = self._escape_markdown(description) if description else ""
         lines = ["⚙️ *执行进度*", ""]
-        if task_title:
-            lines.append(f"• 任务: {task_title}")
+        if safe_title:
+            lines.append(f"• 任务: {safe_title}")
         lines.append(f"• 进度: `[{bar}]` {progress}%")
-        if description:
-            lines.append(f"• 状态: {description}")
+        if safe_desc:
+            lines.append(f"• 状态: {safe_desc}")
         return ("⬇️ 任务进行中", "\n".join(lines))
+
+    @staticmethod
+    def _escape_markdown(text: str) -> str:
+        """转义 Telegram Markdown V1 中的特殊字符: _ * ` ["""
+        for ch in ('_', '*', '`', '['):
+            text = text.replace(ch, f'\\{ch}')
+        return text
 
