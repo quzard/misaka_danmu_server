@@ -146,7 +146,7 @@ class TaskManager:
             _FALLBACK_EVENT_MAP = {
                 "后备搜索:": "fallback_search",
                 "预下载弹幕:": "predownload",
-                "匹配后备弹幕下载:": "match_fallback",
+                "匹配后备:": "match_fallback",
             }
             prefix = next(
                 (v for k, v in _FALLBACK_EVENT_MAP.items() if title.startswith(k)),
@@ -218,6 +218,7 @@ class TaskManager:
                 "task_id": task.task_id,
                 "unique_key": task.unique_key or "",
                 "image_url": image_url,
+                "task_parameters": params,
                 **extra,
             })
         except Exception as e:
@@ -251,6 +252,32 @@ class TaskManager:
                 f"⚠️ 任务 {task_id} 进度状态（{status}）未能写入DB"
                 f"（DB 可能暂时不可用）: {e}"
             )
+
+    def update_task_parameters(self, task_id: str, params: Dict) -> bool:
+        """更新指定任务对象内存中的 task_parameters（合并更新）。
+
+        供 coro_factory 在运行中将匹配详情等动态数据写入 task 对象，
+        确保后续 _emit_task_event 发通知时能携带最新参数。
+
+        Returns:
+            True 表示找到并更新了, False 表示未找到该任务。
+        """
+        # 依次查找：立即执行任务 → 各队列当前任务
+        task: Optional[Task] = self._immediate_tasks.get(task_id)
+        if not task:
+            for t in (self._current_download_task, self._current_management_task, self._current_fallback_task):
+                if t and t.task_id == task_id:
+                    task = t
+                    break
+        if not task:
+            self.logger.debug(f"update_task_parameters: 未找到任务 {task_id}")
+            return False
+
+        if task.task_parameters is None:
+            task.task_parameters = {}
+        task.task_parameters.update(params)
+        self.logger.debug(f"update_task_parameters: 任务 {task_id} 参数已更新: {list(params.keys())}")
+        return True
 
     def start(self):
         """启动后台工作协程来处理任务队列。"""
@@ -671,7 +698,7 @@ class TaskManager:
         _FALLBACK_PROGRESS_KEY_MAP = {
             "后备搜索:": "fallback_search_complete",
             "预下载弹幕:": "predownload_complete",
-            "匹配后备弹幕下载:": "match_fallback_complete",
+            "匹配后备:": "match_fallback_complete",
         }
         if is_fallback:
             title = task.title or ""

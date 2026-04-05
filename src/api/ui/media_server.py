@@ -603,14 +603,18 @@ async def import_media_items(
     sorted_ids = sorted(item_ids_list)
     unique_key = f"media-import-{hash(tuple(sorted_ids))}"
 
-    # 查询媒体项标题，用于生成可读的任务标题
+    # 查询媒体项标题，用于生成可读的任务标题（分批查询，避免 asyncpg 的 32767 参数限制）
     from src.db.orm_models import MediaItem
     from sqlalchemy import select, func
-    title_stmt = select(MediaItem.title, func.count(MediaItem.id).label('cnt')).where(
-        MediaItem.id.in_(item_ids_list)
-    ).group_by(MediaItem.title)
-    title_result = await session.execute(title_stmt)
-    title_groups = title_result.all()  # [(title, count), ...]
+    PG_BATCH = 30000
+    title_groups = []
+    for i in range(0, len(item_ids_list), PG_BATCH):
+        batch = item_ids_list[i:i + PG_BATCH]
+        title_stmt = select(MediaItem.title, func.count(MediaItem.id).label('cnt')).where(
+            MediaItem.id.in_(batch)
+        ).group_by(MediaItem.title)
+        title_result = await session.execute(title_stmt)
+        title_groups.extend(title_result.all())
 
     if len(title_groups) == 1:
         name, cnt = title_groups[0]
