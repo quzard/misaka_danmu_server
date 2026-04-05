@@ -1054,10 +1054,30 @@ async def stream_update(
             await pull_task  # 确保线程完成
 
             # 阶段 2: 使用 watchtower 更新（同样在线程池中执行）
+            # 获取当前容器的真实名称（config 里的名字可能不对）
+            def _get_real_container_name():
+                try:
+                    from src.utils.docker_utils import get_current_container_id, get_docker_client
+                    cid = get_current_container_id()
+                    if not cid:
+                        return container_name  # 回退到 config 值
+                    _client = get_docker_client()
+                    if not _client:
+                        return container_name
+                    _container = _client.containers.get(cid)
+                    real_name = _container.name
+                    logger.info(f"当前容器真实名称: {real_name} (ID: {cid[:12]})")
+                    return real_name
+                except Exception as e:
+                    logger.warning(f"获取容器真实名称失败: {e}, 回退使用配置名: {container_name}")
+                    return container_name
+
+            real_container_name = await asyncio.get_event_loop().run_in_executor(None, _get_real_container_name)
+
             queue2: asyncio.Queue = asyncio.Queue()
 
             def _run_watchtower():
-                for progress in update_container_with_watchtower(container_name, proxy_url=effective_proxy):
+                for progress in update_container_with_watchtower(real_container_name, proxy_url=effective_proxy):
                     queue2.put_nowait(progress)
                 queue2.put_nowait(sentinel)
 
