@@ -572,7 +572,7 @@ async def get_comments_for_dandan(
                     except Exception as e:
                         logger.error(f"匹配后备弹幕下载任务执行失败: {e}", exc_info=True)
                         await task_session.rollback()
-                        return None
+                        raise  # 让异常传播到 task_manager，标记任务为失败
 
                 # 提交弹幕下载任务到后备队列
                 try:
@@ -1038,7 +1038,7 @@ async def get_comments_for_dandan(
                                 return None
                         except Exception as e:
                             logger.error(f"弹幕下载任务执行失败: {e}", exc_info=True)
-                            return None
+                            raise  # 让异常传播到 task_manager，标记任务为失败
 
                     # 提交弹幕下载任务
                     try:
