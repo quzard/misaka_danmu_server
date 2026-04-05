@@ -1016,8 +1016,31 @@ async def stream_update(
                 if item is sentinel:
                     break
                 yield f"data: {json.dumps(item)}\n\n"
-                if item.get("event") in ("UP_TO_DATE", "ERROR"):
-                    return  # 已是最新或出错，直接结束，不再启动 watchtower
+                if item.get("event") == "ERROR":
+                    return
+                if item.get("event") == "UP_TO_DATE":
+                    # 镜像无远端更新，但需额外检查：运行中容器是否使用的就是这个镜像
+                    # 如果容器用的是其他镜像（如 test 版本），仍需 watchtower 重建
+                    def _check_container_image():
+                        try:
+                            import docker as _docker
+                            _client = _docker.from_env()
+                            _container = _client.containers.get(container_name)
+                            container_image_id = _container.image.id
+                            latest_image = _client.images.get(image_name)
+                            latest_image_id = latest_image.id
+                            logger.info(f"容器镜像ID: {container_image_id[:20]}..., latest镜像ID: {latest_image_id[:20]}...")
+                            return container_image_id == latest_image_id
+                        except Exception as e:
+                            logger.warning(f"检查容器镜像失败: {e}")
+                            return True  # 失败时默认一致，避免误操作
+
+                    is_same = await asyncio.get_event_loop().run_in_executor(None, _check_container_image)
+                    if is_same:
+                        return  # 真正无需更新
+                    # 容器使用了不同的镜像，需要 watchtower 重建
+                    yield f"data: {json.dumps({'status': '镜像无远端更新，但容器使用了不同版本的镜像，需要重建容器...', 'progress': 95})}\n\n"
+                    # 不 return，继续走下面的 watchtower 流程
 
             await pull_task  # 确保线程完成
 
