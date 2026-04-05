@@ -391,14 +391,16 @@ def restart_via_exit() -> None:
 
 def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Generator[Dict[str, Any], None, None]:
     """
-    流式拉取 Docker 镜像
+    流式拉取 Docker 镜像，实时推送 layer 进度。
+
+    通过对比本地/远程镜像 digest 判断是否需要更新（比版本号更准确）。
 
     Args:
         image_name: 镜像名称（含标签）
         proxy_url: 代理 URL（可选）
 
     Yields:
-        拉取进度信息
+        拉取进度信息，包含 status / event / progress(0-100) 字段
     """
     if not is_docker_socket_available():
         yield {"status": "Docker 套接字 不可用", "event": "ERROR"}
@@ -417,25 +419,78 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
             yield {"status": "无法获取 Docker 客户端", "event": "ERROR"}
             return
 
+        # ── 预检：通过 digest 判断是否有更新 ──
+        yield {"status": f"正在检查镜像更新: {image_name}...", "progress": 0}
+        local_digest = None
+        try:
+            local_image = client.images.get(image_name)
+            # RepoDigests 格式: ["repo@sha256:xxxx"]
+            repo_digests = local_image.attrs.get("RepoDigests", [])
+            if repo_digests:
+                local_digest = repo_digests[0].split("@")[-1]
+                logger.info(f"本地镜像 digest: {local_digest[:20]}...")
+        except Exception:
+            logger.info(f"本地无镜像 {image_name}，将直接拉取")
+
         yield {"status": f"正在拉取镜像: {image_name}..."}
 
-        # 使用低级 API 获取流式输出
+        # ── 流式拉取，实时计算进度 ──
         stream = client.api.pull(image_name, stream=True, decode=True)
 
+        # 跟踪每个 layer 的下载进度
+        layer_progress: Dict[str, Dict[str, int]] = {}  # id -> {current, total}
         last_line = {}
+        last_yield_time = 0.0
+
         for line in stream:
             last_line = line
-            # 可以在这里发送更详细的进度，但为简化只保留最后状态
+            layer_id = line.get("id", "")
+            status = line.get("status", "")
+            detail = line.get("progressDetail", {})
 
-        # 检查最终状态
+            # 跟踪 Downloading 和 Extracting 进度
+            if layer_id and detail.get("total"):
+                layer_progress[layer_id] = {
+                    "current": detail.get("current", 0),
+                    "total": detail["total"],
+                }
+
+            # 每 0.5 秒推送一次总进度
+            now = time.time()
+            if now - last_yield_time >= 0.5 and layer_progress:
+                total_bytes = sum(lp["total"] for lp in layer_progress.values())
+                current_bytes = sum(lp["current"] for lp in layer_progress.values())
+                if total_bytes > 0:
+                    pct = min(int(current_bytes * 90 / total_bytes), 90)  # 保留 90-100 给最终阶段
+                    size_str = _format_size(current_bytes)
+                    total_str = _format_size(total_bytes)
+                    yield {"status": f"下载中: {size_str} / {total_str}", "progress": pct}
+                    last_yield_time = now
+
+        # ── 检查最终状态 ──
         final_status = last_line.get('status', '')
         if 'Status: Image is up to date' in final_status:
-            yield {"status": "当前已是最新版本", "event": "UP_TO_DATE"}
+            yield {"status": "当前镜像已是最新", "event": "UP_TO_DATE", "progress": 100}
         elif 'errorDetail' in last_line:
             error_msg = last_line['errorDetail'].get('message', '未知错误')
             yield {"status": f"拉取失败: {error_msg}", "event": "ERROR"}
         else:
-            yield {"status": "镜像拉取完成", "event": "PULLED"}
+            # 拉取成功，对比 digest 确认是否真正有变化
+            yield {"status": "镜像拉取完成，正在验证...", "progress": 95}
+            remote_digest = None
+            try:
+                new_image = client.images.get(image_name)
+                repo_digests = new_image.attrs.get("RepoDigests", [])
+                if repo_digests:
+                    remote_digest = repo_digests[0].split("@")[-1]
+                    logger.info(f"拉取后镜像 digest: {remote_digest[:20]}...")
+            except Exception:
+                pass
+
+            if local_digest and remote_digest and local_digest == remote_digest:
+                yield {"status": "当前镜像已是最新（digest 一致）", "event": "UP_TO_DATE", "progress": 100}
+            else:
+                yield {"status": "新版本镜像已就绪", "event": "PULLED", "progress": 100}
 
     except Exception as e:
         logger.error(f"拉取镜像失败: {e}")

@@ -995,19 +995,55 @@ async def stream_update(
 
     async def generate_progress():
         try:
-            # 阶段 1: 拉取镜像
-            for progress in pull_image_stream(image_name, effective_proxy):
-                yield f"data: {json.dumps(progress)}\n\n"
+            # 阶段 1: 拉取镜像（在线程池中执行同步生成器，避免阻塞事件循环）
+            import asyncio
+            queue: asyncio.Queue = asyncio.Queue()
+            sentinel = object()  # 标记生成器结束
 
-                # 如果已是最新或出错，直接结束
-                if progress.get("event") in ("UP_TO_DATE", "ERROR"):
-                    if progress.get("event") == "UP_TO_DATE":
+            def _run_pull():
+                for progress in pull_image_stream(image_name, effective_proxy):
+                    queue.put_nowait(progress)
+                queue.put_nowait(sentinel)
+
+            pull_task = asyncio.get_event_loop().run_in_executor(None, _run_pull)
+
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=120)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'status': '拉取超时，请稍后重试', 'event': 'ERROR'})}\n\n"
+                    return
+                if item is sentinel:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("event") in ("UP_TO_DATE", "ERROR"):
+                    if item.get("event") == "UP_TO_DATE":
                         yield f"data: {json.dumps({'status': '无需更新', 'event': 'DONE'})}\n\n"
                     return
 
-            # 阶段 2: 使用 watchtower 更新
-            for progress in update_container_with_watchtower(container_name, proxy_url=effective_proxy):
-                yield f"data: {json.dumps(progress)}\n\n"
+            await pull_task  # 确保线程完成
+
+            # 阶段 2: 使用 watchtower 更新（同样在线程池中执行）
+            queue2: asyncio.Queue = asyncio.Queue()
+
+            def _run_watchtower():
+                for progress in update_container_with_watchtower(container_name, proxy_url=effective_proxy):
+                    queue2.put_nowait(progress)
+                queue2.put_nowait(sentinel)
+
+            wt_task = asyncio.get_event_loop().run_in_executor(None, _run_watchtower)
+
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue2.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'status': '更新超时', 'event': 'ERROR'})}\n\n"
+                    return
+                if item is sentinel:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+
+            await wt_task
 
         except Exception as e:
             logger.error(f"更新过程出错: {e}")

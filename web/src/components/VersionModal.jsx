@@ -53,6 +53,8 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updateLogs, setUpdateLogs] = useState([])
   const [updateComplete, setUpdateComplete] = useState(false)
   const [updateError, setUpdateError] = useState(null)
+  const [updateProgress, setUpdateProgress] = useState(0)
+  const [countdown, setCountdown] = useState(null)
   const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false)
   const statsAbortController = useRef(null)
   const messageApi = useMessage()
@@ -149,9 +151,11 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     setUpdateLogs([])
     setUpdateComplete(false)
     setUpdateError(null)
+    setUpdateProgress(0)
+    setCountdown(null)
 
     const token = Cookies.get('danmu_token')
-    
+
     try {
       await fetchEventSource('/api/ui/update/stream', {
         method: 'GET',
@@ -162,10 +166,31 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
           try {
             const data = JSON.parse(event.data)
             setUpdateLogs(prev => [...prev, data.status])
-            
-            if (data.event === 'DONE' || data.event === 'UP_TO_DATE') {
+
+            // 更新进度条
+            if (data.progress != null) {
+              setUpdateProgress(data.progress)
+            }
+
+            if (data.event === 'DONE') {
               setUpdateComplete(true)
               setUpdating(false)
+              setUpdateProgress(100)
+              // 更新完成后倒计时 15 秒自动刷新（容器重启需要时间）
+              let sec = 15
+              setCountdown(sec)
+              const timer = setInterval(() => {
+                sec -= 1
+                setCountdown(sec)
+                if (sec <= 0) {
+                  clearInterval(timer)
+                  window.location.reload()
+                }
+              }, 1000)
+            } else if (data.event === 'UP_TO_DATE') {
+              setUpdateComplete(true)
+              setUpdating(false)
+              setUpdateProgress(100)
             } else if (data.event === 'ERROR') {
               setUpdateError(data.status)
               setUpdating(false)
@@ -327,6 +352,15 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
           {(updating || updateLogs.length > 0) && (
             <div className="mt-4">
               <Divider>更新进度</Divider>
+              {/* 进度条 */}
+              {(updating || updateProgress > 0) && (
+                <Progress
+                  percent={updateProgress}
+                  status={updateError ? 'exception' : updateComplete ? 'success' : 'active'}
+                  strokeWidth={10}
+                  className="mb-3"
+                />
+              )}
               <div className="bg-gray-900 text-green-400 rounded-lg p-4 max-h-[200px] overflow-y-auto font-mono text-sm">
                 {updateLogs.map((log, index) => (
                   <div key={index}>{log}</div>
@@ -342,7 +376,10 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               type="success"
               showIcon
               message="更新完成"
-              description="容器将在后台重启，请稍后刷新页面"
+              description={countdown != null
+                ? `容器正在后台重启，${countdown} 秒后自动刷新页面...`
+                : "容器将在后台重启，请稍后刷新页面"
+              }
             />
           )}
 
@@ -368,7 +405,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
               <Button onClick={() => loadData()} icon={<SyncOutlined />}>
                 刷新
               </Button>
-              {updateInfo?.hasUpdate && dockerStatus?.canUpdate && (
+              {dockerStatus?.canUpdate && (
                 <Button
                   type="primary"
                   icon={<RocketOutlined />}
@@ -376,7 +413,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                   loading={updating}
                   disabled={updateComplete}
                 >
-                  开始更新
+                  {updateInfo?.hasUpdate ? '更新并重启' : '检查并更新'}
                 </Button>
               )}
               {updateInfo?.releaseUrl && (
