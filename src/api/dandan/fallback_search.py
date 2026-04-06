@@ -57,7 +57,7 @@ async def handle_fallback_search(
     custom_domain = await config_manager.get("customApiDomain", "")
     image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
 
-    # 读取可配置的最大等待时间（默认30秒），作为接口响应的安全上限
+    # 读取可配置的最大等待时间（默认30秒）。-1 表示无限等待直到出结果
     timeout_str = await config_manager.get("searchFallbackTimeout", "30")
     try:
         max_wait_time = float(timeout_str)
@@ -66,9 +66,9 @@ async def handle_fallback_search(
 
     # ── 辅助：等待搜索完成（阻塞式，等到出结果才返回）──
     async def _wait_for_search_result(wait_key: str) -> DandanSearchAnimeResponse:
-        """轮询等待搜索任务完成。在 max_wait_time 内等待，超时返回空结果。"""
+        """轮询等待搜索任务完成。max_wait_time=-1 时无限等待。"""
         start = time.time()
-        while time.time() - start < max_wait_time:
+        while True:
             await asyncio.sleep(0.5)
             await session.commit()
             info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, wait_key)
@@ -77,8 +77,10 @@ async def handle_fallback_search(
             if info["status"] == "completed":
                 logger.info(f"搜索完成，等待耗时 {time.time() - start:.2f}s")
                 return DandanSearchAnimeResponse(animes=info["results"])
-        logger.info(f"搜索等待超过 {max_wait_time}s，返回空结果")
-        return DandanSearchAnimeResponse(animes=[])
+            # 非 -1 时检查超时
+            if max_wait_time >= 0 and time.time() - start >= max_wait_time:
+                logger.info(f"搜索等待超过 {max_wait_time}s，返回空结果")
+                return DandanSearchAnimeResponse(animes=[])
 
     # 检查该 token 是否已有正在进行的搜索任务
     existing_search_key = await get_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token)
