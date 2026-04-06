@@ -969,6 +969,7 @@ async def restart_service(
 
 @router.get("/update/stream", summary="流式更新服务")
 async def stream_update(
+    source: str = Query("docker", description="更新源: docker (Docker Hub) 或 github (ghcr.io)"),
     current_user: models.User = Depends(security.get_current_user),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
@@ -976,15 +977,21 @@ async def stream_update(
     通过 SSE 流式返回更新进度。
 
     流程：
-    1. 拉取最新镜像
-    2. 使用 watchtower 更新容器
+    1. 拉取最新镜像（Docker Hub 或 ghcr.io）
+    2. 通过辅助容器重建当前容器
     """
     if not is_docker_socket_available():
         async def error_stream():
             yield f"data: {json.dumps({'status': 'Docker socket 不可用，无法执行更新', 'event': 'ERROR'})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    image_name = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
+    docker_hub_image = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
+
+    # 根据更新源选择镜像地址
+    if source == "github":
+        image_name = f"ghcr.io/{GITHUB_OWNER}/{GITHUB_REPO}:latest"
+    else:
+        image_name = docker_hub_image
     proxy_url = await config_manager.get("proxyUrl", "")
     proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
     proxy_mode = await config_manager.get("proxyMode", "none")

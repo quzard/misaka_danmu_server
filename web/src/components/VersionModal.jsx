@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic } from 'antd'
-import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined } from '@ant-design/icons'
+import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic, Switch, Tooltip } from 'antd'
+import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined, GithubOutlined, CloudOutlined } from '@ant-design/icons'
 import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
@@ -57,6 +57,9 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updateProgress, setUpdateProgress] = useState(0)
   const [countdown, setCountdown] = useState(null)
   const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false)
+  const [useGithubSource, setUseGithubSource] = useState(() => {
+    return localStorage.getItem('updateSource') === 'github'
+  })
   const statsAbortController = useRef(null)
   const messageApi = useMessage()
 
@@ -159,7 +162,8 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     const token = Cookies.get('danmu_token')
 
     try {
-      await fetchEventSource('/api/ui/update/stream', {
+      const source = useGithubSource ? 'github' : 'docker'
+      await fetchEventSource(`/api/ui/update/stream?source=${source}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -464,13 +468,30 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
 
           {/* 操作按钮 */}
           <Divider />
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <Button
               onClick={() => setReleaseHistoryOpen(true)}
               icon={<HistoryOutlined />}
             >
               更新日志
             </Button>
+            {/* 更新源切换 */}
+            {dockerStatus?.canUpdate && (
+              <Tooltip title={useGithubSource ? '使用 GitHub 源更新' : '使用 Docker Hub 镜像更新'}>
+                <div className="flex items-center gap-1.5 select-none">
+                  <CloudOutlined style={{ color: useGithubSource ? undefined : 'var(--color-primary)' }} />
+                  <Switch
+                    size="small"
+                    checked={useGithubSource}
+                    onChange={v => {
+                      setUseGithubSource(v)
+                      localStorage.setItem('updateSource', v ? 'github' : 'docker')
+                    }}
+                  />
+                  <GithubOutlined style={{ color: useGithubSource ? 'var(--color-primary)' : undefined }} />
+                </div>
+              </Tooltip>
+            )}
             <div className="flex gap-2">
               <Button onClick={() => loadData()} icon={<SyncOutlined />}>
                 刷新
