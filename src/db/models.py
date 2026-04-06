@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union, Tuple
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Search 模块模型
 class AnimeInfo(BaseModel):
@@ -423,13 +423,15 @@ class SourceDetailsResponse(BaseModel):
     bangumiId: Optional[str] = None
 
 class MetadataSourceStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     providerName: str
     isAuxSearchEnabled: bool
+    isFailoverEnabled: bool
     displayOrder: int
     status: str
     statusCode: str = "ok"
     useProxy: bool
-    isFailoverEnabled: bool
     logRawResponses: bool = Field(False, alias="log_raw_responses")
 
 class ScraperSettingWithConfig(ScraperSetting):

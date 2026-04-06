@@ -680,14 +680,14 @@ async def check_duplicate_import(
     只有完全重复（相同provider + media_id + 集数 + 已有弹幕）时才阻止导入
     返回None表示可以导入，返回字符串表示重复原因
     """
-    # 检查数据源是否已存在
-    source_exists = await check_source_exists_by_media_id(session, provider, media_id)
+    # 检查数据源是否已存在（按 provider + media_id + season 精确匹配）
+    source_exists = await check_source_exists_by_media_id(session, provider, media_id, season=season)
     if not source_exists:
         # 数据源不存在，允许导入
         return None
 
     # 数据源存在，获取anime_id
-    anime_id = await get_anime_id_by_source_media_id(session, provider, media_id)
+    anime_id = await get_anime_id_by_source_media_id(session, provider, media_id, season=season)
     if not anime_id:
         # 理论上不应该发生，但为了安全起见
         return None

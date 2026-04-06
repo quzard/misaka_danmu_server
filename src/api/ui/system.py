@@ -635,7 +635,8 @@ from src.utils.docker_utils import (
     restart_container,
     restart_via_exit,
     pull_image_stream,
-    update_container_with_watchtower
+    recreate_container_with_image,
+    get_current_container_id,
 )
 import json
 
@@ -968,6 +969,7 @@ async def restart_service(
 
 @router.get("/update/stream", summary="流式更新服务")
 async def stream_update(
+    source: str = Query("docker", description="更新源: docker (Docker Hub) 或 github (ghcr.io)"),
     current_user: models.User = Depends(security.get_current_user),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
@@ -975,16 +977,21 @@ async def stream_update(
     通过 SSE 流式返回更新进度。
 
     流程：
-    1. 拉取最新镜像
-    2. 使用 watchtower 更新容器
+    1. 拉取最新镜像（Docker Hub 或 ghcr.io）
+    2. 通过辅助容器重建当前容器
     """
     if not is_docker_socket_available():
         async def error_stream():
             yield f"data: {json.dumps({'status': 'Docker socket 不可用，无法执行更新', 'event': 'ERROR'})}\n\n"
         return StreamingResponse(error_stream(), media_type="text/event-stream")
 
-    container_name = await config_manager.get("containerName", "misaka_danmu_server")
-    image_name = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
+    docker_hub_image = await config_manager.get("dockerImageName", "l429609201/misaka_danmu_server:latest")
+
+    # 根据更新源选择镜像地址
+    if source == "github":
+        image_name = f"ghcr.io/{GITHUB_OWNER}/{GITHUB_REPO}:latest"
+    else:
+        image_name = docker_hub_image
     proxy_url = await config_manager.get("proxyUrl", "")
     proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
     proxy_mode = await config_manager.get("proxyMode", "none")
@@ -995,19 +1002,95 @@ async def stream_update(
 
     async def generate_progress():
         try:
-            # 阶段 1: 拉取镜像
-            for progress in pull_image_stream(image_name, effective_proxy):
-                yield f"data: {json.dumps(progress)}\n\n"
+            # 阶段 1: 拉取镜像（在线程池中执行同步生成器，避免阻塞事件循环）
+            import asyncio
+            queue: asyncio.Queue = asyncio.Queue()
+            sentinel = object()  # 标记生成器结束
 
-                # 如果已是最新或出错，直接结束
-                if progress.get("event") in ("UP_TO_DATE", "ERROR"):
-                    if progress.get("event") == "UP_TO_DATE":
-                        yield f"data: {json.dumps({'status': '无需更新', 'event': 'DONE'})}\n\n"
+            def _run_pull():
+                for progress in pull_image_stream(image_name, effective_proxy):
+                    queue.put_nowait(progress)
+                queue.put_nowait(sentinel)
+
+            pull_task = asyncio.get_event_loop().run_in_executor(None, _run_pull)
+
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=120)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'status': '拉取超时，请稍后重试', 'event': 'ERROR'})}\n\n"
+                    return
+                if item is sentinel:
+                    break
+
+                # 拦截 UP_TO_DATE：先检查容器镜像再决定是否真正无需更新
+                if item.get("event") == "UP_TO_DATE":
+                    yield f"data: {json.dumps({'status': '正在检查容器镜像...', 'progress': 76})}\n\n"
+
+                    def _check_container_image():
+                        try:
+                            from src.utils.docker_utils import get_current_container_id, get_docker_client
+                            current_id = get_current_container_id()
+                            if not current_id:
+                                logger.warning("无法获取当前容器ID，跳过镜像比较")
+                                return True
+                            _client = get_docker_client()
+                            if not _client:
+                                return True
+                            _container = _client.containers.get(current_id)
+                            container_image_id = _container.image.id
+                            latest_image = _client.images.get(image_name)
+                            latest_image_id = latest_image.id
+                            logger.info(f"当前容器({current_id[:12]})镜像ID: {container_image_id[:20]}..., {image_name} 镜像ID: {latest_image_id[:20]}...")
+                            return container_image_id == latest_image_id
+                        except Exception as e:
+                            logger.warning(f"检查容器镜像失败: {e}")
+                            return True
+
+                    is_same = await asyncio.get_event_loop().run_in_executor(None, _check_container_image)
+                    if is_same:
+                        # 镜像一致，真正无需更新
+                        yield f"data: {json.dumps({**item, 'progress': 100})}\n\n"
+                        return
+                    # 容器使用了不同的镜像，继续重建
+                    yield f"data: {json.dumps({'status': '容器使用了不同版本的镜像，需要重建容器...', 'progress': 80})}\n\n"
+                    break  # 跳出 pull 循环，进入重建阶段
+
+                yield f"data: {json.dumps(item)}\n\n"
+                if item.get("event") == "ERROR":
                     return
 
-            # 阶段 2: 使用 watchtower 更新
-            for progress in update_container_with_watchtower(container_name, proxy_url=effective_proxy):
-                yield f"data: {json.dumps(progress)}\n\n"
+            await pull_task  # 确保线程完成
+
+            # 阶段 2: 通过辅助容器重建当前容器（使用新镜像）
+            def _get_current_id():
+                return get_current_container_id()
+
+            current_container_id = await asyncio.get_event_loop().run_in_executor(None, _get_current_id)
+            if not current_container_id:
+                yield f"data: {json.dumps({'status': '无法获取当前容器ID', 'event': 'ERROR'})}\n\n"
+                return
+
+            queue2: asyncio.Queue = asyncio.Queue()
+
+            def _run_recreate():
+                for progress in recreate_container_with_image(current_container_id, image_name):
+                    queue2.put_nowait(progress)
+                queue2.put_nowait(sentinel)
+
+            recreate_task = asyncio.get_event_loop().run_in_executor(None, _run_recreate)
+
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue2.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'status': '更新超时', 'event': 'ERROR'})}\n\n"
+                    return
+                if item is sentinel:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+
+            await recreate_task
 
         except Exception as e:
             logger.error(f"更新过程出错: {e}")

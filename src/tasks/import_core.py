@@ -672,8 +672,8 @@ async def edited_import_task(
     if not episodes:
         raise TaskSuccess("没有提供任何分集，任务结束。")
 
-    # 首先检查是否已存在数据源
-    anime_id = await crud.get_anime_id_by_source_media_id(session, request_data.provider, request_data.mediaId)
+    # 首先检查是否已存在数据源（按 provider + mediaId + season 精确匹配）
+    anime_id = await crud.get_anime_id_by_source_media_id(session, request_data.provider, request_data.mediaId, season=request_data.season)
     source_id = None
 
     if anime_id:
