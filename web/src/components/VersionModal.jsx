@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic, Switch, Tooltip } from 'antd'
-import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined, GithubOutlined, CloudOutlined } from '@ant-design/icons'
+import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic, Switch } from 'antd'
+import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined, GithubOutlined } from '@ant-design/icons'
 import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
 import ReleaseHistoryModal from './ReleaseHistoryModal'
+import { MyIcon } from './MyIcon'
 import ReactMarkdown from 'react-markdown'
 
 const { Text, Title } = Typography
@@ -477,20 +478,15 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
             </Button>
             {/* 更新源切换 */}
             {dockerStatus?.canUpdate && (
-              <Tooltip title={useGithubSource ? '使用 GitHub 源更新' : '使用 Docker Hub 镜像更新'}>
-                <div className="flex items-center gap-1.5 select-none">
-                  <CloudOutlined style={{ color: useGithubSource ? undefined : 'var(--color-primary)' }} />
-                  <Switch
-                    size="small"
-                    checked={useGithubSource}
-                    onChange={v => {
-                      setUseGithubSource(v)
-                      localStorage.setItem('updateSource', v ? 'github' : 'docker')
-                    }}
-                  />
-                  <GithubOutlined style={{ color: useGithubSource ? 'var(--color-primary)' : undefined }} />
-                </div>
-              </Tooltip>
+              <Switch
+                checked={useGithubSource}
+                checkedChildren={<><GithubOutlined /> GitHub</>}
+                unCheckedChildren={<><MyIcon icon="Docker2" size={14} className="mr-0.5 align-middle" /> Docker</>}
+                onChange={v => {
+                  setUseGithubSource(v)
+                  localStorage.setItem('updateSource', v ? 'github' : 'docker')
+                }}
+              />
             )}
             <div className="flex gap-2">
               <Button onClick={() => loadData()} icon={<SyncOutlined />}>
