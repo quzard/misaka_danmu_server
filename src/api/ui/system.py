@@ -1018,6 +1018,8 @@ async def stream_update(
 
                 # 拦截 UP_TO_DATE：先检查容器镜像再决定是否真正无需更新
                 if item.get("event") == "UP_TO_DATE":
+                    yield f"data: {json.dumps({'status': '正在检查容器镜像...', 'progress': 76})}\n\n"
+
                     def _check_container_image():
                         try:
                             from src.utils.docker_utils import get_current_container_id, get_docker_client
@@ -1040,12 +1042,12 @@ async def stream_update(
 
                     is_same = await asyncio.get_event_loop().run_in_executor(None, _check_container_image)
                     if is_same:
-                        # 镜像一致，真正无需更新，发送 UP_TO_DATE 给前端
-                        yield f"data: {json.dumps(item)}\n\n"
+                        # 镜像一致，真正无需更新
+                        yield f"data: {json.dumps({**item, 'progress': 100})}\n\n"
                         return
-                    # 容器使用了不同的镜像，不发 UP_TO_DATE，继续走 watchtower
-                    yield f"data: {json.dumps({'status': '容器使用了不同版本的镜像，需要重建容器...', 'progress': 95})}\n\n"
-                    break  # 跳出 pull 循环，进入 watchtower 阶段
+                    # 容器使用了不同的镜像，继续重建
+                    yield f"data: {json.dumps({'status': '容器使用了不同版本的镜像，需要重建容器...', 'progress': 80})}\n\n"
+                    break  # 跳出 pull 循环，进入重建阶段
 
                 yield f"data: {json.dumps(item)}\n\n"
                 if item.get("event") == "ERROR":

@@ -441,21 +441,28 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
         except Exception:
             logger.info(f"本地无镜像 {image_name}，将直接拉取")
 
-        yield {"status": f"正在拉取镜像: {image_name}..."}
+        yield {"status": f"正在拉取镜像: {image_name}...", "progress": 5}
 
         # ── 流式拉取，实时计算进度 ──
+        # 进度映射: 拉取阶段占 5% ~ 70%
         stream = client.api.pull(image_name, stream=True, decode=True)
 
         # 跟踪每个 layer 的下载进度
         layer_progress: Dict[str, Dict[str, int]] = {}  # id -> {current, total}
+        completed_layers: set = set()  # 已完成的层（Pull complete / Already exists）
         last_line = {}
         last_yield_time = 0.0
+        max_pct = 5  # 进度只增不减
 
         for line in stream:
             last_line = line
             layer_id = line.get("id", "")
             status = line.get("status", "")
             detail = line.get("progressDetail", {})
+
+            # 标记已完成的层
+            if layer_id and status in ("Pull complete", "Already exists", "Download complete"):
+                completed_layers.add(layer_id)
 
             # 跟踪 Downloading 和 Extracting 进度
             if layer_id and detail.get("total"):
@@ -470,7 +477,11 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
                 total_bytes = sum(lp["total"] for lp in layer_progress.values())
                 current_bytes = sum(lp["current"] for lp in layer_progress.values())
                 if total_bytes > 0:
-                    pct = min(int(current_bytes * 90 / total_bytes), 90)  # 保留 90-100 给最终阶段
+                    # 映射到 5% ~ 70% 的范围，只增不减
+                    raw_pct = int(current_bytes * 100 / total_bytes)
+                    pct = 5 + int(raw_pct * 65 / 100)  # 5 + (0~65) = 5~70
+                    pct = max(pct, max_pct)  # 只增不减
+                    max_pct = pct
                     size_str = _format_size(current_bytes)
                     total_str = _format_size(total_bytes)
                     yield {"status": f"下载中: {size_str} / {total_str}", "progress": pct}
@@ -479,13 +490,13 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
         # ── 检查最终状态 ──
         final_status = last_line.get('status', '')
         if 'Status: Image is up to date' in final_status:
-            yield {"status": "当前镜像已是最新", "event": "UP_TO_DATE", "progress": 100}
+            yield {"status": "当前镜像已是最新", "event": "UP_TO_DATE", "progress": 75}
         elif 'errorDetail' in last_line:
             error_msg = last_line['errorDetail'].get('message', '未知错误')
             yield {"status": f"拉取失败: {error_msg}", "event": "ERROR"}
         else:
             # 拉取成功，对比 digest 确认是否真正有变化
-            yield {"status": "镜像拉取完成，正在验证...", "progress": 95}
+            yield {"status": "镜像拉取完成，正在验证...", "progress": 72}
             remote_digest = None
             try:
                 new_image = client.images.get(image_name)
@@ -497,9 +508,9 @@ def pull_image_stream(image_name: str, proxy_url: Optional[str] = None) -> Gener
                 pass
 
             if local_digest and remote_digest and local_digest == remote_digest:
-                yield {"status": "当前镜像已是最新（digest 一致）", "event": "UP_TO_DATE", "progress": 100}
+                yield {"status": "当前镜像已是最新（digest 一致）", "event": "UP_TO_DATE", "progress": 75}
             else:
-                yield {"status": "新版本镜像已就绪", "event": "PULLED", "progress": 100}
+                yield {"status": "新版本镜像已就绪", "event": "PULLED", "progress": 75}
 
     except Exception as e:
         logger.error(f"拉取镜像失败: {e}")
@@ -709,7 +720,7 @@ def recreate_container_with_image(
             return
 
         # 获取当前容器信息
-        yield {"status": "正在读取容器配置..."}
+        yield {"status": "正在读取容器配置...", "progress": 82}
         container = client.containers.get(container_id)
         attrs = container.attrs
         name = attrs['Name'].lstrip('/')
@@ -792,10 +803,10 @@ def recreate_container_with_image(
         try:
             client.images.get(helper_image)
         except NotFound:
-            yield {"status": f"正在拉取辅助工具: {helper_image}..."}
+            yield {"status": f"正在拉取辅助工具: {helper_image}...", "progress": 85}
             client.images.pull(helper_image)
 
-        yield {"status": f"正在启动重建任务（容器: {name}）..."}
+        yield {"status": f"正在启动重建任务（容器: {name}）...", "progress": 90}
 
         # 启动辅助容器执行重建
         client.containers.run(
@@ -806,8 +817,8 @@ def recreate_container_with_image(
             volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}},
         )
 
-        yield {"status": "重建任务已启动，容器将在后台被替换"}
-        yield {"status": "新容器启动后页面将自动刷新", "event": "DONE"}
+        yield {"status": "重建任务已启动，容器将在后台被替换", "progress": 95}
+        yield {"status": "新容器启动后页面将自动刷新", "event": "DONE", "progress": 100}
 
     except NotFound:
         yield {"status": f"找不到容器: {container_id}", "event": "ERROR"}
