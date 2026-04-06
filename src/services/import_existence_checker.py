@@ -56,16 +56,18 @@ async def check_anime_existence(
     """
     NOT_FOUND = {"found": False, "anime_id": None, "source_id": None, "stage": "none", "reason": "未命中任何存在性规则"}
 
-    # ── Stage 1: anime_sources (provider + media_id) ──
+    # ── Stage 1: anime_sources (provider + media_id，可选 season) ──
     src_stmt = (
         select(AnimeSource.id, AnimeSource.animeId)
         .where(AnimeSource.providerName == provider, AnimeSource.mediaId == media_id)
-        .limit(1)
     )
+    if season is not None:
+        src_stmt = src_stmt.join(Anime, AnimeSource.animeId == Anime.id).where(Anime.season == season)
+    src_stmt = src_stmt.limit(1)
     src_row = (await session.execute(src_stmt)).first()
     if src_row:
         source_id, anime_id = src_row
-        detail = f"弹幕源精确命中(provider={provider}, mediaId={media_id})"
+        detail = f"弹幕源精确命中(provider={provider}, mediaId={media_id}, season={season})"
         logger.info(f"存在性检查 Stage1 命中: {detail}, anime_id={anime_id}, source_id={source_id}")
         return {"found": True, "anime_id": int(anime_id), "source_id": int(source_id), "stage": "source", "reason": detail}
 
