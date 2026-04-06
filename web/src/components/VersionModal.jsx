@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic } from 'antd'
-import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined } from '@ant-design/icons'
+import { Modal, Button, Tag, Spin, Badge, Typography, Divider, Alert, Card, Progress, Row, Col, Statistic, Switch } from 'antd'
+import { SyncOutlined, RocketOutlined, CheckCircleOutlined, CloseCircleOutlined, HistoryOutlined, CloudServerOutlined, GithubOutlined } from '@ant-design/icons'
 import { checkAppUpdate, getDockerStatus, restartService } from '../apis'
 import { useMessage } from '../MessageContext'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import Cookies from 'js-cookie'
 import ReleaseHistoryModal from './ReleaseHistoryModal'
+import { MyIcon } from './MyIcon'
 import ReactMarkdown from 'react-markdown'
 
 const { Text, Title } = Typography
@@ -52,8 +53,14 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
   const [updating, setUpdating] = useState(false)
   const [updateLogs, setUpdateLogs] = useState([])
   const [updateComplete, setUpdateComplete] = useState(false)
+  const [updateUpToDate, setUpdateUpToDate] = useState(false)
   const [updateError, setUpdateError] = useState(null)
+  const [updateProgress, setUpdateProgress] = useState(0)
+  const [countdown, setCountdown] = useState(null)
   const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false)
+  const [useGithubSource, setUseGithubSource] = useState(() => {
+    return localStorage.getItem('updateSource') === 'github'
+  })
   const statsAbortController = useRef(null)
   const messageApi = useMessage()
 
@@ -148,12 +155,16 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     setUpdating(true)
     setUpdateLogs([])
     setUpdateComplete(false)
+    setUpdateUpToDate(false)
     setUpdateError(null)
+    setUpdateProgress(0)
+    setCountdown(null)
 
     const token = Cookies.get('danmu_token')
-    
+
     try {
-      await fetchEventSource('/api/ui/update/stream', {
+      const source = useGithubSource ? 'github' : 'docker'
+      await fetchEventSource(`/api/ui/update/stream?source=${source}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -162,10 +173,74 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
           try {
             const data = JSON.parse(event.data)
             setUpdateLogs(prev => [...prev, data.status])
-            
-            if (data.event === 'DONE' || data.event === 'UP_TO_DATE') {
+
+            // 更新进度条
+            if (data.progress != null) {
+              setUpdateProgress(data.progress)
+            }
+
+            if (data.event === 'DONE') {
               setUpdateComplete(true)
               setUpdating(false)
+              setUpdateProgress(100)
+              // 轮询检测服务恢复，而非固定倒计时
+              const waitForRestart = async () => {
+                const maxWait = 120
+                let waited = 0
+                setCountdown(-1) // 标记正在等待重启
+
+                // 辅助：替换最后一行日志（避免刷屏）
+                const updateLastLog = (msg) => {
+                  setUpdateLogs(prev => {
+                    const copy = [...prev]
+                    if (copy.length > 0 && (copy[copy.length - 1].startsWith('⏳') || copy[copy.length - 1].startsWith('✅') || copy[copy.length - 1].startsWith('⚠️'))) {
+                      copy[copy.length - 1] = msg
+                    } else {
+                      copy.push(msg)
+                    }
+                    return copy
+                  })
+                }
+
+                // 第一阶段：等待服务停止（最多30秒）
+                for (let i = 0; i < 30; i++) {
+                  waited++
+                  updateLastLog(`⏳ 等待容器停止... (${waited}秒)`)
+                  try {
+                    const res = await fetch('/api/ui/version', { signal: AbortSignal.timeout(3000) })
+                    if (!res.ok) break
+                  } catch {
+                    break // 服务已停止
+                  }
+                  await new Promise(r => setTimeout(r, 1000))
+                }
+
+                // 第二阶段：等待服务恢复
+                for (let i = 0; i < 60; i++) {
+                  waited++
+                  setCountdown(maxWait - waited)
+                  updateLastLog(`⏳ 正在等待服务恢复... (${waited}秒)`)
+                  try {
+                    const res = await fetch('/api/ui/version', { signal: AbortSignal.timeout(3000) })
+                    if (res.ok) {
+                      updateLastLog('✅ 服务已恢复，正在刷新...')
+                      await new Promise(r => setTimeout(r, 500))
+                      window.location.reload()
+                      return
+                    }
+                  } catch { /* 还没恢复 */ }
+                  await new Promise(r => setTimeout(r, 2000))
+                }
+
+                // 超时
+                updateLastLog('⚠️ 等待超时，请手动刷新页面')
+                setCountdown(null)
+              }
+              waitForRestart()
+            } else if (data.event === 'UP_TO_DATE') {
+              setUpdateUpToDate(true)
+              setUpdating(false)
+              setUpdateProgress(100)
             } else if (data.event === 'ERROR') {
               setUpdateError(data.status)
               setUpdating(false)
@@ -327,22 +402,59 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
           {(updating || updateLogs.length > 0) && (
             <div className="mt-4">
               <Divider>更新进度</Divider>
-              <div className="bg-gray-900 text-green-400 rounded-lg p-4 max-h-[200px] overflow-y-auto font-mono text-sm">
+              {/* 进度条 */}
+              {(updating || updateProgress > 0) && (
+                <Progress
+                  percent={updateProgress}
+                  status={updateError ? 'exception' : (updateComplete || updateUpToDate) ? 'success' : 'active'}
+                  strokeWidth={10}
+                  className="mb-3"
+                />
+              )}
+              <div
+                className="rounded-lg p-4 max-h-[200px] overflow-y-auto font-mono text-sm"
+                style={{
+                  backgroundColor: 'var(--color-hover, #f5f5f5)',
+                  color: 'var(--color-text, #333)',
+                }}
+              >
                 {updateLogs.map((log, index) => (
-                  <div key={index}>{log}</div>
+                  <div key={index}>
+                    {log.startsWith('⏳') ? (
+                      <><span className="inline-block mr-1 animate-spin">⏳</span>{log.slice(1)}</>
+                    ) : log}
+                  </div>
                 ))}
                 {updating && <Spin size="small" className="ml-2" />}
               </div>
             </div>
           )}
 
-          {/* 更新结果 */}
+          {/* 更新结果：有新版本已更新 */}
           {updateComplete && (
             <Alert
               type="success"
               showIcon
               message="更新完成"
-              description="容器将在后台重启，请稍后刷新页面"
+              description={
+                countdown === -1
+                  ? "正在等待容器停止..."
+                  : countdown != null && countdown > 0
+                    ? `正在等待服务恢复... (剩余约 ${countdown} 秒)`
+                    : "更新任务已完成，等待服务恢复后将自动刷新页面"
+              }
+              className="mt-3"
+            />
+          )}
+
+          {/* 更新结果：已是最新 */}
+          {updateUpToDate && (
+            <Alert
+              type="info"
+              showIcon
+              message="无需更新"
+              description="当前镜像已是最新版本，无需操作。"
+              className="mt-3"
             />
           )}
 
@@ -357,18 +469,30 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
 
           {/* 操作按钮 */}
           <Divider />
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <Button
               onClick={() => setReleaseHistoryOpen(true)}
               icon={<HistoryOutlined />}
             >
               更新日志
             </Button>
+            {/* 更新源切换 */}
+            {dockerStatus?.canUpdate && (
+              <Switch
+                checked={useGithubSource}
+                checkedChildren={<><GithubOutlined /> GitHub</>}
+                unCheckedChildren={<><MyIcon icon="Docker2" size={14} className="mr-0.5 align-middle" /> Docker</>}
+                onChange={v => {
+                  setUseGithubSource(v)
+                  localStorage.setItem('updateSource', v ? 'github' : 'docker')
+                }}
+              />
+            )}
             <div className="flex gap-2">
               <Button onClick={() => loadData()} icon={<SyncOutlined />}>
                 刷新
               </Button>
-              {updateInfo?.hasUpdate && dockerStatus?.canUpdate && (
+              {dockerStatus?.canUpdate && (
                 <Button
                   type="primary"
                   icon={<RocketOutlined />}
@@ -376,7 +500,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
                   loading={updating}
                   disabled={updateComplete}
                 >
-                  开始更新
+                  {updateInfo?.hasUpdate ? '更新并重启' : '检查并更新'}
                 </Button>
               )}
               {updateInfo?.releaseUrl && (

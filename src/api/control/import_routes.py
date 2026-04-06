@@ -598,9 +598,9 @@ async def edited_import(
     item_to_import = cached_results[payload.resultIndex]
 
     # 关键修复：恢复并完善在任务提交前的重复检查。
-    # 对于编辑后导入，我们需要检查每个单集是否已存在（必须是相同数据源）
+    # 对于编辑后导入，我们需要检查每个单集是否已存在（必须是相同数据源 + 季度）
     # 检查数据源是否已存在
-    source_exists = await crud.check_source_exists_by_media_id(session, item_to_import.provider, item_to_import.mediaId)
+    source_exists = await crud.check_source_exists_by_media_id(session, item_to_import.provider, item_to_import.mediaId, season=item_to_import.season)
 
     if source_exists:
         # 数据源已存在，检查每个要导入的单集是否已有弹幕（必须是相同 provider + media_id）

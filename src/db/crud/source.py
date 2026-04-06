@@ -16,22 +16,28 @@ from src.core.timezone import get_now
 logger = logging.getLogger(__name__)
 
 
-async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str) -> bool:
-    """检查具有给定提供商和媒体ID的源是否已存在。"""
+async def check_source_exists_by_media_id(session: AsyncSession, provider_name: str, media_id: str, season: Optional[int] = None) -> bool:
+    """检查具有给定提供商和媒体ID的源是否已存在。传入 season 时会 JOIN anime 表按季度精确匹配。"""
     stmt = select(AnimeSource.id).where(
         AnimeSource.providerName == provider_name,
         AnimeSource.mediaId == media_id
-    ).limit(1)
+    )
+    if season is not None:
+        stmt = stmt.join(Anime, AnimeSource.animeId == Anime.id).where(Anime.season == season)
+    stmt = stmt.limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none() is not None
 
 
-async def get_anime_id_by_source_media_id(session: AsyncSession, provider_name: str, media_id: str) -> Optional[int]:
-    """通过数据源的provider和media_id获取对应的anime_id。"""
+async def get_anime_id_by_source_media_id(session: AsyncSession, provider_name: str, media_id: str, season: Optional[int] = None) -> Optional[int]:
+    """通过数据源的provider和media_id获取对应的anime_id。传入 season 时会 JOIN anime 表按季度精确匹配。"""
     stmt = select(AnimeSource.animeId).where(
         AnimeSource.providerName == provider_name,
         AnimeSource.mediaId == media_id
-    ).limit(1)
+    )
+    if season is not None:
+        stmt = stmt.join(Anime, AnimeSource.animeId == Anime.id).where(Anime.season == season)
+    stmt = stmt.limit(1)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
