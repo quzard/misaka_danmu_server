@@ -114,6 +114,16 @@ CONFIG_SCHEMA = [
                 "description": "每个搜索源最多返回的结果数量。设置较小的值可以提高搜索速度。",
                 "placeholder": "30",
             },
+            {
+                "key": "searchFallbackTimeout",
+                "label": "后备搜索超时时间",
+                "type": "number",
+                "suffix": "秒",
+                "min": 5,
+                "max": 120,
+                "description": "后备搜索接口等待结果的最大时间。超时后返回空结果，搜索任务继续在后台运行。",
+                "placeholder": "30",
+            },
         ],
     },
     {
