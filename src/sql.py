@@ -33,7 +33,10 @@ _DANGEROUS_KEYWORDS = ("DROP", "TRUNCATE", "ALTER", "DELETE FROM", "UPDATE ")
 # ═══════════════════════════════════════════════════════════
 
 def _format_table(columns: Sequence[str], rows: Sequence[Sequence], max_rows: int = 100) -> str:
-    """将列名和数据行格式化为对齐的 ASCII 表格（纯内置，无依赖）。"""
+    """将列名和数据行格式化为对齐的 ASCII 表格（纯内置，无依赖）。
+    当结果超过 max_rows 时只显示前 max_rows 行并提示剩余行数。
+    返回 (表格字符串, 是否还有更多行, 总行数)。
+    """
     if not columns:
         return "(无数据)"
 
@@ -55,10 +58,32 @@ def _format_table(columns: Sequence[str], rows: Sequence[Sequence], max_rows: in
         lines.append(fmt.format(*(str(v)[:w] for v, w in zip(row, col_widths))))
     lines.append(sep)
 
-    if len(rows) > max_rows:
-        lines.append(f"  ... 还有 {len(rows) - max_rows} 行未显示 (共 {len(rows)} 行)")
-
     return "\n".join(lines)
+
+
+def _print_table_paged(columns: Sequence[str], rows: Sequence[Sequence], page_size: int = 100):
+    """分页打印表格，超过 page_size 行时交互式提示继续。"""
+    if not rows:
+        print(_format_table(columns, []))
+        print("  (0 行)")
+        return
+
+    offset = 0
+    total = len(rows)
+    while offset < total:
+        page = rows[offset:offset + page_size]
+        print(_format_table(columns, page))
+        offset += len(page)
+        if offset < total:
+            remaining = total - offset
+            try:
+                ans = input(f"  已显示 {offset}/{total} 行，还有 {remaining} 行。按回车继续 / 输入 q 停止: ").strip().lower()
+                if ans in ("q", "quit", "exit"):
+                    print(f"  (已显示 {offset}/{total} 行)")
+                    return
+            except (EOFError, KeyboardInterrupt):
+                print(f"\n  (已显示 {offset}/{total} 行)")
+                return
 
 
 # ═══════════════════════════════════════════════════════════
@@ -263,7 +288,7 @@ class SqlConsole:
                 if is_select:
                     rows = result.fetchall()
                     columns = list(result.keys())
-                    print(_format_table(columns, rows))
+                    _print_table_paged(columns, rows)
                     print(f"  ({len(rows)} 行, 耗时 {elapsed:.3f}s)")
                 else:
                     await session.commit()
@@ -370,7 +395,10 @@ def main():
     parser.add_argument("--yes", "-y", action="store_true", help="跳过确认提示")
     args = parser.parse_args()
 
-    asyncio.run(_main(args))
+    try:
+        asyncio.run(_main(args))
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 
 if __name__ == "__main__":
