@@ -555,13 +555,6 @@ async def generic_import_task(
         raise TaskSuccess("数据源验证失败，未能获取到任何弹幕，未创建数据库条目。")
 
     # 处理所有分集（包括第一集）
-    # 多源场景：在分集标题前加上源名称前缀，便于区分来源
-    sources = await crud.get_anime_sources(session, anime_id)
-    if len(sources) > 1:
-        for ep in episodes:
-            if not ep.title.startswith("【"):
-                ep.title = f"【{provider}】{ep.title}"
-
     try:
         total_comments_added, successful_episodes_indices, skipped_episodes_indices, failed_episodes_count, failed_episodes_details = await _import_episodes_iteratively(
             session=session,
@@ -795,13 +788,6 @@ async def edited_import_task(
         raise TaskSuccess(error_msg)
 
     # 处理所有分集
-    # 多源场景：在分集标题前加上源名称前缀，便于区分来源
-    sources = await crud.get_anime_sources(session, anime_id)
-    if len(sources) > 1:
-        for ep in episodes:
-            if not ep.title.startswith("【"):
-                ep.title = f"【{request_data.provider}】{ep.title}"
-
     try:
         total_comments_added, successful_indices, skipped_indices, failed_count, failed_details = await _import_episodes_iteratively(
             session=session,

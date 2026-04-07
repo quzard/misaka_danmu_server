@@ -641,6 +641,7 @@ async def search_episodes_in_library(session: AsyncSession, anime_title: str, ep
             Episode.id.label("episodeId"),
             Episode.episodeIndex.label("episodeIndex"),
             case((Anime.type == 'movie', func.concat(Scraper.providerName, ' 源')), else_=Episode.title).label("episodeTitle"),
+            Scraper.providerName.label("providerName"),
             AnimeAlias.nameEn,
             AnimeAlias.nameJp,
             AnimeAlias.nameRomaji,

@@ -469,6 +469,10 @@ async def search_implementation(
     )
 
     grouped_animes: Dict[int, DandanAnimeInfo] = {}
+    # 收集每个 anime 涉及的 provider 集合，用于多源时在分集标题加前缀
+    anime_providers: Dict[int, set] = {}
+    # 暂存原始分集数据（含 providerName），分组后统一处理
+    anime_raw_episodes: Dict[int, list] = {}
 
     for res in flat_results:
         anime_id = res['animeId']
@@ -486,10 +490,26 @@ async def search_implementation(
                 isFavorited=res.get('isFavorited', False),
                 episodes=[]
             )
+            anime_providers[anime_id] = set()
+            anime_raw_episodes[anime_id] = []
 
-        grouped_animes[anime_id].episodes.append(
-            DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=res['episodeTitle'], isLibrary=True, episodeIndex=res.get('episodeIndex'))
-        )
+        provider = res.get('providerName', '')
+        if provider:
+            anime_providers[anime_id].add(provider)
+        anime_raw_episodes[anime_id].append(res)
+
+    # 多源时在分集标题前加 【provider】 前缀
+    for anime_id, raw_eps in anime_raw_episodes.items():
+        is_multi_source = len(anime_providers.get(anime_id, set())) > 1
+        for res in raw_eps:
+            title = res['episodeTitle']
+            if is_multi_source:
+                provider = res.get('providerName', '')
+                if provider and not title.startswith("【"):
+                    title = f"【{provider}】{title}"
+            grouped_animes[anime_id].episodes.append(
+                DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=title, isLibrary=True, episodeIndex=res.get('episodeIndex'))
+            )
 
     # ─── 并行搜索：从源站补充库内缺失的分集 ───
     parallel_search_enabled = False
