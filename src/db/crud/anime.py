@@ -1099,16 +1099,37 @@ async def get_anime_details_for_dandan(session: AsyncSession, anime_id: int) -> 
             .where(AnimeSource.animeId == anime_id)
             .order_by(Scraper.displayOrder)
         )
+        episodes_res = await session.execute(ep_stmt)
+        episodes = [dict(row) for row in episodes_res.mappings()]
     else:
+        # 查出分集及其所属的 providerName
         ep_stmt = (
-            select(Episode.id.label("episodeId"), Episode.title.label("episodeTitle"), Episode.episodeIndex.label("episodeNumber"))
+            select(
+                Episode.id.label("episodeId"),
+                Episode.title.label("episodeTitle"),
+                Episode.episodeIndex.label("episodeNumber"),
+                AnimeSource.providerName.label("providerName"),
+            )
             .join(AnimeSource, Episode.sourceId == AnimeSource.id)
             .where(AnimeSource.animeId == anime_id)
             .order_by(Episode.episodeIndex)
         )
+        episodes_res = await session.execute(ep_stmt)
+        raw_episodes = [dict(row) for row in episodes_res.mappings()]
 
-    episodes_res = await session.execute(ep_stmt)
-    episodes = [dict(row) for row in episodes_res.mappings()]
+        # 判断是否多源：统计不同的 provider 数量
+        providers = {ep['providerName'] for ep in raw_episodes if ep.get('providerName')}
+        is_multi_source = len(providers) > 1
+
+        for ep in raw_episodes:
+            title = ep['episodeTitle']
+            if is_multi_source and ep.get('providerName') and not title.startswith("【"):
+                title = f"【{ep['providerName']}】{title}"
+            episodes.append({
+                "episodeId": ep['episodeId'],
+                "episodeTitle": title,
+                "episodeNumber": ep['episodeNumber'],
+            })
 
     return {"anime": dict(anime_details), "episodes": episodes}
 
