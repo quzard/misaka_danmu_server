@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Callable, Optional
 from datetime import timedelta
@@ -185,16 +186,33 @@ class DatabaseMaintenanceJob(BaseJob):
 
         await progress_callback(80, optimization_message)
 
-        # --- 4. 图片缓存清理 ---
+        # --- 4. 图片缓存清理（带重试，防止长时间任务导致连接断开）---
         await progress_callback(85, "正在清理无效图片缓存...")
 
-        try:
-            image_cleanup_message = await _clean_orphaned_images(session)
-            self.logger.info(f"图片缓存清理结果: {image_cleanup_message}")
-        except Exception as e:
-            image_cleanup_message = f"图片缓存清理失败: {e}"
-            self.logger.error(image_cleanup_message, exc_info=True)
-            # 即使清理失败，也不应导致整个任务失败，仅记录错误
+        image_cleanup_message = ""
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                image_cleanup_message = await _clean_orphaned_images(session)
+                self.logger.info(f"图片缓存清理结果: {image_cleanup_message}")
+                break
+            except OperationalError as e:
+                if attempt < max_retries:
+                    wait_time = 3 * (attempt + 1)
+                    self.logger.warning(f"图片缓存清理数据库连接异常 (第{attempt + 1}次)，{wait_time}秒后重试: {e}")
+                    await asyncio.sleep(wait_time)
+                    # 尝试使连接池回收死连接（通过 pool_pre_ping 机制）
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                else:
+                    image_cleanup_message = f"图片缓存清理失败（重试{max_retries}次后仍失败）: {e}"
+                    self.logger.error(image_cleanup_message, exc_info=True)
+            except Exception as e:
+                image_cleanup_message = f"图片缓存清理失败: {e}"
+                self.logger.error(image_cleanup_message, exc_info=True)
+                break
 
         await progress_callback(100, "缓存日志清理任务完成")
 
