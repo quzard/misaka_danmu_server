@@ -667,9 +667,21 @@ class TaskManager:
             async with self._lock:
                 self._immediate_tasks[task_id] = task
 
+            # 定时任务超时保护：默认30分钟，防止 immediate 任务永远卡住
+            immediate_timeout = 1800  # 30分钟
+
             async def _run_and_cleanup():
                 try:
-                    await self._run_task_wrapper(task, queue_type=queue_type)
+                    await asyncio.wait_for(
+                        self._run_task_wrapper(task, queue_type=queue_type),
+                        timeout=immediate_timeout
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.error(f"立即执行任务 '{title}' (ID: {task_id}) 超时（{immediate_timeout}秒），强制终止")
+                    await self._safe_finalize_task(
+                        task_id, TaskStatus.FAILED, f"任务执行超时（{immediate_timeout // 60}分钟），已强制终止"
+                    )
+                    task.done_event.set()
                 finally:
                     async with self._lock:
                         self._immediate_tasks.pop(task_id, None)
@@ -1018,10 +1030,14 @@ class TaskManager:
                         if await self._try_recover_task(task_info):
                             active_recovered += 1
 
-                    # 将原来的中断任务（运行中/已暂停）全部标记为失败
-                    # 恢复成功的任务已创建了新的任务ID，原记录可以安全标记为失败
-                    await crud.mark_interrupted_tasks_as_failed(session)
-                    self.logger.info(f"中断任务处理完成: {active_recovered} 个已恢复重新入队，{len(active_tasks) - active_recovered} 个无法恢复（原记录已标记为失败）")
+                    self.logger.info(f"中断任务处理完成: {active_recovered} 个已恢复重新入队，{len(active_tasks) - active_recovered} 个无法恢复")
+
+                # 始终清理所有残留的"运行中/已暂停"状态的任务（包括无 TaskStateCache 的定时任务）
+                # 必须在 active_tasks 条件块外执行，否则没有 TaskStateCache 记录的
+                # run_immediately 定时任务会永远卡在"运行中"状态
+                interrupted_count = await crud.mark_interrupted_tasks_as_failed(session)
+                if interrupted_count > 0:
+                    self.logger.info(f"已将 {interrupted_count} 个中断的运行中/已暂停任务标记为失败")
 
                 # 2. 处理排队中的任务（这些任务直接从 TaskHistory 表恢复，无需 TaskStateCache）
                 pending_tasks = await crud.get_pending_recoverable_tasks(session)
