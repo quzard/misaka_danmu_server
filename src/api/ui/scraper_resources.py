@@ -2037,21 +2037,15 @@ async def _download_and_extract_release(
         if progress_callback:
             await progress_callback("正在解压文件...")
 
-        # 先清理旧的 .so/.pyd 文件
-        deleted_count = 0
-        for file in scrapers_dir.glob("*"):
-            if file.suffix in ['.so', '.pyd']:
-                try:
-                    file.unlink()
-                    deleted_count += 1
-                except Exception as e:
-                    logger.warning(f"删除旧文件 {file.name} 失败: {e}")
+        # 记录旧文件列表（解压完成后清理多余的旧文件）
+        old_files = {
+            file.name for file in scrapers_dir.glob("*")
+            if file.suffix in ['.so', '.pyd']
+        }
 
-        if deleted_count > 0:
-            logger.info(f"已删除 {deleted_count} 个旧的编译文件")
-
-        # 解压新文件
+        # 解压新文件（直接覆盖写入，不先删除旧文件，保证原子性）
         extracted_count = 0
+        new_files = set()
 
         # 判断压缩包类型
         if filename.endswith('.tar.gz') or filename.endswith('.tgz'):
@@ -2085,6 +2079,8 @@ async def _download_and_extract_release(
                             file_content = file_obj.read()
                             await asyncio.to_thread(target_path.write_bytes, file_content)
                             extracted_count += 1
+                            if base_name.endswith(('.so', '.pyd')):
+                                new_files.add(base_name)
                             logger.debug(f"解压: {base_name}")
         else:
             # 处理 zip 格式
@@ -2110,10 +2106,22 @@ async def _download_and_extract_release(
                         # 读取并写入文件
                         file_content = zip_ref.read(zip_info.filename)
                         await asyncio.to_thread(target_path.write_bytes, file_content)
-                        eracted_count += 1
+                        extracted_count += 1
+                        if base_name.endswith(('.so', '.pyd')):
+                            new_files.add(base_name)
                         logger.debug(f"解压: {base_name}")
 
         logger.info(f"解压完成: 共 {extracted_count} 个文件")
+
+        # 解压成功后，清理不再存在于新包中的旧文件
+        stale_files = old_files - new_files
+        if stale_files and extracted_count > 0:
+            for stale_name in stale_files:
+                try:
+                    (scrapers_dir / stale_name).unlink(missing_ok=True)
+                    logger.info(f"清理旧文件: {stale_name}")
+                except Exception as e:
+                    logger.warning(f"清理旧文件 {stale_name} 失败: {e}")
 
         if progress_callback:
             await progress_callback(f"解压完成: {extracted_count} 个文件")

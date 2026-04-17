@@ -14,6 +14,7 @@ from src.db import models, orm_models, get_db_session, ConfigManager
 from src.api.dependencies import get_config_manager, get_title_recognition_manager
 from .models import (
     TitleRecognitionContent, TitleRecognitionUpdateResponse,
+    TitleRecognitionTestRequest, TitleRecognitionTestResponse,
     GlobalFilterSettings, WebhookSettings
 )
 
@@ -28,7 +29,7 @@ async def get_title_recognition_content(
 ):
     """
     获取识别词配置内容
-    
+
     Returns:
         TitleRecognitionContent: 包含识别词配置内容的响应
     """
@@ -38,7 +39,7 @@ async def get_title_recognition_content(
             select(orm_models.TitleRecognition).limit(1)
         )
         title_recognition = result.scalar_one_or_none()
-        
+
         if title_recognition is None:
             # 如果没有配置记录，返回默认内容
             default_content = """# 自定义识别词配置 - 参考MoviePilot格式
@@ -92,9 +93,9 @@ async def get_title_recognition_content(
 # source=bilibili：可选，限定只对特定源生效
 """
             return TitleRecognitionContent(content=default_content)
-        
+
         return TitleRecognitionContent(content=title_recognition.content)
-        
+
     except Exception as e:
         logger.error(f"获取识别词配置时发生错误: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取识别词配置时发生内部错误。")
@@ -132,6 +133,80 @@ async def update_title_recognition_content(
     except Exception as e:
         logger.error(f"更新识别词配置时发生错误: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"更新识别词配置时发生内部错误: {str(e)}")
+
+
+
+@router.post("/settings/title-recognition/test", response_model=TitleRecognitionTestResponse, summary="测试识别词规则")
+async def test_title_recognition_rules(
+    payload: TitleRecognitionTestRequest,
+    current_user: models.User = Depends(security.get_current_user),
+    title_recognition_manager = Depends(get_title_recognition_manager)
+):
+    """
+    测试识别词规则对指定标题的效果，不保存任何修改。
+    """
+    try:
+        if title_recognition_manager is None:
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="识别词管理器未初始化")
+
+        original_title = payload.title
+        original_season = payload.season
+        original_episode = payload.episode
+        matched_rules = []
+
+        processed_title = original_title
+        processed_season = original_season
+        processed_episode = original_episode
+        has_changed = False
+
+        if payload.stage in ("preprocess", "all"):
+            pre_title, pre_episode, pre_season, pre_changed = await title_recognition_manager.apply_search_preprocessing(
+                processed_title, processed_episode, processed_season
+            )
+            if pre_changed:
+                has_changed = True
+                if pre_title != processed_title:
+                    matched_rules.append(f"[搜索预处理] 标题: '{processed_title}' → '{pre_title}'")
+                if pre_season != processed_season:
+                    matched_rules.append(f"[搜索预处理] 季度: {processed_season} → {pre_season}")
+                if pre_episode != processed_episode:
+                    matched_rules.append(f"[搜索预处理] 集数: {processed_episode} → {pre_episode}")
+                processed_title = pre_title
+                processed_season = pre_season
+                processed_episode = pre_episode
+
+        if payload.stage in ("postprocess", "all"):
+            post_title, post_season, post_changed, metadata_info, post_episode = await title_recognition_manager.apply_storage_postprocessing(
+                processed_title, processed_season, payload.source, processed_episode
+            )
+            if post_changed:
+                has_changed = True
+                if post_title != processed_title:
+                    matched_rules.append(f"[入库后处理] 标题: '{processed_title}' → '{post_title}'")
+                if post_season != processed_season:
+                    matched_rules.append(f"[入库后处理] 季度: {processed_season} → {post_season}")
+                if post_episode != processed_episode:
+                    matched_rules.append(f"[入库后处理] 集数: {processed_episode} → {post_episode}")
+                if metadata_info:
+                    matched_rules.append(f"[入库后处理] 元数据: {metadata_info}")
+                processed_title = post_title
+                processed_season = post_season
+                processed_episode = post_episode
+
+        return TitleRecognitionTestResponse(
+            originalTitle=original_title,
+            processedTitle=processed_title,
+            originalSeason=original_season,
+            processedSeason=processed_season,
+            originalEpisode=original_episode,
+            processedEpisode=processed_episode,
+            matched=has_changed,
+            matchedRules=matched_rules,
+        )
+
+    except Exception as e:
+        logger.error(f"测试识别词规则时发生错误: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"测试失败: {str(e)}")
 
 
 

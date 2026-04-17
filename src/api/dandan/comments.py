@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from src.db import crud, orm_models, models, get_db_session, sync_postgres_sequence, ConfigManager
 from src.core import get_now
 from src.core.cache import get_cache_backend
-from src.services import ScraperManager, TaskManager
+from src.services import ScraperManager, TaskManager, TaskSuccess
 from src.utils import parse_search_keyword, sample_comments_evenly, record_play_history, handle_danmaku_likes, strip_danmaku_likes
 from src.utils import restyle_danmaku_likes
 from src.rate_limiter import RateLimiter
@@ -453,7 +453,7 @@ async def get_comments_for_dandan(
                         comments = await current_scraper.get_comments(current_provider_episode_id, progress_callback=progress_callback)
                         if not comments:
                             logger.warning(f"下载失败，未获取到弹幕")
-                            return None
+                            raise TaskSuccess("未获取到弹幕，源站可能暂时不可用")
 
                         # 增加流控计数
                         await current_rate_limiter.increment_fallback("match", current_provider)
@@ -569,6 +569,8 @@ async def get_comments_for_dandan(
                         await progress_callback(100, "完成")
                         return comments
 
+                    except TaskSuccess:
+                        raise  # TaskSuccess 直接穿透到 task_manager
                     except Exception as e:
                         logger.error(f"匹配后备弹幕下载任务执行失败: {e}", exc_info=True)
                         await task_session.rollback()
