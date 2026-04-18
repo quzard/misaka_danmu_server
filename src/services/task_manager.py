@@ -748,15 +748,21 @@ class TaskManager:
                 self.logger.error(f"任务进度更新失败 (ID: {task.task_id}): {e}", exc_info=False)
 
             # 进度未完成时触发 TG 进度通知（TG 会 edit 已有消息，其他渠道跳过进度推送）
+            # 加超时保护：通知推送不应阻塞任务执行（TG 代理不可达时可能卡住）
             if self._notification_service and progress < 100:
                 try:
-                    await self._notification_service.emit_task_progress(
-                        task_id=task.task_id,
-                        task_title=task.title,
-                        progress=int(progress),
-                        description=description,
-                        check_event_key=progress_check_key,
+                    await asyncio.wait_for(
+                        self._notification_service.emit_task_progress(
+                            task_id=task.task_id,
+                            task_title=task.title,
+                            progress=int(progress),
+                            description=description,
+                            check_event_key=progress_check_key,
+                        ),
+                        timeout=10  # 最多等10秒，超时则跳过本次通知
                     )
+                except asyncio.TimeoutError:
+                    self.logger.warning(f"任务进度通知超时 (ID: {task.task_id})，跳过本次推送")
                 except Exception as e:
                     self.logger.debug(f"任务进度通知失败 (ID: {task.task_id}): {e}")
 
