@@ -212,10 +212,9 @@ export const Test = () => {
           name: 'bangumiId',
           label: '番剧ID',
           apiParam: 'id (path)',
-          placeholder: '请输入番剧ID',
+          placeholder: '支持纯数字ID、A开头的备用ID（如 A900002）、或Bangumi ID',
           required: true,
-          component: InputNumber,
-          componentProps: { className: 'w-full', style: { width: '100%' } },
+          component: Input,
         },
       ],
       // 番剧详情是单条数据，不需要分页
