@@ -14,9 +14,30 @@ from src.db import crud, models, get_db_session
 
 from .models import ApiTokenUpdate
 
+import re
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Token 字符合法性正则：仅允许字母、数字、下划线、短横线
+_TOKEN_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+
+def _validate_custom_token(token_str: str) -> str:
+    """校验自定义 Token 字符串的合法性"""
+    token_str = token_str.strip()
+    if len(token_str) < 5 or len(token_str) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="自定义 Token 长度须在 5~100 字符之间"
+        )
+    if not _TOKEN_PATTERN.match(token_str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="自定义 Token 仅允许字母、数字、下划线和短横线"
+        )
+    return token_str
 
 @router.get("/tokens", response_model=List[models.ApiTokenInfo], summary="获取所有弹幕API Token")
 async def get_all_api_tokens(
@@ -35,13 +56,22 @@ async def create_new_api_token(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """创建一个新的、随机的 API Token。"""
-    # 生成一个由大小写字母和数字组成的20位随机字符串
-    alphabet = string.ascii_letters + string.digits
-    new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
+    """创建一个新的 API Token，支持自定义 Token 字符串或自动生成。"""
+    if token_data.customToken:
+        new_token_str = _validate_custom_token(token_data.customToken)
+        # 唯一性检查
+        existing = await crud.get_api_token_by_token_str(session, new_token_str)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Token '{new_token_str}' 已被使用，请换一个。"
+            )
+    else:
+        # 自动生成20位随机字符串
+        alphabet = string.ascii_letters + string.digits
+        new_token_str = ''.join(secrets.choice(alphabet) for _ in range(20))
     try:
         token_id = await crud.create_api_token(session, token_data.name, new_token_str, token_data.validityPeriod, token_data.dailyCallLimit)
-        # 重新从数据库获取以包含所有字段
         new_token = await crud.get_api_token_by_id(session, token_id)
         return models.ApiTokenInfo.model_validate(new_token)
     except ValueError as e:
@@ -84,13 +114,25 @@ async def update_api_token(
     current_user: models.User = Depends(security.get_current_user),
     session: AsyncSession = Depends(get_db_session)
 ):
-    """更新指定API Token的名称、每日调用上限和有效期。"""
+    """更新指定API Token的名称、每日调用上限、有效期和Token字符串。"""
+    # 如果提供了自定义 Token，先校验
+    new_token_str = None
+    if payload.customToken:
+        new_token_str = _validate_custom_token(payload.customToken)
+        # 唯一性检查（排除自身）
+        existing = await crud.get_api_token_by_token_str(session, new_token_str)
+        if existing and existing['id'] != token_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Token '{new_token_str}' 已被其他条目使用，请换一个。"
+            )
     updated = await crud.update_api_token(
         session,
         token_id=token_id,
         name=payload.name,
         daily_call_limit=payload.dailyCallLimit,
-        validity_period=payload.validityPeriod
+        validity_period=payload.validityPeriod,
+        new_token_str=new_token_str,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")

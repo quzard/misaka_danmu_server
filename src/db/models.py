@@ -299,6 +299,7 @@ class ApiTokenCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
     validityPeriod: str = Field("permanent", description="有效期: permanent, 1d, 7d, 30d, 180d, 365d")
     dailyCallLimit: int = Field(500, description="每日调用次数限制, -1 表示无限")
+    customToken: Optional[str] = Field(None, min_length=5, max_length=100, description="自定义Token字符串，留空则自动生成")
 
 # --- UA Filter Models ---
 class UaRule(BaseModel):

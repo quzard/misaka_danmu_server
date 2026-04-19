@@ -115,6 +115,7 @@ class ApiTokenUpdate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
     dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
     validityPeriod: str = Field(..., description="新的有效期: 'permanent', 'custom', '30d' 等")
+    customToken: Optional[str] = Field(None, min_length=5, max_length=100, description="自定义Token字符串，留空则保持不变")
 
 
 class CustomDanmakuPathRequest(BaseModel):

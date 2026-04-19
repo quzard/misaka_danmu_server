@@ -127,6 +127,10 @@ export const Token = ({ domain }) => {
   const handleSave = async () => {
     try {
       const values = await form.validateFields()
+      // 空字符串的 customToken 转为 null，避免后端校验失败
+      if (!values.customToken?.trim()) {
+        values.customToken = null
+      }
       setConfirmLoading(true)
       if (isEditing && editingRecord) {
         await editToken({ ...values, id: editingRecord.id })
@@ -553,6 +557,32 @@ export const Token = ({ domain }) => {
               min={-1}
               style={{ width: '100%' }}
               placeholder="默认为500, -1为无限"
+            />
+          </Form.Item>
+          <Form.Item
+            name="customToken"
+            label="自定义Token"
+            tooltip="自定义Token字符串，仅允许字母、数字、下划线和短横线（5~100字符）。留空则自动生成。"
+            className="mb-4"
+            rules={[
+              {
+                pattern: /^[a-zA-Z0-9_-]*$/,
+                message: '仅允许字母、数字、下划线和短横线',
+              },
+              {
+                validator: (_, value) => {
+                  if (value && value.length > 0 && value.length < 5) {
+                    return Promise.reject('Token 长度至少 5 个字符')
+                  }
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <Input
+              placeholder={isEditing ? '留空保持当前Token不变' : '留空自动生成'}
+              maxLength={100}
+              allowClear
             />
           </Form.Item>
         </Form>

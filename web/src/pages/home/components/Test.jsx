@@ -284,9 +284,10 @@ export const Test = () => {
           colorCount[hex] = (colorCount[hex] || 0) + 1
         }
 
-        // 热力图：按30秒分桶
+        // 热力图：动态分桶，确保桶数在 40~80 之间（手机上也能看清）
         const maxTime = Math.max(...times, 1)
-        const bucketSize = 30
+        const targetBuckets = 60  // 目标桶数
+        const bucketSize = Math.max(Math.ceil(maxTime / targetBuckets), 10)  // 最小10秒/桶
         const bucketCount = Math.ceil(maxTime / bucketSize)
         const buckets = new Array(bucketCount).fill(0)
         for (const t of times) {
@@ -294,6 +295,7 @@ export const Test = () => {
           buckets[idx]++
         }
         const maxBucket = Math.max(...buckets, 1)
+        const bucketLabel = bucketSize >= 60 ? `${Math.round(bucketSize / 60)}分钟` : `${bucketSize}秒`
 
         // 统计
         const durationMin = Math.floor(maxTime / 60)
@@ -307,16 +309,17 @@ export const Test = () => {
 
             {/* 弹幕热力图 */}
             <div>
-              <div className="text-xs text-gray-500 mb-1">弹幕密度分布 (每30秒)</div>
+              <div className="text-xs text-gray-500 mb-1">弹幕密度分布 (每{bucketLabel})</div>
               <div className="flex items-end gap-px h-16 bg-gray-100 dark:bg-gray-800 rounded p-1 overflow-hidden">
                 {buckets.map((count, i) => {
                   const h = Math.max((count / maxBucket) * 100, count > 0 ? 4 : 0)
                   const intensity = count / maxBucket
                   const bg = intensity > 0.8 ? 'bg-red-500' : intensity > 0.5 ? 'bg-orange-400' : intensity > 0.2 ? 'bg-blue-400' : 'bg-blue-200'
-                  const mins = Math.floor((i * bucketSize) / 60)
-                  const secs = (i * bucketSize) % 60
+                  const startSec = i * bucketSize
+                  const endSec = Math.min((i + 1) * bucketSize, maxTime)
+                  const fmtTime = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
                   return (
-                    <div key={i} className="flex-1 flex flex-col justify-end h-full" title={`${mins}:${String(secs).padStart(2, '0')} - ${count} 条`}>
+                    <div key={i} className="flex-1 flex flex-col justify-end h-full" title={`${fmtTime(startSec)} ~ ${fmtTime(endSec)} — ${count} 条`}>
                       <div className={`${bg} rounded-t-sm transition-all`} style={{ height: `${h}%`, minWidth: 2 }} />
                     </div>
                   )
