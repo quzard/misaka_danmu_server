@@ -11,10 +11,8 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   Button,
   Card,
-  Col,
   Form,
   Input,
-  Row,
   Tabs,
   InputNumber,
   Select,
@@ -264,16 +262,122 @@ export const Test = () => {
           (item.p || '').toLowerCase().includes(kw)
       },
       renderHeader: data => {
-        if (data?.comments && data.comments.length > 0) {
-          return <div className="font-bold text-green-600">[获取成功] 共 {data.count || data.comments.length} 条弹幕</div>
+        if (!data?.comments || data.comments.length === 0) {
+          return <div className="text-red-600">[获取失败] 未找到弹幕</div>
         }
-        return <div className="text-red-600">[获取失败] 未找到弹幕</div>
+        const comments = data.comments
+        const total = data.count || comments.length
+
+        // 解析所有弹幕的时间和模式
+        const times = []
+        const modeCount = {}
+        const colorCount = {}
+        const modeLabels = { 1: '滚动', 4: '底部', 5: '顶部', 6: '逆向', 7: '精准', 8: '高级' }
+        for (const c of comments) {
+          const parts = (c.p || '').split(',')
+          const t = parseFloat(parts[0] || 0)
+          const mode = parseInt(parts[1] || 1)
+          const color = parseInt(parts[2] || 16777215)
+          times.push(t)
+          const ml = modeLabels[mode] || `模式${mode}`
+          modeCount[ml] = (modeCount[ml] || 0) + 1
+          const hex = '#' + color.toString(16).padStart(6, '0')
+          colorCount[hex] = (colorCount[hex] || 0) + 1
+        }
+
+        // 热力图：按30秒分桶
+        const maxTime = Math.max(...times, 1)
+        const bucketSize = 30
+        const bucketCount = Math.ceil(maxTime / bucketSize)
+        const buckets = new Array(bucketCount).fill(0)
+        for (const t of times) {
+          const idx = Math.min(Math.floor(t / bucketSize), bucketCount - 1)
+          buckets[idx]++
+        }
+        const maxBucket = Math.max(...buckets, 1)
+
+        // 统计
+        const durationMin = Math.floor(maxTime / 60)
+        const durationSec = Math.floor(maxTime % 60)
+        const topColors = Object.entries(colorCount).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        const modeEntries = Object.entries(modeCount).sort((a, b) => b[1] - a[1])
+
+        return (
+          <div className="space-y-3">
+            <div className="font-bold text-green-600">[获取成功] 共 {total} 条弹幕</div>
+
+            {/* 弹幕热力图 */}
+            <div>
+              <div className="text-xs text-gray-500 mb-1">弹幕密度分布 (每30秒)</div>
+              <div className="flex items-end gap-px h-16 bg-gray-100 dark:bg-gray-800 rounded p-1 overflow-hidden">
+                {buckets.map((count, i) => {
+                  const h = Math.max((count / maxBucket) * 100, count > 0 ? 4 : 0)
+                  const intensity = count / maxBucket
+                  const bg = intensity > 0.8 ? 'bg-red-500' : intensity > 0.5 ? 'bg-orange-400' : intensity > 0.2 ? 'bg-blue-400' : 'bg-blue-200'
+                  const mins = Math.floor((i * bucketSize) / 60)
+                  const secs = (i * bucketSize) % 60
+                  return (
+                    <div key={i} className="flex-1 flex flex-col justify-end h-full" title={`${mins}:${String(secs).padStart(2, '0')} - ${count} 条`}>
+                      <div className={`${bg} rounded-t-sm transition-all`} style={{ height: `${h}%`, minWidth: 2 }} />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex justify-between text-xs text-gray-400 mt-0.5 px-1">
+                <span>0:00</span>
+                <span>{durationMin}:{String(durationSec).padStart(2, '0')}</span>
+              </div>
+            </div>
+
+            {/* 统计信息 */}
+            <div className="flex flex-wrap gap-4 text-xs">
+              {/* 弹幕模式分布 */}
+              <div>
+                <div className="text-gray-500 mb-1">模式分布</div>
+                <div className="flex flex-wrap gap-1">
+                  {modeEntries.map(([label, count]) => (
+                    <Tag key={label} className="!text-xs !m-0">{label}: {count}</Tag>
+                  ))}
+                </div>
+              </div>
+              {/* 热门颜色 */}
+              <div>
+                <div className="text-gray-500 mb-1">热门颜色</div>
+                <div className="flex gap-1">
+                  {topColors.map(([hex, count]) => (
+                    <div key={hex} className="flex items-center gap-0.5" title={`${hex} (${count}条)`}>
+                      <span className="w-3 h-3 rounded-sm border border-gray-200" style={{ backgroundColor: hex }} />
+                      <span className="text-gray-400">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )
       },
-      renderItem: (comment, index) => (
-        <div key={index} className="text-sm py-1 px-2 bg-purple-50 rounded">
-          <span className="text-gray-400">[{comment.p}]</span> {comment.m}
-        </div>
-      ),
+      renderItem: (comment, index) => {
+        // dandanplay 弹幕 p 格式: "时间,模式,颜色,uid"
+        const parts = (comment.p || '').split(',')
+        const time = parseFloat(parts[0] || 0)
+        const mode = parseInt(parts[1] || 1)
+        const color = parseInt(parts[2] || 16777215)
+        const modeLabels = { 1: '滚动', 4: '底部', 5: '顶部', 6: '逆向', 7: '精准', 8: '高级' }
+        const modeLabel = modeLabels[mode] || `模式${mode}`
+        // 将十进制颜色转为 #RRGGBB
+        const hexColor = '#' + color.toString(16).padStart(6, '0')
+        const mins = Math.floor(time / 60)
+        const secs = Math.floor(time % 60)
+        const timeStr = `${mins}:${String(secs).padStart(2, '0')}`
+        return (
+          <div key={index} className="flex items-center gap-2 text-sm py-1.5 px-3 rounded hover:bg-gray-100 dark:hover:bg-gray-800 border-b border-gray-100 dark:border-gray-800">
+            <span className="text-gray-400 font-mono w-12 shrink-0 text-right">{timeStr}</span>
+            <span className="w-4 h-4 rounded-sm shrink-0 border border-gray-200" style={{ backgroundColor: hexColor }} title={hexColor} />
+            <Tag className="shrink-0 !text-xs !px-1 !leading-4" color={mode === 5 ? 'red' : mode === 4 ? 'blue' : 'default'}>{modeLabel}</Tag>
+            <span className="truncate flex-1" title={comment.m}>{comment.m}</span>
+          </div>
+        )
+      },
     },
     fileRecognition: {
       label: '文件识别',
@@ -392,8 +496,8 @@ export const Test = () => {
           }))}
         />
 
-        <Row gutter={24} className="mt-4">
-          <Col md={12} sm={24}>
+        <div className="mt-4">
+          <div className="max-w-2xl mx-auto">
             {/* 接口信息展示（内部工具类接口不显示） */}
             {!currentConfig.noToken && (
             <Alert
@@ -434,7 +538,7 @@ export const Test = () => {
               form={form}
               layout="vertical"
               onFinish={handleTest}
-              className="px-6 pb-6"
+              className="px-2"
             >
               {/* Token选择（不需要token的测试类型隐藏） */}
               {!currentConfig.noToken && (
@@ -550,88 +654,83 @@ export const Test = () => {
                 </Button>
               </Form.Item>
             </Form>
-          </Col>
+          </div>
 
-          <Col md={12} sm={24}>
-            <div className="px-6">
+          {/* 结果区域（上下布局，全宽展示） */}
+          {result && (
+            <div className="mt-4 px-2">
               <div className="text-sm text-gray-500 mb-2">测试结果:</div>
-              <div className="p-4 bg-gray-50 rounded">
-                {result ? (
-                  result.error ? (
-                    <div className="text-red-600">
-                      <div className="font-bold">[错误]</div>
-                      <div className="mt-2">{result.message}</div>
-                    </div>
-                  ) : isListResult ? (
-                    <>
-                      {/* 头部信息 */}
-                      {currentConfig.renderHeader(result)}
+              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded">
+                {result.error ? (
+                  <div className="text-red-600">
+                    <div className="font-bold">[错误]</div>
+                    <div className="mt-2">{result.message}</div>
+                  </div>
+                ) : isListResult ? (
+                  <>
+                    {/* 头部信息 */}
+                    {currentConfig.renderHeader(result)}
 
-                      {/* 搜索栏 */}
-                      {(currentConfig.getListData(result) || []).length > 0 && (
-                        <div className="mt-2 mb-2 flex items-center gap-2">
-                          <Input
-                            placeholder="搜索结果..."
-                            prefix={<SearchOutlined className="text-gray-400" />}
-                            allowClear
-                            value={searchKeyword}
-                            onChange={e => {
-                              setSearchKeyword(e.target.value)
-                              setCurrentPage(1)
-                            }}
-                            size="small"
-                          />
-                          {searchKeyword && (
-                            <span className="text-xs text-gray-400 whitespace-nowrap">
-                              {totalFiltered} 条
-                            </span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* 滚动列表 */}
-                      <div className="max-h-[400px] overflow-y-auto space-y-2">
-                        {pagedList.length > 0 ? (
-                          pagedList.map((item, index) =>
-                            currentConfig.renderItem(item, (currentPage - 1) * pageSize + index, result)
-                          )
-                        ) : (
-                          <div className="text-gray-400 text-center py-4">
-                            {searchKeyword ? '没有匹配的结果' : '暂无数据'}
-                          </div>
+                    {/* 搜索栏 */}
+                    {(currentConfig.getListData(result) || []).length > 0 && (
+                      <div className="mt-2 mb-2 flex items-center gap-2">
+                        <Input
+                          placeholder="搜索结果..."
+                          prefix={<SearchOutlined className="text-gray-400" />}
+                          allowClear
+                          value={searchKeyword}
+                          onChange={e => {
+                            setSearchKeyword(e.target.value)
+                            setCurrentPage(1)
+                          }}
+                          size="small"
+                        />
+                        {searchKeyword && (
+                          <span className="text-xs text-gray-400 whitespace-nowrap">
+                            {totalFiltered} 条
+                          </span>
                         )}
                       </div>
+                    )}
 
-                      {/* 分页 */}
-                      {totalFiltered > pageSize && (
-                        <div className="mt-3 flex justify-center">
-                          <Pagination
-                            current={currentPage}
-                            pageSize={pageSize}
-                            total={totalFiltered}
-                            size="small"
-                            showSizeChanger
-                            pageSizeOptions={[10, 20, 50, 100]}
-                            onChange={(page, size) => {
-                              setCurrentPage(page)
-                              setPageSize(size)
-                            }}
-                          />
+                    {/* 滚动列表 */}
+                    <div className="max-h-[500px] overflow-y-auto space-y-1">
+                      {pagedList.length > 0 ? (
+                        pagedList.map((item, index) =>
+                          currentConfig.renderItem(item, (currentPage - 1) * pageSize + index, result)
+                        )
+                      ) : (
+                        <div className="text-gray-400 text-center py-4">
+                          {searchKeyword ? '没有匹配的结果' : '暂无数据'}
                         </div>
                       )}
-                    </>
-                  ) : (
-                    currentConfig.renderResult(result)
-                  )
+                    </div>
+
+                    {/* 分页 */}
+                    {totalFiltered > pageSize && (
+                      <div className="mt-3 flex justify-center">
+                        <Pagination
+                          current={currentPage}
+                          pageSize={pageSize}
+                          total={totalFiltered}
+                          size="small"
+                          showSizeChanger
+                          pageSizeOptions={[10, 20, 50, 100]}
+                          onChange={(page, size) => {
+                            setCurrentPage(page)
+                            setPageSize(size)
+                          }}
+                        />
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <div className="text-gray-400">
-                    测试结果将显示在这里。
-                  </div>
+                  currentConfig.renderResult(result)
                 )}
               </div>
             </div>
-          </Col>
-        </Row>
+          )}
+        </div>
       </Card>
     </div>
   )
