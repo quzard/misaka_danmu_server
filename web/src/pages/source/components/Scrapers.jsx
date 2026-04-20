@@ -1291,6 +1291,7 @@ export const Scrapers = () => {
       setConfirmLoading(false)
       setOpen(false)
       form.resetFields()
+      getInfo() // 刷新列表以更新代理/日志图标状态
     }
   }
 
