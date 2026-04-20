@@ -475,6 +475,8 @@ export const getSingleScraper = data =>
 
 /** 获取资源仓库配置 */
 export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
+/** 获取资源仓库的分支和标签列表 */
+export const getRepoRefs = () => api.get('/api/ui/scrapers/repo-refs')
 /** 保存资源仓库配置 */
 export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
 /** 获取资源包版本信息 */

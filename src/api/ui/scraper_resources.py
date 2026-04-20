@@ -279,6 +279,82 @@ async def get_resource_repo(
     return {"repoUrl": repo_url}
 
 
+@router.get("/scrapers/repo-refs", summary="获取资源仓库的分支和标签列表")
+async def get_repo_refs(
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """从 GitHub/Gitee API 获取仓库的分支列表和最近的标签"""
+    repo_url = await config_manager.get("scraper_resource_repo", "")
+    if not repo_url:
+        return {"branches": [], "tags": []}
+
+    # 解析仓库 URL
+    gitee_info = parse_gitee_url(repo_url)
+    repo_info = None
+    if not gitee_info:
+        try:
+            repo_info = parse_github_url(repo_url)
+        except ValueError:
+            pass
+
+    if not repo_info and not gitee_info:
+        return {"branches": [], "tags": []}
+
+    # 构建请求头
+    headers = {}
+    if repo_info:
+        github_token = await config_manager.get("github_token", "")
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+
+    # 获取代理
+    proxy_url = await config_manager.get("proxyUrl", "")
+    proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+    proxy = proxy_url if proxy_enabled and proxy_url else None
+
+    branches = []
+    tags = []
+    timeout = httpx.Timeout(10.0, read=10.0)
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+            if repo_info:
+                owner, repo = repo_info['owner'], repo_info['repo']
+                # 获取分支
+                try:
+                    resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=10")
+                    if resp.status_code == 200:
+                        branches = [b["name"] for b in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 GitHub 分支列表失败: {e}")
+                # 获取最近5个 tag
+                try:
+                    resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=5")
+                    if resp.status_code == 200:
+                        tags = [t["name"] for t in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 GitHub 标签列表失败: {e}")
+            elif gitee_info:
+                owner, repo = gitee_info['owner'], gitee_info['repo']
+                try:
+                    resp = await client.get(f"https://gitee.com/api/v5/repos/{owner}/{repo}/branches?per_page=10")
+                    if resp.status_code == 200:
+                        branches = [b["name"] for b in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 Gitee 分支列表失败: {e}")
+                try:
+                    resp = await client.get(f"https://gitee.com/api/v5/repos/{owner}/{repo}/tags?per_page=5")
+                    if resp.status_code == 200:
+                        tags = [t["name"] for t in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 Gitee 标签列表失败: {e}")
+    except Exception as e:
+        logger.warning(f"获取仓库 refs 失败: {e}")
+
+    return {"branches": branches, "tags": tags}
+
+
 async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[Dict[str, Optional[str]]]:
     """
     带重试机制的版本信息获取函数

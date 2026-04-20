@@ -34,6 +34,7 @@ import {
   setScrapers,
   setSingleScraper,
   getResourceRepo,
+  getRepoRefs,
   saveResourceRepo,
   getScraperVersions,
   loadScraperResources,
@@ -229,6 +230,8 @@ export const Scrapers = () => {
 
   // 分支选择相关
   const [selectedBranch, setSelectedBranch] = useState('main')
+  const [repoRefs, setRepoRefs] = useState({ branches: [], tags: [] })
+  const [refsLoading, setRefsLoading] = useState(false)
 
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
@@ -352,10 +355,25 @@ export const Scrapers = () => {
       const res = await getResourceRepo()
       setResourceRepoUrl(res.data?.repoUrl || '')
 
-      // 同时加载版本信息
-      await loadVersionInfo()
+      // 同时加载版本信息和分支/标签列表
+      await Promise.all([loadVersionInfo(), loadRepoRefs()])
     } catch (error) {
       console.error('加载资源仓库配置失败:', error)
+    }
+  }
+
+  const loadRepoRefs = async () => {
+    try {
+      setRefsLoading(true)
+      const res = await getRepoRefs()
+      setRepoRefs({
+        branches: res.data?.branches || [],
+        tags: res.data?.tags || [],
+      })
+    } catch (error) {
+      console.error('加载仓库分支/标签失败:', error)
+    } finally {
+      setRefsLoading(false)
     }
   }
 
@@ -1648,14 +1666,42 @@ export const Scrapers = () => {
                 value={resourceRepoUrl}
                 onChange={(e) => setResourceRepoUrl(e.target.value)}
               />
-              {/* 分支选择器 */}
+              {/* 分支/版本选择器 */}
               <Select
                 value={selectedBranch}
                 onChange={setSelectedBranch}
-                style={{ width: isMobile ? '100%' : 140 }}
+                loading={refsLoading}
+                style={{ width: isMobile ? '100%' : 180 }}
+                placeholder="选择分支或版本"
+                onDropdownVisibleChange={(open) => {
+                  if (open && repoRefs.branches.length === 0 && repoRefs.tags.length === 0) {
+                    loadRepoRefs()
+                  }
+                }}
               >
-                <Select.Option value="main">main</Select.Option>
-                <Select.Option value="test">test (仅X86)</Select.Option>
+                {repoRefs.branches.length > 0 || repoRefs.tags.length > 0 ? (
+                  <>
+                    {repoRefs.branches.length > 0 && (
+                      <Select.OptGroup label="分支">
+                        {repoRefs.branches.map(b => (
+                          <Select.Option key={`branch-${b}`} value={b}>{b}</Select.Option>
+                        ))}
+                      </Select.OptGroup>
+                    )}
+                    {repoRefs.tags.length > 0 && (
+                      <Select.OptGroup label="版本标签">
+                        {repoRefs.tags.map(t => (
+                          <Select.Option key={`tag-${t}`} value={t}>{t}</Select.Option>
+                        ))}
+                      </Select.OptGroup>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Select.Option value="main">main</Select.Option>
+                    <Select.Option value="test">test</Select.Option>
+                  </>
+                )}
               </Select>
               {isMobile ? (
                 <>
