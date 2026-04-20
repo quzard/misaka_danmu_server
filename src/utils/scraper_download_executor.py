@@ -450,7 +450,21 @@ class ScraperDownloadExecutor:
 
         # 下载成功，更新 versions.json
         self._log("正在更新版本信息...")
-        await self._update_versions_json(asset_info, scrapers_dir, platform_key)
+        full_replace_min_ver = await self._update_versions_json(asset_info, scrapers_dir, platform_key)
+
+        # 全量替换后检查：解压出的弹幕源包是否要求更高的服务器版本
+        if full_replace_min_ver:
+            from src._version import APP_VERSION
+            from src.services.scraper_manager import _version_satisfies
+            if not _version_satisfies(APP_VERSION, full_replace_min_ver):
+                msg = (
+                    f"远程弹幕源包要求服务器版本 >= {full_replace_min_ver}，"
+                    f"当前版本 {APP_VERSION}，正在还原备份..."
+                )
+                self._log(f"⚠️ {msg}", "warning")
+                await restore_scrapers(self.current_user, self.scraper_manager)
+                self._log("已还原备份，请先升级服务器版本")
+                raise ValueError(msg)
 
         # 清除版本缓存，让前端能获取到最新版本号
         self._clear_version_cache()
@@ -576,6 +590,19 @@ class ScraperDownloadExecutor:
 
         if not package_data:
             raise ValueError("获取资源包信息失败")
+
+        # 前置检查：远程弹幕源包是否要求更高的服务器版本
+        remote_min_server = package_data.get('min_server_version')
+        if remote_min_server:
+            from src._version import APP_VERSION
+            from src.services.scraper_manager import _version_satisfies
+            if not _version_satisfies(APP_VERSION, remote_min_server):
+                msg = (
+                    f"远程弹幕源包要求服务器版本 >= {remote_min_server}，"
+                    f"当前版本 {APP_VERSION}，请先升级服务器"
+                )
+                self._log(f"⚠️ {msg}", "warning")
+                raise ValueError(msg)
 
         # 获取资源列表
         resources = package_data.get('resources', {})
@@ -1362,8 +1389,8 @@ class ScraperDownloadExecutor:
         except Exception as e:
             logger.warning(f"清除版本缓存失败: {e}")
 
-    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str):
-        """全量替换后更新 versions.json"""
+    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str) -> Optional[str]:
+        """全量替换后更新 versions.json，返回 min_server_version（如有）"""
         try:
             platform_info = get_platform_info()
             release_version = asset_info['version'].lstrip('v')
@@ -1447,9 +1474,12 @@ class ScraperDownloadExecutor:
             except Exception as pkg_err:
                 logger.warning(f"更新 package.json 失败: {pkg_err}")
 
+            return min_server_version
+
         except Exception as e:
             logger.error(f"更新版本信息失败: {e}", exc_info=True)
             self._log(f"更新版本信息失败: {e}", "warning")
+            return None
 
 
 async def start_download_task(

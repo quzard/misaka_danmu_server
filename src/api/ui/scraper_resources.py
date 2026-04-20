@@ -923,6 +923,25 @@ async def load_resources_stream(
                             except Exception as e:
                                 logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
 
+                            # 全量替换后检查：解压出的弹幕源包是否要求更高的服务器版本
+                            if min_server_version:
+                                from src._version import APP_VERSION
+                                from src.services.scraper_manager import _version_satisfies
+                                if not _version_satisfies(APP_VERSION, min_server_version):
+                                    msg = f"远程弹幕源包要求服务器版本 >= {min_server_version}，当前版本 {APP_VERSION}，正在还原备份..."
+                                    logger.warning(msg)
+                                    yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
+                                    # 还原备份
+                                    try:
+                                        from src.api.ui.scraper_resources import restore_scrapers
+                                        await restore_scrapers(current_user, manager)
+                                        yield f"data: {json.dumps({'type': 'info', 'message': '已还原备份，请先升级服务器版本'}, ensure_ascii=False)}\n\n"
+                                    except Exception as restore_err:
+                                        logger.error(f"还原备份失败: {restore_err}")
+                                        yield f"data: {json.dumps({'type': 'error', 'message': f'还原备份失败: {restore_err}'}, ensure_ascii=False)}\n\n"
+                                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                    return
+
                             versions_data = {
                                 "platform": platform_info['platform'],
                                 "type": platform_info['arch'],
@@ -1038,6 +1057,18 @@ async def load_resources_stream(
                         yield f"data: {json.dumps({'type': 'error', 'message': '获取资源包信息失败'}, ensure_ascii=False)}\n\n"
                         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
+
+                    # 前置检查：远程弹幕源包是否要求更高的服务器版本
+                    pkg_min_server_ver = package_data.get('min_server_version')
+                    if pkg_min_server_ver:
+                        from src._version import APP_VERSION
+                        from src.services.scraper_manager import _version_satisfies
+                        if not _version_satisfies(APP_VERSION, pkg_min_server_ver):
+                            msg = f"远程弹幕源包要求服务器版本 >= {pkg_min_server_ver}，当前版本 {APP_VERSION}，请先升级服务器"
+                            logger.warning(msg)
+                            yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                            return
 
                     # 获取资源列表 (支持 resources 字段)
                     resources = package_data.get('resources', {})
