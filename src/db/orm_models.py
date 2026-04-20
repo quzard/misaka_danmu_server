@@ -102,6 +102,7 @@ class Episode(Base):
     danmakuFilePath: Mapped[Optional[str]] = mapped_column("danmaku_file_path", String(1024))
     fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", NaiveDateTime)
     commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
+    mediaServerEpisodeId: Mapped[Optional[str]] = mapped_column("media_server_episode_id", String(500))
 
     source: Mapped["AnimeSource"] = relationship(back_populates="episodes")
 
@@ -164,6 +165,9 @@ class AnimeMetadata(Base):
     tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(500))
     doubanId: Mapped[Optional[str]] = mapped_column("douban_id", String(500))
     bangumiId: Mapped[Optional[str]] = mapped_column("bangumi_id", String(500))
+    mediaServerType: Mapped[Optional[str]] = mapped_column("media_server_type", String(50))
+    mediaServerSeriesId: Mapped[Optional[str]] = mapped_column("media_server_series_id", String(500))
+    mediaServerSeasonId: Mapped[Optional[str]] = mapped_column("media_server_season_id", String(500))
 
     anime: Mapped["Anime"] = relationship(back_populates="metadataRecord")
 

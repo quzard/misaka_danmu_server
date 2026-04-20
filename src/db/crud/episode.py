@@ -403,6 +403,15 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
     return False
 
 
+
+async def update_episode_media_server_id(session: AsyncSession, episode_id: int, media_server_episode_id: str):
+    """更新分集的媒体服务 Episode ID（用于 webhook 删除联动）。"""
+    episode = await session.get(Episode, episode_id)
+    if episode:
+        episode.mediaServerEpisodeId = media_server_episode_id
+        await session.flush()
+
+
 async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:
     """更新单个分集的信息。如果集数被修改，将重命名弹幕文件并更新路径。"""
     # 使用 joinedload 高效地获取关联的 source 和 anime 信息 # type: ignore

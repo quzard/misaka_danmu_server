@@ -261,7 +261,7 @@ async def get_webhook_settings(
     (
         enabled_str, delayed_enabled_str, delay_hours_str, custom_domain_str,
         filter_mode, filter_regex, log_raw_request_str, fallback_enabled_str,
-        tmdb_season_mapping_str
+        tmdb_season_mapping_str, delete_sync_str
     ) = await asyncio.gather(
         config.get("webhookEnabled", "true"),
         config.get("webhookDelayedImportEnabled", "false"),
@@ -271,7 +271,8 @@ async def get_webhook_settings(
         config.get("webhookFilterRegex", ""),
         config.get("webhookLogRawRequest", "false"),
         config.get("webhookFallbackEnabled", "false"),
-        config.get("webhookEnableTmdbSeasonMapping", "false")
+        config.get("webhookEnableTmdbSeasonMapping", "false"),
+        config.get("webhookDeleteSyncEnabled", "false")
     )
     return WebhookSettings(
         webhookEnabled=enabled_str.lower() == 'true',
@@ -282,7 +283,8 @@ async def get_webhook_settings(
         webhookFilterRegex=filter_regex,
         webhookLogRawRequest=log_raw_request_str.lower() == 'true',
         webhookFallbackEnabled=fallback_enabled_str.lower() == 'true',
-        webhookEnableTmdbSeasonMapping=tmdb_season_mapping_str.lower() == 'true'
+        webhookEnableTmdbSeasonMapping=tmdb_season_mapping_str.lower() == 'true',
+        webhookDeleteSyncEnabled=delete_sync_str.lower() == 'true'
     )
 
 
@@ -303,7 +305,8 @@ async def update_webhook_settings(
         config.setValue("webhookFilterRegex", payload.webhookFilterRegex),
         config.setValue("webhookLogRawRequest", str(payload.webhookLogRawRequest).lower()),
         config.setValue("webhookFallbackEnabled", str(payload.webhookFallbackEnabled).lower()),
-        config.setValue("webhookEnableTmdbSeasonMapping", str(payload.webhookEnableTmdbSeasonMapping).lower())
+        config.setValue("webhookEnableTmdbSeasonMapping", str(payload.webhookEnableTmdbSeasonMapping).lower()),
+        config.setValue("webhookDeleteSyncEnabled", str(payload.webhookDeleteSyncEnabled).lower())
     )
     return
 

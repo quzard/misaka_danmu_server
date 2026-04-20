@@ -117,6 +117,11 @@ async def generic_import_task(
     # 新增: 追更任务标识,用于失败计数
     is_incremental_refresh: bool = False,
     incremental_refresh_source_id: Optional[int] = None,
+    # 新增: 媒体服务三级 ID（用于 webhook 删除联动）
+    mediaServerType: Optional[str] = None,
+    mediaServerSeriesId: Optional[str] = None,
+    mediaServerSeasonId: Optional[str] = None,
+    mediaServerEpisodeId: Optional[str] = None,
 ):
     """
     后台任务：执行从指定数据源导入弹幕的完整流程。
@@ -273,7 +278,10 @@ async def generic_import_task(
                     imdb_id=imdbId,
                     tvdb_id=tvdbId,
                     douban_id=doubanId,
-                    bangumi_id=bangumiId
+                    bangumi_id=bangumiId,
+                    media_server_type=mediaServerType,
+                    media_server_series_id=mediaServerSeriesId,
+                    media_server_season_id=mediaServerSeasonId,
                 )
 
                 # 链接数据源（如果还没有链接）
@@ -281,6 +289,10 @@ async def generic_import_task(
 
                 episode_title = f"第 {currentEpisodeIndex} 集"
                 episode_db_id = await crud.create_episode_if_not_exists(session, anime_id, source_id, currentEpisodeIndex, episode_title, None, "failover")
+
+                # 写入媒体服务 Episode ID（webhook 删除联动用）
+                if mediaServerEpisodeId:
+                    await crud.update_episode_media_server_id(session, episode_db_id, mediaServerEpisodeId)
 
                 added_count = await crud.save_danmaku_for_episode(session, episode_db_id, comments, config_manager)
                 await session.commit()
@@ -524,7 +536,10 @@ async def generic_import_task(
                 imdb_id=imdbId,
                 tvdb_id=tvdbId,
                 douban_id=doubanId,
-                bangumi_id=bangumiId
+                bangumi_id=bangumiId,
+                media_server_type=mediaServerType,
+                media_server_series_id=mediaServerSeriesId,
+                media_server_season_id=mediaServerSeasonId,
             )
 
             # 链接数据源（如果还没有链接）
@@ -632,6 +647,24 @@ async def generic_import_task(
 
     # 生成最终消息
     final_message_parts = []
+
+    # 写入媒体服务 Episode ID（webhook 删除联动用）
+    # 仅对 webhook 单集导入有效：找到 currentEpisodeIndex 对应的 Episode 记录并写入 ItemId
+    if mediaServerEpisodeId and currentEpisodeIndex is not None and source_id:
+        try:
+            from sqlalchemy import select as sa_select
+            ep_stmt = sa_select(orm_models.Episode).where(
+                orm_models.Episode.sourceId == source_id,
+                orm_models.Episode.episodeIndex == currentEpisodeIndex
+            ).limit(1)
+            ep_result = await session.execute(ep_stmt)
+            target_episode = ep_result.scalar_one_or_none()
+            if target_episode:
+                target_episode.mediaServerEpisodeId = mediaServerEpisodeId
+                await session.flush()
+                logger.info(f"已写入媒体服务 Episode ID: episode_id={target_episode.id}, mediaServerEpisodeId={mediaServerEpisodeId}")
+        except Exception as e:
+            logger.warning(f"写入媒体服务 Episode ID 失败: {e}")
 
     if successful_episodes_indices:
         episode_range_str = _generate_episode_range_string(successful_episodes_indices)

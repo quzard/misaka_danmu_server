@@ -239,6 +239,7 @@ class WebhookSettings(BaseModel):
     webhookLogRawRequest: bool
     webhookFallbackEnabled: bool
     webhookEnableTmdbSeasonMapping: bool
+    webhookDeleteSyncEnabled: bool = False
 
 
 class WebhookTaskItem(BaseModel):

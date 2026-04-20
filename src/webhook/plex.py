@@ -130,7 +130,11 @@ class PlexWebhook(BaseWebhook):
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
                     "tvdbId": provider_ids.get("tvdb"),
-                    "bangumiId": provider_ids.get("bangumi")
+                    "bangumiId": provider_ids.get("bangumi"),
+                    "mediaServerType": "plex",
+                    "mediaServerSeriesId": str(metadata.get("grandparentRatingKey", "")) if metadata.get("grandparentRatingKey") else None,
+                    "mediaServerSeasonId": str(metadata.get("parentRatingKey", "")) if metadata.get("parentRatingKey") else None,
+                    "mediaServerEpisodeId": str(metadata.get("ratingKey", "")) if metadata.get("ratingKey") else None,
                 },
                 webhook_source=webhook_source
             )
@@ -164,7 +168,11 @@ class PlexWebhook(BaseWebhook):
                     "tmdbId": provider_ids.get("tmdb"),
                     "imdbId": provider_ids.get("imdb"),
                     "tvdbId": provider_ids.get("tvdb"),
-                    "bangumiId": provider_ids.get("bangumi")
+                    "bangumiId": provider_ids.get("bangumi"),
+                    "mediaServerType": "plex",
+                    "mediaServerSeriesId": None,
+                    "mediaServerSeasonId": None,
+                    "mediaServerEpisodeId": str(metadata.get("ratingKey", "")) if metadata.get("ratingKey") else None,
                 },
                 webhook_source=webhook_source
             )
@@ -203,6 +211,11 @@ class PlexWebhook(BaseWebhook):
             self.logger.warning("Tautulli Webhook: 缺少标题信息（show_name 和 title 字段都为空）")
             return
 
+        # 提取 Plex 三级 ratingKey（用于删除联动，需用户在 Tautulli JSON Data 模板中配置）
+        tautulli_rating_key = str(payload.get("rating_key", "")) if payload.get("rating_key") else None
+        tautulli_parent_key = str(payload.get("parent_rating_key", "")) if payload.get("parent_rating_key") else None
+        tautulli_grandparent_key = str(payload.get("grandparent_rating_key", "")) if payload.get("grandparent_rating_key") else None
+
         if media_type in ["episode", "season"]:
             # 处理剧集（单集或多集）
             season_raw = payload.get("season", 1)
@@ -240,7 +253,11 @@ class PlexWebhook(BaseWebhook):
                                 "tmdbId": None,
                                 "imdbId": None,
                                 "tvdbId": None,
-                                "bangumiId": None
+                                "bangumiId": None,
+                                "mediaServerType": "plex",
+                                "mediaServerSeriesId": tautulli_grandparent_key,
+                                "mediaServerSeasonId": tautulli_parent_key,
+                                "mediaServerEpisodeId": tautulli_rating_key,
                             },
                             webhook_source=webhook_source
                         )
@@ -268,7 +285,11 @@ class PlexWebhook(BaseWebhook):
                             "tmdbId": None,
                             "imdbId": None,
                             "tvdbId": None,
-                            "bangumiId": None
+                            "bangumiId": None,
+                            "mediaServerType": "plex",
+                            "mediaServerSeriesId": tautulli_grandparent_key,
+                            "mediaServerSeasonId": tautulli_parent_key,
+                            "mediaServerEpisodeId": tautulli_rating_key,
                         },
                         webhook_source=webhook_source
                     )
@@ -304,7 +325,11 @@ class PlexWebhook(BaseWebhook):
                         "tmdbId": None,
                         "imdbId": None,
                         "tvdbId": None,
-                        "bangumiId": None
+                        "bangumiId": None,
+                        "mediaServerType": "plex",
+                        "mediaServerSeriesId": None,
+                        "mediaServerSeasonId": None,
+                        "mediaServerEpisodeId": tautulli_rating_key,
                     },
                     webhook_source=webhook_source
                 )

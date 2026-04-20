@@ -99,6 +99,7 @@ export const Webhook = () => {
         webhookLogRawRequest: values.webhookLogRawRequest ?? false,
         webhookFallbackEnabled: values.webhookFallbackEnabled ?? false,
         webhookEnableTmdbSeasonMapping: values.webhookEnableTmdbSeasonMapping ?? false,
+        webhookDeleteSyncEnabled: values.webhookDeleteSyncEnabled ?? false,
       }
       await setWebhookSettings(payload)
       messageApi.success('保存成功')
@@ -252,6 +253,24 @@ export const Webhook = () => {
               </Form.Item>
               <span className="text-gray-400 text-sm">
                 启用后，当首选源无法提供有效分集时，会自动尝试其他候选源
+              </span>
+            </div>
+          </Form.Item>
+
+          <Form.Item
+            label="删除联动"
+            className="mb-3"
+          >
+            <div className="flex items-center gap-2">
+              <Form.Item
+                name="webhookDeleteSyncEnabled"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch disabled={!webhookEnabled} />
+              </Form.Item>
+              <span className="text-gray-400 text-sm">
+                启用后，当 Emby/Jellyfin 删除媒体时，自动联动删除弹幕库中通过 Webhook 入库的对应记录
               </span>
             </div>
           </Form.Item>

@@ -287,7 +287,10 @@ async def update_metadata_if_empty(
     tvdb_id: Optional[str] = None,
     douban_id: Optional[str] = None,
     bangumi_id: Optional[str] = None,
-    tmdb_episode_group_id: Optional[str] = None
+    tmdb_episode_group_id: Optional[str] = None,
+    media_server_type: Optional[str] = None,
+    media_server_series_id: Optional[str] = None,
+    media_server_season_id: Optional[str] = None,
 ):
     """
     如果 anime_metadata 记录中的字段为空，则使用提供的值进行更新。
@@ -309,6 +312,9 @@ async def update_metadata_if_empty(
     if douban_id and not metadata_record.doubanId: metadata_record.doubanId = douban_id
     if bangumi_id and not metadata_record.bangumiId: metadata_record.bangumiId = bangumi_id
     if tmdb_episode_group_id and not metadata_record.tmdbEpisodeGroupId: metadata_record.tmdbEpisodeGroupId = tmdb_episode_group_id
+    if media_server_type: metadata_record.mediaServerType = media_server_type
+    if media_server_series_id: metadata_record.mediaServerSeriesId = media_server_series_id
+    if media_server_season_id: metadata_record.mediaServerSeasonId = media_server_season_id
 
     await session.flush()
 
