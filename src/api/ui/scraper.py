@@ -64,10 +64,10 @@ async def get_scraper_settings(
 
         full_setting_data['verificationEnabled'] = verification_enabled
 
-        # 从 config 表读取该源的日志记录开关
-        name_cap = provider_name[0].upper() + provider_name[1:]
-        log_resp_str = await config_manager.get(f"scraper{name_cap}LogResponses", "false")
-        full_setting_data['logRawResponses'] = log_resp_str.lower() == "true"
+        # 从 config 表读取该源的日志记录开关（DB key 为下划线格式）
+        log_resp_key = f"scraper_{provider_name}_log_responses"
+        log_resp_str = await config_manager.get(log_resp_key, "false")
+        full_setting_data['logRawResponses'] = str(log_resp_str).lower() == "true"
 
         try:
             s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
