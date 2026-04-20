@@ -20,7 +20,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- Stage 2: Python Dependency Builder ---
-FROM l429609201/su-exec:su-exec AS python-builder
+FROM l429609201/su-exec:3.12 AS python-builder
 
 # 安装编译Python包所需的构建时依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -47,7 +47,7 @@ RUN pip install --no-cache-dir --no-compile -r requirements.txt --target . \
     && find . -type f -name '*.pyi' -delete
 
 # --- Stage 3: Final Python Application ---
-FROM l429609201/su-exec:su-exec
+FROM l429609201/su-exec:3.12
 
 # 设置环境变量，防止生成 .pyc 文件并启用无缓冲输出
 # 设置时区为亚洲/上海，以确保日志等时间正确显示
@@ -96,8 +96,8 @@ RUN set -ex \
     && rm -rf /var/lib/apt/lists/*
 
 # 从 python-builder 阶段将安装好的包复制到系统 site-packages 目录
-# 注意：路径中的 python3.11 需要与基础镜像的Python版本匹配
-COPY --from=python-builder /install /usr/local/lib/python3.11/site-packages
+# 注意：路径中的 python3.12 需要与基础镜像的Python版本匹配
+COPY --from=python-builder /install /usr/local/lib/python3.12/site-packages
 
 # 复制应用代码
 COPY src/ ./src/
