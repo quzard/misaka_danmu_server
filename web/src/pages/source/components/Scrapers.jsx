@@ -153,7 +153,7 @@ const SortableItem = ({
             </div>
             {item.useProxy && (
               <Tooltip title="已启用代理">
-                <span className="text-blue-500"><MyIcon icon="daili" size={18} /></span>
+                <span className="text-blue-500"><MyIcon icon="wangluo" size={18} /></span>
               </Tooltip>
             )}
             {item.logRawResponses && (
