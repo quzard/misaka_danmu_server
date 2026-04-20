@@ -194,7 +194,11 @@ class TelegramChannel(BaseNotificationChannel):
             telebot.apihelper.proxy = None
             telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
 
-        self._bot = telebot.TeleBot(bot_token, threaded=False, connect_timeout=10, read_timeout=15)
+        # 设置 HTTP 超时，防止代理不可达时 send_message 无限阻塞
+        telebot.apihelper.CONNECT_TIMEOUT = 10
+        telebot.apihelper.READ_TIMEOUT = 15
+
+        self._bot = telebot.TeleBot(bot_token, threaded=False)
         self._register_handlers()
 
         mode = self.config.get("mode", "polling")
@@ -636,7 +640,9 @@ class TelegramChannel(BaseNotificationChannel):
             else:
                 telebot.apihelper.proxy = None
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
-            bot = telebot.TeleBot(bot_token, threaded=False, connect_timeout=10, read_timeout=15)
+            telebot.apihelper.CONNECT_TIMEOUT = 10
+            telebot.apihelper.READ_TIMEOUT = 15
+            bot = telebot.TeleBot(bot_token, threaded=False)
             info = await asyncio.to_thread(bot.get_me)
             # 发送测试消息到配置的 chat_id
             chat_id = self.config.get("chat_id", "")
