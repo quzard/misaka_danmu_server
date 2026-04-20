@@ -637,7 +637,7 @@ class TelegramChannel(BaseNotificationChannel):
             elif self.proxy_url:
                 telebot.apihelper.proxy = {"https": self.proxy_url}
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
-            else:
+            else: 
                 telebot.apihelper.proxy = None
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
             telebot.apihelper.CONNECT_TIMEOUT = 10
