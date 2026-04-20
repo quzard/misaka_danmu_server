@@ -151,6 +151,16 @@ const SortableItem = ({
             <div onClick={handleConfig} className="cursor-pointer">
               <MyIcon icon="setting" size={24} />
             </div>
+            {item.useProxy && (
+              <Tooltip title="已启用代理">
+                <Tag color="blue" className="!text-xs !px-1 !py-0 !m-0">代理</Tag>
+              </Tooltip>
+            )}
+            {item.logRawResponses && (
+              <Tooltip title="已启用记录原始响应">
+                <Tag color="orange" className="!text-xs !px-1 !py-0 !m-0">日志</Tag>
+              </Tooltip>
+            )}
             {item.version && (
               <Tag color="blue">{item.version}</Tag>
             )}
