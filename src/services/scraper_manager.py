@@ -292,10 +292,10 @@ class ScraperManager:
         async with self._session_factory() as session:
             # 1. 仅当发现基于文件的搜索源时，才清理过时的条目。
             #    这是一个安全措施，防止在发现过程失败时意外清空数据库。
-            #    import 失败的源也保留（不能因为依赖问题就删掉数据库记录）。
+            #    加载失败的源从数据库中移除（避免前端显示不可用的源）。
             #    我们总是将 'custom' 添加到要保留的列表中。
             if discovered_providers:
-                providers_to_keep = discovered_providers + failed_providers + ['custom']
+                providers_to_keep = discovered_providers + ['custom']
                 await crud.remove_stale_scrapers(session, providers_to_keep)
             
             # 2. 确保所有发现的搜索源和 'custom' 源都存在于数据库中。

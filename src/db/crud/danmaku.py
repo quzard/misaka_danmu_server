@@ -248,7 +248,7 @@ def _generate_xml_from_comments(
 def _get_fs_path_from_web_path(web_path: Optional[str]) -> Optional[Path]:
     """
     将Web路径转换为文件系统路径。
-    支持: Docker路径(/app/...)、Linux绝对路径(/)、Windows绝对路径(D:\...)、旧格式相对路径。
+    支持: Docker路径(/app/...)、Linux绝对路径(/)、Windows绝对路径(D:\\...)、旧格式相对路径。
     """
     if not web_path:
         return None
