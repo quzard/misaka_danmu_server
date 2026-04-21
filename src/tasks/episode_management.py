@@ -73,6 +73,8 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
 
             old_episodes_to_delete = []
             new_episodes_to_add = []
+            # 两阶段重命名：收集所有需要重命名的文件，避免顺序覆盖
+            file_renames = []  # [(old_path, new_path), ...]
 
             for i, old_ep in enumerate(episodes_to_migrate):
                 new_index = i + 1
@@ -86,9 +88,8 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
                 if old_ep.danmakuFilePath:
                     old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
                     new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
-                    if old_full_path.is_file() and old_full_path != new_full_path:
-                        new_full_path.parent.mkdir(parents=True, exist_ok=True)
-                        old_full_path.rename(new_full_path)
+                    if old_full_path and old_full_path.is_file() and old_full_path != new_full_path:
+                        file_renames.append((old_full_path, new_full_path))
 
                 new_episodes_to_add.append(orm_models.Episode(id=new_id, sourceId=old_ep.sourceId, episodeIndex=new_index, title=old_ep.title, sourceUrl=old_ep.sourceUrl, providerEpisodeId=old_ep.providerEpisodeId, fetchedAt=old_ep.fetchedAt, commentCount=old_ep.commentCount, danmakuFilePath=new_danmaku_web_path))
                 old_episodes_to_delete.append(old_ep)
@@ -97,6 +98,20 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
                 raise TaskSuccess("所有分集顺序和ID都正确，无需重整。")
 
             await progress_callback(30, f"准备迁移 {len(old_episodes_to_delete)} 个分集...")
+
+            # 两阶段文件重命名：先全部移到临时名，再移到最终名（防止顺序覆盖）
+            if file_renames:
+                # 阶段1: old → tmp
+                for old_path, _ in file_renames:
+                    tmp_path = old_path.with_suffix('.xml.tmp')
+                    if old_path.is_file():
+                        old_path.rename(tmp_path)
+                # 阶段2: tmp → new
+                for old_path, new_path in file_renames:
+                    tmp_path = old_path.with_suffix('.xml.tmp')
+                    if tmp_path.is_file():
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        tmp_path.rename(new_path)
 
             for old_ep in old_episodes_to_delete:
                 await session.delete(old_ep)
@@ -213,10 +228,12 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
         try:
             old_episodes_to_delete = []
             new_episodes_to_add = []
+            # 两阶段重命名：收集所有需要重命名的文件，避免顺序覆盖
+            file_renames = []  # [(old_path, new_path), ...]
 
             total_to_migrate = len(selected_episodes)
             for i, old_ep in enumerate(selected_episodes):
-                await progress_callback(20 + int((i / total_to_migrate) * 70), f"正在处理分集 {i+1}/{total_to_migrate}...")
+                await progress_callback(20 + int((i / total_to_migrate) * 50), f"正在处理分集 {i+1}/{total_to_migrate}...")
 
                 new_index = old_ep.episodeIndex + offset
                 new_id = int(f"25{anime_id:06d}{source_order:02d}{new_index:04d}")
@@ -227,8 +244,7 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
                     old_full_path = _get_fs_path_from_web_path(old_ep.danmakuFilePath)
                     new_full_path = _get_fs_path_from_web_path(new_danmaku_web_path)
                     if old_full_path and old_full_path.is_file() and old_full_path != new_full_path:
-                        new_full_path.parent.mkdir(parents=True, exist_ok=True)
-                        old_full_path.rename(new_full_path)
+                        file_renames.append((old_full_path, new_full_path))
 
                 new_episodes_to_add.append(orm_models.Episode(
                     id=new_id,
@@ -242,6 +258,21 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
                     danmakuFilePath=new_danmaku_web_path
                 ))
                 old_episodes_to_delete.append(old_ep)
+
+            # 两阶段文件重命名：先全部移到临时名，再移到最终名（防止顺序覆盖）
+            if file_renames:
+                await progress_callback(75, f"正在重命名 {len(file_renames)} 个弹幕文件...")
+                # 阶段1: old → tmp
+                for old_path, _ in file_renames:
+                    tmp_path = old_path.with_suffix('.xml.tmp')
+                    if old_path.is_file():
+                        old_path.rename(tmp_path)
+                # 阶段2: tmp → new
+                for old_path, new_path in file_renames:
+                    tmp_path = old_path.with_suffix('.xml.tmp')
+                    if tmp_path.is_file():
+                        new_path.parent.mkdir(parents=True, exist_ok=True)
+                        tmp_path.rename(new_path)
 
             # Perform DB operations
             for old_ep in old_episodes_to_delete:

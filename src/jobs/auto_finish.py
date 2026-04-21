@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import datetime
 from typing import Callable, List, Dict, Any
 
@@ -48,37 +49,39 @@ class AutoFinishJob(BaseJob):
         if not tmdb_source:
             raise TaskSuccess("TMDB 元数据源未启用，无法检测完结状态。")
 
-        try:
-            client = await tmdb_source._create_client()
-        except ValueError as e:
-            raise TaskSuccess(f"TMDB 客户端创建失败: {e}")
-
         canceled_count = 0
         skipped_count = 0
         error_count = 0
         today = datetime.now().date()
 
+        # 使用 async with 管理 TMDB client，确保异常时也能释放连接
         try:
-            for i, source_id in enumerate(source_ids):
-                try:
-                    async with self._session_factory() as task_session:
-                        result = await self._check_and_finish_source(
-                            task_session, client, source_id, delay_days, today
-                        )
-                        if result == "canceled":
-                            canceled_count += 1
-                        elif result == "error":
-                            error_count += 1
-                        else:
-                            skipped_count += 1
-                except Exception as e:
-                    self.logger.error(f"处理源 ID {source_id} 时发生错误: {e}", exc_info=True)
-                    error_count += 1
+            client = await tmdb_source._create_client()
+        except ValueError as e:
+            raise TaskSuccess(f"TMDB 客户端创建失败: {e}")
 
-                progress = 5 + int(((i + 1) / total) * 90)
-                await progress_callback(progress, f"已检查 {i + 1}/{total} 个源")
-        finally:
-            await client.aclose()
+        try:
+            async with client:
+                for i, source_id in enumerate(source_ids):
+                    try:
+                        async with self._session_factory() as task_session:
+                            result = await self._check_and_finish_source(
+                                task_session, client, source_id, delay_days, today
+                            )
+                            if result == "canceled":
+                                canceled_count += 1
+                            elif result == "error":
+                                error_count += 1
+                            else:
+                                skipped_count += 1
+                    except Exception as e:
+                        self.logger.error(f"处理源 ID {source_id} 时发生错误: {e}", exc_info=True)
+                        error_count += 1
+
+                    progress = 5 + int(((i + 1) / total) * 90)
+                    await progress_callback(progress, f"已检查 {i + 1}/{total} 个源")
+        except Exception as e:
+            self.logger.error(f"追更自动完结任务执行异常: {e}", exc_info=True)
 
         summary = f"追更自动完结完成：共 {total} 个源，自动取消 {canceled_count} 个，跳过 {skipped_count} 个"
         if error_count:
@@ -107,12 +110,15 @@ class AutoFinishJob(BaseJob):
         title = anime.title if anime else f"源ID:{source_id}"
 
         try:
-            response = await client.get(f"/tv/{tmdb_id}")
+            response = await asyncio.wait_for(client.get(f"/tv/{tmdb_id}"), timeout=30)
             if response.status_code == 404:
                 self.logger.warning(f"'{title}' TMDB ID {tmdb_id} 不存在(404)，跳过")
                 return "skip"
             response.raise_for_status()
             data = response.json()
+        except asyncio.TimeoutError:
+            self.logger.warning(f"'{title}' 查询 TMDB 状态超时(30s)，跳过")
+            return "error"
         except Exception as e:
             self.logger.warning(f"'{title}' 查询 TMDB 状态失败: {e}")
             return "error"

@@ -667,8 +667,8 @@ class TaskManager:
             async with self._lock:
                 self._immediate_tasks[task_id] = task
 
-            # 定时任务超时保护：默认30分钟，防止 immediate 任务永远卡住
-            immediate_timeout = 1800  # 30分钟
+            # 定时任务超时保护：管理队列任务 15 分钟，下载队列任务 30 分钟
+            immediate_timeout = 900 if queue_type == "management" else 1800
 
             async def _run_and_cleanup():
                 try:
@@ -678,6 +678,9 @@ class TaskManager:
                     )
                 except asyncio.TimeoutError:
                     self.logger.error(f"立即执行任务 '{title}' (ID: {task_id}) 超时（{immediate_timeout}秒），强制终止")
+                    # 确保内部 running_coro_task 被取消
+                    if task.running_coro_task and not task.running_coro_task.done():
+                        task.running_coro_task.cancel()
                     await self._safe_finalize_task(
                         task_id, TaskStatus.FAILED, f"任务执行超时（{immediate_timeout // 60}分钟），已强制终止"
                     )

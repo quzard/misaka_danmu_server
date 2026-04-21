@@ -177,8 +177,13 @@ class DatabaseMaintenanceJob(BaseJob):
         await progress_callback(70, "正在执行数据库表优化...")
         
         try:
-            optimization_message = await _optimize_database(session, db_type)
+            optimization_message = await asyncio.wait_for(
+                _optimize_database(session, db_type), timeout=300  # 5 分钟超时
+            )
             self.logger.info(f"数据库优化结果: {optimization_message}")
+        except asyncio.TimeoutError:
+            optimization_message = "数据库优化超时(5分钟)，已跳过"
+            self.logger.warning(optimization_message)
         except Exception as e:
             optimization_message = f"数据库优化失败: {e}"
             self.logger.error(optimization_message, exc_info=True)
@@ -193,8 +198,14 @@ class DatabaseMaintenanceJob(BaseJob):
         max_retries = 2
         for attempt in range(max_retries + 1):
             try:
-                image_cleanup_message = await _clean_orphaned_images(session)
+                image_cleanup_message = await asyncio.wait_for(
+                    _clean_orphaned_images(session), timeout=180  # 3 分钟超时
+                )
                 self.logger.info(f"图片缓存清理结果: {image_cleanup_message}")
+                break
+            except asyncio.TimeoutError:
+                image_cleanup_message = "图片缓存清理超时(3分钟)，已跳过"
+                self.logger.warning(image_cleanup_message)
                 break
             except OperationalError as e:
                 if attempt < max_retries:
