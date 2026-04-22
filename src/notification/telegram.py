@@ -585,8 +585,11 @@ class TelegramChannel(BaseNotificationChannel):
                                 self.logger.warning(f"edit_message_caption 失败: {cap_err}")
                     else:
                         self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
-                        # edit 失败时降级为发新消息
-                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                        # edit 失败时降级为发新消息；若为 Markdown 解析失败则去掉 parse_mode
+                        is_parse_err = "can't parse entities" in err_str
+                        fallback_mode = None if is_parse_err else "Markdown"
+                        fallback_text = f"{title}\n{text}" if (is_parse_err and title) else caption
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, parse_mode=fallback_mode, reply_markup=markup)
                         if msg_id_out is not None and sent:
                             msg_id_out.append(sent.message_id)
             elif image:

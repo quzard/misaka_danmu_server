@@ -43,20 +43,21 @@ class MessagesMixin:
             return (event_type, data.get("text", ""))
 
         label, is_success = label_info
+        _esc = self._escape_markdown
         message     = data.get("message", "")
-        anime_title = data.get("anime_title", "")
+        anime_title = _esc(data.get("anime_title", ""))
         season      = data.get("season")
         episode     = data.get("episode")
-        source      = data.get("source", "")
-        webhook_src = data.get("webhook_source", "")
+        source      = _esc(data.get("source", ""))
+        webhook_src = _esc(data.get("webhook_source", ""))
         task_id     = data.get("task_id", "")
-        task_title  = data.get("task_title", "")
+        task_title  = _esc(data.get("task_title", ""))
         tmdb_id     = data.get("tmdb_id", "")
-        media_type  = data.get("media_type", "")
+        media_type  = _esc(data.get("media_type", ""))
         finished_at = data.get("finished_at", "")
         icon        = "✅" if is_success else "❌"
         status_str  = "处理完成" if is_success else "处理失败"
-        msg_short   = (message[:300] + "…") if len(message) > 300 else message
+        msg_short   = _esc((message[:300] + "…") if len(message) > 300 else message)
 
         # ── 系统启动 ──────────────────────────────────────
         if event_type == "system_start":
@@ -78,7 +79,7 @@ class MessagesMixin:
 
         # ── 后备弹幕下载（旧，保留兼容） ────────────────────────
         if event_type in ("download_fallback_success", "download_fallback_failed"):
-            token_name = data.get("token_name", "")
+            token_name = _esc(data.get("token_name", ""))
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
@@ -94,7 +95,7 @@ class MessagesMixin:
 
         # ── 后备搜索 ─────────────────────────────────────────
         if event_type in ("fallback_search_success", "fallback_search_failed"):
-            token_name = data.get("token_name", "")
+            token_name = _esc(data.get("token_name", ""))
             lines = [
                 "📺 *媒体信息*",
                 f"• 任务: {task_title}" if task_title else "",
@@ -125,8 +126,8 @@ class MessagesMixin:
         if event_type in ("match_fallback_success", "match_fallback_failed"):
             # 从 task_parameters 读取匹配详情
             task_params = data.get("task_parameters", {})
-            provider = task_params.get("provider", "")
-            final_title = task_params.get("final_title", "")
+            provider = _esc(task_params.get("provider", ""))
+            final_title = _esc(task_params.get("final_title", ""))
             final_season = task_params.get("final_season")
             episode_number = task_params.get("episode_number")
             is_movie = task_params.get("is_movie", False)

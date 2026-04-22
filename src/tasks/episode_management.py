@@ -141,6 +141,9 @@ async def reorder_episodes_task(sourceId: int, session: AsyncSession, progress_c
                     await session.commit()
                 except Exception as e:
                     logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
+    except TaskSuccess:
+        # TaskSuccess 不是错误，直接向上传递给 TaskManager 处理
+        raise
     except Exception as e:
         logger.error(f"重整分集任务 (源ID: {sourceId}) 失败: {e}", exc_info=True)
         raise
@@ -304,6 +307,9 @@ async def offset_episodes_task(episode_ids: List[int], offset: int, session: Asy
                 except Exception as e:
                     logger.warning(f"无法恢复PostgreSQL会话角色: {e}")
 
+    except TaskSuccess:
+        # TaskSuccess 不是错误，直接向上传递给 TaskManager 处理
+        raise
     except ValueError as e:
         # Catch validation errors and report them as task failures
         logger.error(f"集数偏移任务验证失败: {e}")
