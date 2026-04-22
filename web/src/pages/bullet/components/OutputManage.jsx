@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, ColorPicker, InputNumber, Select, Segmented, Tag, Switch, Input, Tooltip } from 'antd'
-import { QuestionCircleOutlined } from '@ant-design/icons'
+import { Button, Card, ColorPicker, InputNumber, Select, Segmented, Tag, Switch, Input, Tooltip, Modal, Space } from 'antd'
+import { QuestionCircleOutlined, RobotOutlined } from '@ant-design/icons'
 import {
   getDanmuOutputTotal,
   setDanmuOutputTotal,
@@ -22,6 +22,7 @@ import {
   setDanmakuBlacklistEnabled,
   getDanmakuBlacklistPatterns,
   setDanmakuBlacklistPatterns,
+  generateRegex,
 } from '../../../apis'
 import { useMessage } from '../../../MessageContext'
 
@@ -86,6 +87,10 @@ export const OutputManage = () => {
   const [blacklistEnabled, setBlacklistEnabled] = useState(false)
   const [blacklistPatterns, setBlacklistPatterns] = useState('')
   const [blacklistSaveLoading, setBlacklistSaveLoading] = useState(false)
+  const [aiRegexModalOpen, setAiRegexModalOpen] = useState(false)
+  const [aiRegexDesc, setAiRegexDesc] = useState('')
+  const [aiRegexLoading, setAiRegexLoading] = useState(false)
+  const [aiRegexResult, setAiRegexResult] = useState('')
   const [chConvert, setChConvert] = useState('0')
   const [chConvertPriority, setChConvertPriority] = useState('player')
   const [likesStyle, setLikesStyle] = useState('heart_white')
@@ -176,6 +181,40 @@ export const OutputManage = () => {
     } finally {
       setBlacklistSaveLoading(false)
     }
+  }
+
+  const handleAiGenerate = async () => {
+    if (!aiRegexDesc.trim()) {
+      messageApi.warning('请输入描述')
+      return
+    }
+    setAiRegexLoading(true)
+    setAiRegexResult('')
+    try {
+      const res = await generateRegex(aiRegexDesc.trim(), blacklistPatterns)
+      if (res.data?.regex) {
+        setAiRegexResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的正则表达式')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 正则生成失败')
+    } finally {
+      setAiRegexLoading(false)
+    }
+  }
+
+  const handleApplyAiRegex = () => {
+    if (!aiRegexResult) return
+    if (blacklistPatterns.trim()) {
+      setBlacklistPatterns(prev => prev.trim() + '|' + aiRegexResult)
+    } else {
+      setBlacklistPatterns(aiRegexResult)
+    }
+    setAiRegexModalOpen(false)
+    setAiRegexDesc('')
+    setAiRegexResult('')
+    messageApi.success('已追加到黑名单规则')
   }
 
   const addColorToPalette = (color) => {
@@ -395,8 +434,19 @@ export const OutputManage = () => {
             />
           </div>
 
-          <div className="mb-2 text-sm text-gray-700">
-            黑名单规则（正则表达式）
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm text-gray-700">黑名单规则（正则表达式）</span>
+            <Tooltip title="使用 AI 根据自然语言描述生成正则表达式">
+              <Button
+                type="link"
+                size="small"
+                icon={<RobotOutlined />}
+                disabled={!blacklistEnabled}
+                onClick={() => setAiRegexModalOpen(true)}
+              >
+                AI 生成
+              </Button>
+            </Tooltip>
           </div>
           <TextArea
             value={blacklistPatterns}
@@ -426,6 +476,55 @@ export const OutputManage = () => {
           </Button>
         </div>
       </Card>
+
+      <Modal
+        title={<><RobotOutlined /> AI 正则生成助手</>}
+        open={aiRegexModalOpen}
+        onCancel={() => { setAiRegexModalOpen(false); setAiRegexResult('') }}
+        footer={null}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你想过滤的内容，AI 会帮你生成对应的正则表达式。
+            </div>
+            <TextArea
+              value={aiRegexDesc}
+              onChange={e => setAiRegexDesc(e.target.value)}
+              placeholder="例如：过滤掉包含 抽奖、红包、转发抽奖 的弹幕"
+              rows={3}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiRegexLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiRegexResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">生成结果：</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all">
+                {aiRegexResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiRegexResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiRegex}>
+                    追加到规则
+                  </Button>
+                </Space>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

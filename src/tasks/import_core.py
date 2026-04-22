@@ -652,8 +652,7 @@ async def generic_import_task(
     # 仅对 webhook 单集导入有效：找到 currentEpisodeIndex 对应的 Episode 记录并写入 ItemId
     if mediaServerEpisodeId and currentEpisodeIndex is not None and source_id:
         try:
-            from sqlalchemy import select as sa_select
-            ep_stmt = sa_select(orm_models.Episode).where(
+            ep_stmt = select(orm_models.Episode).where(
                 orm_models.Episode.sourceId == source_id,
                 orm_models.Episode.episodeIndex == currentEpisodeIndex
             ).limit(1)

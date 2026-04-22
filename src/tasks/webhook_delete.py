@@ -9,6 +9,8 @@ from sqlalchemy import select, delete as sa_delete
 
 from src.db import orm_models, crud, ConfigManager
 from src.db.orm_models import AnimeMetadata, Episode, AnimeSource, Anime
+from src.db.crud.danmaku import _get_fs_path_from_web_path
+from src.tasks.delete import _cleanup_empty_parent_directories, _determine_cleanup_stop_dir
 
 logger = logging.getLogger(__name__)
 
@@ -112,9 +114,6 @@ async def _delete_by_series_id(session: AsyncSession, server_type: str, series_i
 
 async def _delete_anime_and_episodes(session: AsyncSession, anime_id: int, title: str):
     """删除一个 Anime 下的所有 Episode（含弹幕文件）、AnimeSource、以及 Anime 本身。"""
-    from src.db.crud.episode import delete_episode
-    from src.tasks.delete import _cleanup_empty_parent_directories, _determine_cleanup_stop_dir
-    from src.db.crud.danmaku import _get_fs_path_from_web_path
 
     # 1. 获取所有 Episode 并删除弹幕文件
     sources_stmt = select(AnimeSource).where(AnimeSource.animeId == anime_id)

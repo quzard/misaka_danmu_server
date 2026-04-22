@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Row,
   Select,
   Space,
@@ -20,11 +21,13 @@ import {
   refreshWebhookApikey,
   getWebhookSettings,
   setWebhookSettings,
+  generateRegex,
 } from '../../../apis'
 import {
   CopyOutlined,
   ReloadOutlined,
   InfoCircleOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 import copy from 'copy-to-clipboard'
 import { useMessage } from '../../../MessageContext'
@@ -34,6 +37,10 @@ export const Webhook = () => {
   const [isSaving, setSaving] = useState(false)
   const [apiKey, setApiKey] = useState('')
   const [services, setServices] = useState([])
+  const [aiRegexModalOpen, setAiRegexModalOpen] = useState(false)
+  const [aiRegexDesc, setAiRegexDesc] = useState('')
+  const [aiRegexLoading, setAiRegexLoading] = useState(false)
+  const [aiRegexResult, setAiRegexResult] = useState('')
   const messageApi = useMessage()
   const [form] = Form.useForm()
 
@@ -113,6 +120,42 @@ export const Webhook = () => {
   useEffect(() => {
     getInfo()
   }, []) // eslint-disable-line
+
+  const handleAiGenerate = async () => {
+    if (!aiRegexDesc.trim()) {
+      messageApi.warning('请输入描述')
+      return
+    }
+    setAiRegexLoading(true)
+    setAiRegexResult('')
+    try {
+      const existing = form.getFieldValue('webhookFilterRegex') || ''
+      const res = await generateRegex(aiRegexDesc.trim(), existing)
+      if (res.data?.regex) {
+        setAiRegexResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的正则表达式')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 正则生成失败')
+    } finally {
+      setAiRegexLoading(false)
+    }
+  }
+
+  const handleApplyAiRegex = () => {
+    if (!aiRegexResult) return
+    const existing = form.getFieldValue('webhookFilterRegex') || ''
+    if (existing.trim()) {
+      form.setFieldValue('webhookFilterRegex', existing.trim() + '|' + aiRegexResult)
+    } else {
+      form.setFieldValue('webhookFilterRegex', aiRegexResult)
+    }
+    setAiRegexModalOpen(false)
+    setAiRegexDesc('')
+    setAiRegexResult('')
+    messageApi.success('已追加到过滤规则')
+  }
 
   return (
     <div className="my-6">
@@ -218,6 +261,14 @@ export const Webhook = () => {
                     />
                   </Form.Item>
                 }
+                addonAfter={
+                  <Tooltip title="AI 生成正则">
+                    <RobotOutlined
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setAiRegexModalOpen(true)}
+                    />
+                  </Tooltip>
+                }
                 placeholder="留空则不过滤"
               />
             </Form.Item>
@@ -304,6 +355,55 @@ export const Webhook = () => {
           </Form.Item>
         </Form>
       </Card>
+
+      <Modal
+        title={<><RobotOutlined /> AI 正则生成助手</>}
+        open={aiRegexModalOpen}
+        onCancel={() => { setAiRegexModalOpen(false); setAiRegexResult('') }}
+        footer={null}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你想过滤的内容，AI 会帮你生成对应的正则表达式。
+            </div>
+            <Input.TextArea
+              value={aiRegexDesc}
+              onChange={e => setAiRegexDesc(e.target.value)}
+              placeholder="例如：过滤掉包含 纪录片、花絮、特典 的标题"
+              rows={3}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiRegexLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiRegexResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">生成结果：</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all">
+                {aiRegexResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiRegexResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiRegex}>
+                    追加到规则
+                  </Button>
+                </Space>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

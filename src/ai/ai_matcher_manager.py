@@ -250,3 +250,27 @@ class AIMatcherManager:
         except Exception as e:
             self.logger.error(f"剧集组选择失败: {e}", exc_info=True)
             return None
+
+
+    async def generate_regex(self, description: str, existing_regex: str = "") -> Optional[str]:
+        """
+        使用 AI 根据自然语言描述生成正则表达式（增量追加模式）。
+
+        Args:
+            description: 用户的自然语言描述，如"过滤掉包含抽奖、红包的弹幕"
+            existing_regex: 当前已有的正则表达式，AI 会避免重复
+
+        Returns:
+            生成的正则表达式片段（不含已有部分），或 None 表示失败
+        """
+        try:
+            matcher = await self.get_matcher()
+            if not matcher:
+                self.logger.warning("AI 正则生成: AI 匹配器未启用或初始化失败")
+                return None
+
+            result = await matcher.generate_regex(description, existing_regex)
+            return result
+        except Exception as e:
+            self.logger.error(f"AI 正则生成失败: {e}", exc_info=True)
+            return None
