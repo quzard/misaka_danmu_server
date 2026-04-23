@@ -594,11 +594,29 @@ class TelegramChannel(BaseNotificationChannel):
                             msg_id_out.append(sent.message_id)
             elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                try:
+                    sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                except Exception as photo_err:
+                    photo_err_str = str(photo_err).lower()
+                    if "can't parse entities" in photo_err_str:
+                        self.logger.warning(f"send_photo Markdown 解析失败，降级为纯文本: {photo_err}")
+                        fallback_caption = f"{title}\n{text}" if title else text
+                        sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=fallback_caption, reply_markup=markup)
+                    else:
+                        raise
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
-                sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                try:
+                    sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                except Exception as send_err:
+                    send_err_str = str(send_err).lower()
+                    if "can't parse entities" in send_err_str:
+                        self.logger.warning(f"send_message Markdown 解析失败，降级为纯文本: {send_err}")
+                        fallback_text = f"{title}\n{text}" if title else text
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, reply_markup=markup)
+                    else:
+                        raise
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:

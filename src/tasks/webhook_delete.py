@@ -38,6 +38,8 @@ async def handle_webhook_delete(
         season_number: 季号（用于 Season 删除时精确匹配）
         title: 标题（用于日志）
     """
+    server_type = (server_type or "").strip().lower()
+
     # 检查删除联动开关
     enabled = (await config_manager.get("webhookDeleteSyncEnabled", "false")).lower() == "true"
     if not enabled:
@@ -59,20 +61,44 @@ async def handle_webhook_delete(
 
 async def _delete_by_episode_id(session: AsyncSession, server_type: str, episode_id: str, title: str):
     """根据 Episode 级别 ID 删除单集。"""
-    stmt = select(Episode).where(Episode.mediaServerEpisodeId == episode_id).limit(1)
+    stmt = (
+        select(Episode)
+        .join(AnimeSource, Episode.sourceId == AnimeSource.id)
+        .join(Anime, AnimeSource.animeId == Anime.id)
+        .join(AnimeMetadata, AnimeMetadata.animeId == Anime.id)
+        .where(
+            Episode.mediaServerEpisodeId == episode_id,
+            AnimeMetadata.mediaServerType == server_type,
+        )
+        .limit(1)
+    )
     result = await session.execute(stmt)
     episode = result.scalar_one_or_none()
 
     if not episode:
-        logger.info(f"Webhook 删除联动: 未找到 mediaServerEpisodeId={episode_id} 对应的分集，跳过")
+        logger.info(f"Webhook 删除联动: 未找到 server_type={server_type}, mediaServerEpisodeId={episode_id} 对应的分集，跳过")
         return
 
     logger.info(f"Webhook 删除联动: 找到匹配分集 id={episode.id}, episodeIndex={episode.episodeIndex}, 正在删除...")
-    deleted = await crud.delete_episode(session, episode.id)
-    if deleted:
-        logger.info(f"✓ Webhook 删除联动: 已删除分集 id={episode.id} ('{title}' 第{episode.episodeIndex}集)")
-    else:
-        logger.warning(f"Webhook 删除联动: 删除分集 id={episode.id} 失败")
+    fs_path = _get_fs_path_from_web_path(episode.danmakuFilePath) if episode.danmakuFilePath else None
+
+    try:
+        await session.delete(episode)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.error(f"Webhook 删除联动: 删除分集 id={episode.id} ('{title}') 时失败", exc_info=True)
+        raise
+
+    if fs_path:
+        try:
+            if fs_path.is_file():
+                fs_path.unlink(missing_ok=True)
+                _cleanup_empty_parent_directories(fs_path, _determine_cleanup_stop_dir(fs_path))
+        except Exception as e:
+            logger.warning(f"Webhook 删除联动: 清理分集弹幕文件失败 {fs_path}: {e}")
+
+    logger.info(f"✓ Webhook 删除联动: 已删除分集 id={episode.id} ('{title}' 第{episode.episodeIndex}集)")
 
 
 async def _delete_by_season_id(session: AsyncSession, server_type: str, season_id: str, season_number: Optional[int], title: str):
@@ -83,6 +109,9 @@ async def _delete_by_season_id(session: AsyncSession, server_type: str, season_i
     )
     result = await session.execute(stmt)
     metadata_records = result.scalars().all()
+
+    if season_number is not None:
+        logger.info(f"Webhook 删除联动: season_id={season_id} 同时带有 season_number={season_number}，当前以 season_id 为主进行精确匹配")
 
     if not metadata_records:
         logger.info(f"Webhook 删除联动: 未找到 mediaServerSeasonId={season_id} 对应的作品，跳过")
@@ -114,30 +143,45 @@ async def _delete_by_series_id(session: AsyncSession, server_type: str, series_i
 
 async def _delete_anime_and_episodes(session: AsyncSession, anime_id: int, title: str):
     """删除一个 Anime 下的所有 Episode（含弹幕文件）、AnimeSource、以及 Anime 本身。"""
-
-    # 1. 获取所有 Episode 并删除弹幕文件
-    sources_stmt = select(AnimeSource).where(AnimeSource.animeId == anime_id)
-    sources_result = await session.execute(sources_stmt)
-    sources = sources_result.scalars().all()
-
+    file_paths_to_cleanup = []
     deleted_ep_count = 0
-    for source in sources:
-        ep_stmt = select(Episode).where(Episode.sourceId == source.id)
-        ep_result = await session.execute(ep_stmt)
-        episodes = ep_result.scalars().all()
-        for ep in episodes:
-            if ep.danmakuFilePath:
-                fs_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
-                if fs_path and fs_path.is_file():
-                    fs_path.unlink(missing_ok=True)
-                    _cleanup_empty_parent_directories(fs_path, _determine_cleanup_stop_dir(fs_path))
-            await session.delete(ep)
-            deleted_ep_count += 1
 
-    # 2. 删除 Anime（级联删除 AnimeSource、AnimeMetadata、AnimeAlias）
-    anime = await session.get(Anime, anime_id)
-    if anime:
-        await session.delete(anime)
+    try:
+        # 1. 收集所有 Episode 及其文件路径
+        sources_stmt = select(AnimeSource).where(AnimeSource.animeId == anime_id)
+        sources_result = await session.execute(sources_stmt)
+        sources = sources_result.scalars().all()
 
-    await session.commit()
+        for source in sources:
+            ep_stmt = select(Episode).where(Episode.sourceId == source.id)
+            ep_result = await session.execute(ep_stmt)
+            episodes = ep_result.scalars().all()
+            for ep in episodes:
+                if ep.danmakuFilePath:
+                    fs_path = _get_fs_path_from_web_path(ep.danmakuFilePath)
+                    if fs_path:
+                        file_paths_to_cleanup.append(fs_path)
+                await session.delete(ep)
+                deleted_ep_count += 1
+
+        # 2. 删除 Anime（级联删除 AnimeSource、AnimeMetadata、AnimeAlias）
+        anime = await session.get(Anime, anime_id)
+        if anime:
+            await session.delete(anime)
+
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.error(f"Webhook 删除联动: 删除作品 animeId={anime_id} ('{title}') 时失败", exc_info=True)
+        raise
+
+    # 3. 数据库删除成功后，再尽力清理物理文件，避免半删半留
+    for fs_path in file_paths_to_cleanup:
+        try:
+            if fs_path.is_file():
+                fs_path.unlink(missing_ok=True)
+                _cleanup_empty_parent_directories(fs_path, _determine_cleanup_stop_dir(fs_path))
+        except Exception as e:
+            logger.warning(f"Webhook 删除联动: 清理弹幕文件失败 {fs_path}: {e}")
+
     logger.info(f"✓ Webhook 删除联动: 已删除作品 animeId={anime_id} ('{title}'), 共删除 {deleted_ep_count} 个分集")

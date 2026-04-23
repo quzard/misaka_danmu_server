@@ -34,6 +34,9 @@ class MediaItem:
         imdb_id: Optional[str] = None,
         poster_url: Optional[str] = None,
         library_id: Optional[str] = None,
+        series_id: Optional[str] = None,
+        season_id: Optional[str] = None,
+        episode_id: Optional[str] = None,
     ):
         self.media_id = media_id
         self.title = title
@@ -46,6 +49,9 @@ class MediaItem:
         self.imdb_id = imdb_id
         self.poster_url = poster_url
         self.library_id = library_id
+        self.series_id = series_id
+        self.season_id = season_id
+        self.episode_id = episode_id
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -60,6 +66,9 @@ class MediaItem:
             'imdbId': self.imdb_id,
             'posterUrl': self.poster_url,
             'libraryId': self.library_id,
+            'seriesId': self.series_id,
+            'seasonId': self.season_id,
+            'episodeId': self.episode_id,
         }
 
 
