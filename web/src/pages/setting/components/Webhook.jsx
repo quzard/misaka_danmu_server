@@ -145,16 +145,11 @@ export const Webhook = () => {
 
   const handleApplyAiRegex = () => {
     if (!aiRegexResult) return
-    const existing = form.getFieldValue('webhookFilterRegex') || ''
-    if (existing.trim()) {
-      form.setFieldValue('webhookFilterRegex', existing.trim() + '|' + aiRegexResult)
-    } else {
-      form.setFieldValue('webhookFilterRegex', aiRegexResult)
-    }
+    form.setFieldValue('webhookFilterRegex', aiRegexResult)
     setAiRegexModalOpen(false)
     setAiRegexDesc('')
     setAiRegexResult('')
-    messageApi.success('已追加到过滤规则')
+    messageApi.success('已应用 AI 生成的规则')
   }
 
   return (
@@ -396,7 +391,7 @@ export const Webhook = () => {
                 <Space>
                   <Button onClick={() => setAiRegexResult('')}>清除</Button>
                   <Button type="primary" onClick={handleApplyAiRegex}>
-                    追加到规则
+                    应用规则
                   </Button>
                 </Space>
               </div>

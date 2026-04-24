@@ -1419,16 +1419,11 @@ export const Scrapers = () => {
   const handleApplyAiRegex = () => {
     if (!aiRegexResult) return
     const fieldKey = `${setname}EpisodeBlacklistRegex`
-    const existing = form.getFieldValue(fieldKey) || ''
-    if (existing.trim()) {
-      form.setFieldValue(fieldKey, existing.trim() + '|' + aiRegexResult)
-    } else {
-      form.setFieldValue(fieldKey, aiRegexResult)
-    }
+    form.setFieldValue(fieldKey, aiRegexResult)
     setAiRegexModalOpen(false)
     setAiRegexDesc('')
     setAiRegexResult('')
-    messageApi.success('已追加到黑名单规则')
+    messageApi.success('已应用 AI 生成的规则')
   }
 
   const handleBiliLogout = () => {
@@ -2850,7 +2845,7 @@ export const Scrapers = () => {
                 <Space>
                   <Button onClick={() => setAiRegexResult('')}>清除</Button>
                   <Button type="primary" onClick={handleApplyAiRegex}>
-                    追加到规则
+                    应用规则
                   </Button>
                 </Space>
               </div>

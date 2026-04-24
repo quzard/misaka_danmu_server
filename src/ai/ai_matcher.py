@@ -1563,25 +1563,36 @@ class AIMatcher:
 
 
     async def generate_regex(self, description: str, existing_regex: str = "") -> Optional[str]:
-        """使用 AI 根据自然语言描述生成正则表达式片段。"""
-        if not self.client and not self.gemini_model:
+        """使用 AI 根据自然语言描述生成或合并正则表达式。"""
+        if not self.client:
             return None
 
-        system_prompt = (
-            "你是一个正则表达式生成助手。用户会用自然语言描述想要过滤/匹配的内容，"
-            "你需要生成对应的正则表达式。\n\n"
-            "规则：\n"
-            "1. 只输出正则表达式本身，不要任何解释、代码块标记或前后缀\n"
-            "2. 多个规则之间用 | 分隔（OR 关系）\n"
-            "3. 不区分大小写（调用方会加 re.IGNORECASE）\n"
-            "4. 保持简洁，不要过度复杂化\n"
-            "5. 如果用户提供了已有规则，不要重复这些规则，只生成新增部分\n"
-        )
-
-        user_parts = [f"请根据以下描述生成正则表达式：\n{description}"]
-        if existing_regex:
-            user_parts.append(f"\n当前已有的规则（不要重复这些）：\n{existing_regex[:500]}")
-        user_prompt = "\n".join(user_parts)
+        if existing_regex.strip():
+            # 有现有规则：让 AI 理解格式并合并
+            system_prompt = (
+                "你是一个正则表达式编辑助手。用户会提供当前已有的正则表达式和新的过滤需求，"
+                "你需要将新规则融合到现有正则中，输出完整的合并后正则表达式。\n\n"
+                "规则：\n"
+                "1. 只输出合并后的完整正则表达式，不要任何解释、代码块标记或前后缀\n"
+                "2. 严格保持现有正则的格式风格和结构不变（如 ^...$|^...$ 的行锚定风格、多行格式等）\n"
+                "3. 新增的规则必须与现有格式完全一致，融合到正确的位置\n"
+                "4. 不要删除或修改任何现有规则，只添加新内容\n"
+                "5. 不区分大小写（调用方会加 re.IGNORECASE）\n"
+                "6. 不要重复已有的规则\n"
+            )
+            user_prompt = f"当前正则表达式：\n{existing_regex}\n\n请将以下需求融合进去：\n{description}"
+        else:
+            # 没有现有规则：直接生成
+            system_prompt = (
+                "你是一个正则表达式生成助手。用户会用自然语言描述想要过滤/匹配的内容，"
+                "你需要生成对应的正则表达式。\n\n"
+                "规则：\n"
+                "1. 只输出正则表达式本身，不要任何解释、代码块标记或前后缀\n"
+                "2. 多个规则之间用 | 分隔（OR 关系）\n"
+                "3. 不区分大小写（调用方会加 re.IGNORECASE）\n"
+                "4. 保持简洁，不要过度复杂化\n"
+            )
+            user_prompt = f"请根据以下描述生成正则表达式：\n{description}"
 
         try:
             if self.provider == "gemini":
@@ -1600,7 +1611,7 @@ class AIMatcher:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.0,
-                    **_get_max_tokens_param(self.model, 500)
+                    **_get_max_tokens_param(self.model, 4096)
                 )
                 content = _extract_openai_content(response)
 

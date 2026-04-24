@@ -206,15 +206,11 @@ export const OutputManage = () => {
 
   const handleApplyAiRegex = () => {
     if (!aiRegexResult) return
-    if (blacklistPatterns.trim()) {
-      setBlacklistPatterns(prev => prev.trim() + '|' + aiRegexResult)
-    } else {
-      setBlacklistPatterns(aiRegexResult)
-    }
+    setBlacklistPatterns(aiRegexResult)
     setAiRegexModalOpen(false)
     setAiRegexDesc('')
     setAiRegexResult('')
-    messageApi.success('已追加到黑名单规则')
+    messageApi.success('已应用 AI 生成的规则')
   }
 
   const addColorToPalette = (color) => {
@@ -509,15 +505,15 @@ export const OutputManage = () => {
           </div>
           {aiRegexResult && (
             <div>
-              <div className="text-sm text-gray-600 mb-1">生成结果：</div>
-              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all">
+              <div className="text-sm text-gray-600 mb-1">{blacklistPatterns.trim() ? '合并后的完整规则：' : '生成结果：'}</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all" style={{ maxHeight: 200, overflow: 'auto' }}>
                 {aiRegexResult}
               </div>
               <div className="flex justify-end mt-3">
                 <Space>
                   <Button onClick={() => setAiRegexResult('')}>清除</Button>
                   <Button type="primary" onClick={handleApplyAiRegex}>
-                    追加到规则
+                    应用规则
                   </Button>
                 </Space>
               </div>
