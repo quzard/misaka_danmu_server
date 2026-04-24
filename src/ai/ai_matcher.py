@@ -1584,10 +1584,11 @@ class AIMatcher:
         user_prompt = "\n".join(user_parts)
 
         try:
-            if self.gemini_model:
+            if self.provider == "gemini":
                 response = await asyncio.to_thread(
-                    self.gemini_model.generate_content,
-                    f"{system_prompt}\n\n{user_prompt}"
+                    self.client.models.generate_content,
+                    model=self.model,
+                    contents=f"{system_prompt}\n\n{user_prompt}"
                 )
                 content = response.text.strip() if response.text else None
             else:
