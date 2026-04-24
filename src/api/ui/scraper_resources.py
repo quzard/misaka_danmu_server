@@ -23,6 +23,7 @@ from src.security import get_current_user
 from src.services import get_download_task_manager
 from src.services.download_task_manager import TaskStatus
 from src.api.dependencies import get_scraper_manager, get_config_manager
+from src._version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,6 +75,20 @@ BACKUP_METADATA_FILE = BACKUP_DIR / "backup_metadata.json"
 # 弹幕源版本信息文件
 SCRAPERS_VERSIONS_FILE = _get_scrapers_dir() / "versions.json"
 SCRAPERS_PACKAGE_FILE = _get_scrapers_dir() / "package.json"
+
+
+def _get_local_min_server_version() -> Optional[str]:
+    """从本地 versions.json 或 package.json 读取 min_server_version"""
+    for f in (SCRAPERS_VERSIONS_FILE, SCRAPERS_PACKAGE_FILE):
+        if f.exists():
+            try:
+                data = json.loads(f.read_text())
+                v = data.get("min_server_version")
+                if v:
+                    return v
+            except Exception:
+                pass
+    return None
 
 
 def get_platform_info() -> Dict[str, str]:
@@ -277,6 +292,87 @@ async def get_resource_repo(
     """获取当前配置的资源仓库链接"""
     repo_url = await config_manager.get("scraper_resource_repo", "")
     return {"repoUrl": repo_url}
+
+
+@router.get("/scrapers/repo-refs", summary="获取资源仓库的分支和标签列表")
+async def get_repo_refs(
+    current_user: models.User = Depends(get_current_user),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """从 GitHub/Gitee API 获取仓库的分支列表和最近的标签"""
+    repo_url = await config_manager.get("scraper_resource_repo", "")
+    if not repo_url:
+        return {"branches": [], "tags": [], "appVersion": APP_VERSION, "minServerVersion": _get_local_min_server_version()}
+
+    # 解析仓库 URL
+    gitee_info = parse_gitee_url(repo_url)
+    repo_info = None
+    if not gitee_info:
+        try:
+            repo_info = parse_github_url(repo_url)
+        except ValueError:
+            pass
+
+    if not repo_info and not gitee_info:
+        return {"branches": [], "tags": [], "appVersion": APP_VERSION, "minServerVersion": _get_local_min_server_version()}
+
+    # 构建请求头
+    headers = {}
+    if repo_info:
+        github_token = await config_manager.get("github_token", "")
+        if github_token:
+            headers["Authorization"] = f"Bearer {github_token}"
+
+    # 获取代理
+    proxy_url = await config_manager.get("proxyUrl", "")
+    proxy_enabled = (await config_manager.get("proxyEnabled", "false")).lower() == "true"
+    proxy = proxy_url if proxy_enabled and proxy_url else None
+
+    branches = []
+    tags = []
+    timeout = httpx.Timeout(10.0, read=10.0)
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout, headers=headers, follow_redirects=True, proxy=proxy) as client:
+            if repo_info:
+                owner, repo = repo_info['owner'], repo_info['repo']
+                # 获取分支
+                try:
+                    resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/branches?per_page=10")
+                    if resp.status_code == 200:
+                        branches = [b["name"] for b in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 GitHub 分支列表失败: {e}")
+                # 获取最近5个 tag
+                try:
+                    resp = await client.get(f"https://api.github.com/repos/{owner}/{repo}/tags?per_page=5")
+                    if resp.status_code == 200:
+                        tags = [t["name"] for t in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 GitHub 标签列表失败: {e}")
+            elif gitee_info:
+                owner, repo = gitee_info['owner'], gitee_info['repo']
+                try:
+                    resp = await client.get(f"https://gitee.com/api/v5/repos/{owner}/{repo}/branches?per_page=10")
+                    if resp.status_code == 200:
+                        branches = [b["name"] for b in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 Gitee 分支列表失败: {e}")
+                try:
+                    resp = await client.get(f"https://gitee.com/api/v5/repos/{owner}/{repo}/tags?per_page=5")
+                    if resp.status_code == 200:
+                        tags = [t["name"] for t in resp.json()]
+                except Exception as e:
+                    logger.warning(f"获取 Gitee 标签列表失败: {e}")
+    except Exception as e:
+        logger.warning(f"获取仓库 refs 失败: {e}")
+
+    return {
+        "branches": branches,
+        "tags": tags,
+        "appVersion": APP_VERSION,
+        "minServerVersion": _get_local_min_server_version(),
+    }
 
 
 async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[Dict[str, Optional[str]]]:
@@ -923,6 +1019,25 @@ async def load_resources_stream(
                             except Exception as e:
                                 logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
 
+                            # 全量替换后检查：解压出的弹幕源包是否要求更高的服务器版本
+                            if min_server_version:
+                                from src._version import APP_VERSION
+                                from src.services.scraper_manager import _version_satisfies
+                                if not _version_satisfies(APP_VERSION, min_server_version):
+                                    msg = f"远程弹幕源包要求服务器版本 >= {min_server_version}，当前版本 {APP_VERSION}，正在还原备份..."
+                                    logger.warning(msg)
+                                    yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
+                                    # 还原备份
+                                    try:
+                                        from src.api.ui.scraper_resources import restore_scrapers
+                                        await restore_scrapers(current_user, manager)
+                                        yield f"data: {json.dumps({'type': 'info', 'message': '已还原备份，请先升级服务器版本'}, ensure_ascii=False)}\n\n"
+                                    except Exception as restore_err:
+                                        logger.error(f"还原备份失败: {restore_err}")
+                                        yield f"data: {json.dumps({'type': 'error', 'message': f'还原备份失败: {restore_err}'}, ensure_ascii=False)}\n\n"
+                                    yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                                    return
+
                             versions_data = {
                                 "platform": platform_info['platform'],
                                 "type": platform_info['arch'],
@@ -1038,6 +1153,18 @@ async def load_resources_stream(
                         yield f"data: {json.dumps({'type': 'error', 'message': '获取资源包信息失败'}, ensure_ascii=False)}\n\n"
                         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
                         return
+
+                    # 前置检查：远程弹幕源包是否要求更高的服务器版本
+                    pkg_min_server_ver = package_data.get('min_server_version')
+                    if pkg_min_server_ver:
+                        from src._version import APP_VERSION
+                        from src.services.scraper_manager import _version_satisfies
+                        if not _version_satisfies(APP_VERSION, pkg_min_server_ver):
+                            msg = f"远程弹幕源包要求服务器版本 >= {pkg_min_server_ver}，当前版本 {APP_VERSION}，请先升级服务器"
+                            logger.warning(msg)
+                            yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
+                            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+                            return
 
                     # 获取资源列表 (支持 resources 字段)
                     resources = package_data.get('resources', {})
@@ -2037,21 +2164,15 @@ async def _download_and_extract_release(
         if progress_callback:
             await progress_callback("正在解压文件...")
 
-        # 先清理旧的 .so/.pyd 文件
-        deleted_count = 0
-        for file in scrapers_dir.glob("*"):
-            if file.suffix in ['.so', '.pyd']:
-                try:
-                    file.unlink()
-                    deleted_count += 1
-                except Exception as e:
-                    logger.warning(f"删除旧文件 {file.name} 失败: {e}")
+        # 记录旧文件列表（解压完成后清理多余的旧文件）
+        old_files = {
+            file.name for file in scrapers_dir.glob("*")
+            if file.suffix in ['.so', '.pyd']
+        }
 
-        if deleted_count > 0:
-            logger.info(f"已删除 {deleted_count} 个旧的编译文件")
-
-        # 解压新文件
+        # 解压新文件（直接覆盖写入，不先删除旧文件，保证原子性）
         extracted_count = 0
+        new_files = set()
 
         # 判断压缩包类型
         if filename.endswith('.tar.gz') or filename.endswith('.tgz'):
@@ -2085,6 +2206,8 @@ async def _download_and_extract_release(
                             file_content = file_obj.read()
                             await asyncio.to_thread(target_path.write_bytes, file_content)
                             extracted_count += 1
+                            if base_name.endswith(('.so', '.pyd')):
+                                new_files.add(base_name)
                             logger.debug(f"解压: {base_name}")
         else:
             # 处理 zip 格式
@@ -2110,10 +2233,22 @@ async def _download_and_extract_release(
                         # 读取并写入文件
                         file_content = zip_ref.read(zip_info.filename)
                         await asyncio.to_thread(target_path.write_bytes, file_content)
-                        eracted_count += 1
+                        extracted_count += 1
+                        if base_name.endswith(('.so', '.pyd')):
+                            new_files.add(base_name)
                         logger.debug(f"解压: {base_name}")
 
         logger.info(f"解压完成: 共 {extracted_count} 个文件")
+
+        # 解压成功后，清理不再存在于新包中的旧文件
+        stale_files = old_files - new_files
+        if stale_files and extracted_count > 0:
+            for stale_name in stale_files:
+                try:
+                    (scrapers_dir / stale_name).unlink(missing_ok=True)
+                    logger.info(f"清理旧文件: {stale_name}")
+                except Exception as e:
+                    logger.warning(f"清理旧文件 {stale_name} 失败: {e}")
 
         if progress_callback:
             await progress_callback(f"解压完成: {extracted_count} 个文件")

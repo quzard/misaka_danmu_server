@@ -536,6 +536,9 @@ async def create_media_item(
     server_id: int,
     media_id: str,
     library_id: Optional[str],
+    series_id: Optional[str],
+    season_id: Optional[str],
+    episode_id: Optional[str],
     title: str,
     media_type: str,
     season: Optional[int] = None,
@@ -557,6 +560,10 @@ async def create_media_item(
 
     if existing_item:
         # 更新现有项
+        existing_item.libraryId = library_id
+        existing_item.seriesId = series_id
+        existing_item.seasonId = season_id
+        existing_item.episodeId = episode_id
         existing_item.title = title
         existing_item.mediaType = media_type
         existing_item.season = season
@@ -575,6 +582,9 @@ async def create_media_item(
             serverId=server_id,
             mediaId=media_id,
             libraryId=library_id,
+            seriesId=series_id,
+            seasonId=season_id,
+            episodeId=episode_id,
             title=title,
             mediaType=media_type,
             season=season,

@@ -1560,3 +1560,60 @@ class AIMatcher:
         except Exception as e:
             logger.error(f"剧集组选择(AI)失败: {e}", exc_info=True)
             return None
+
+
+    async def generate_regex(self, description: str, existing_regex: str = "") -> Optional[str]:
+        """使用 AI 根据自然语言描述生成正则表达式片段。"""
+        if not self.client and not self.gemini_model:
+            return None
+
+        system_prompt = (
+            "你是一个正则表达式生成助手。用户会用自然语言描述想要过滤/匹配的内容，"
+            "你需要生成对应的正则表达式。\n\n"
+            "规则：\n"
+            "1. 只输出正则表达式本身，不要任何解释、代码块标记或前后缀\n"
+            "2. 多个规则之间用 | 分隔（OR 关系）\n"
+            "3. 不区分大小写（调用方会加 re.IGNORECASE）\n"
+            "4. 保持简洁，不要过度复杂化\n"
+            "5. 如果用户提供了已有规则，不要重复这些规则，只生成新增部分\n"
+        )
+
+        user_parts = [f"请根据以下描述生成正则表达式：\n{description}"]
+        if existing_regex:
+            user_parts.append(f"\n当前已有的规则（不要重复这些）：\n{existing_regex[:500]}")
+        user_prompt = "\n".join(user_parts)
+
+        try:
+            if self.gemini_model:
+                response = await asyncio.to_thread(
+                    self.gemini_model.generate_content,
+                    f"{system_prompt}\n\n{user_prompt}"
+                )
+                content = response.text.strip() if response.text else None
+            else:
+                response = await asyncio.to_thread(
+                    self.client.chat.completions.create,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.0,
+                    **_get_max_tokens_param(self.model, 500)
+                )
+                content = _extract_openai_content(response)
+
+            if not content:
+                return None
+
+            # 清理 AI 返回中可能包含的代码块标记
+            content = content.strip().strip('`').strip()
+            if content.startswith('regex'):
+                content = content[5:].strip()
+
+            logger.info(f"AI 正则生成: '{description}' → {content}")
+            return content
+
+        except Exception as e:
+            logger.error(f"AI 正则生成失败: {e}", exc_info=True)
+            return None

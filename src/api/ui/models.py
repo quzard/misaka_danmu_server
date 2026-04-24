@@ -89,11 +89,33 @@ class TitleRecognitionUpdateResponse(BaseModel):
     warnings: List[str] = Field(default_factory=list, description="解析过程中的警告信息")
 
 
+class TitleRecognitionTestRequest(BaseModel):
+    """识别词测试请求"""
+    title: str = Field(..., description="要测试的标题")
+    season: Optional[int] = Field(1, description="季度")
+    episode: Optional[int] = Field(1, description="集数")
+    source: Optional[str] = Field(None, description="数据源名称")
+    stage: str = Field("all", description="测试阶段: preprocess / postprocess / all")
+
+
+class TitleRecognitionTestResponse(BaseModel):
+    """识别词测试响应"""
+    originalTitle: str
+    processedTitle: str
+    originalSeason: Optional[int] = None
+    processedSeason: Optional[int] = None
+    originalEpisode: Optional[int] = None
+    processedEpisode: Optional[int] = None
+    matched: bool = False
+    matchedRules: List[str] = Field(default_factory=list, description="命中的规则描述")
+
+
 class ApiTokenUpdate(BaseModel):
     """API Token更新请求"""
     name: str = Field(..., min_length=1, max_length=50, description="Token的描述性名称")
     dailyCallLimit: int = Field(..., description="每日调用次数限制, -1 表示无限")
     validityPeriod: str = Field(..., description="新的有效期: 'permanent', 'custom', '30d' 等")
+    customToken: Optional[str] = Field(None, min_length=5, max_length=100, description="自定义Token字符串，留空则保持不变")
 
 
 class CustomDanmakuPathRequest(BaseModel):
@@ -217,6 +239,7 @@ class WebhookSettings(BaseModel):
     webhookLogRawRequest: bool
     webhookFallbackEnabled: bool
     webhookEnableTmdbSeasonMapping: bool
+    webhookDeleteSyncEnabled: bool = False
 
 
 class WebhookTaskItem(BaseModel):

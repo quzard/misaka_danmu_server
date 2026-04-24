@@ -190,7 +190,7 @@ class JellyfinMediaServer(BaseMediaServer):
             episodes = []
             for item in data.get('Items', []):
                 if item.get('Type') == 'Episode':
-                    episodes.append(self._parse_episode(item))
+                    episodes.append(self._parse_episode(item, library_id=library_id, season_id=season_id))
 
             return sorted(episodes, key=lambda x: x.episode or 0)
         except Exception as e:
@@ -229,7 +229,7 @@ class JellyfinMediaServer(BaseMediaServer):
             library_id=library_id,
         )
 
-    def _parse_episode(self, data: Dict[str, Any]) -> MediaItem:
+    def _parse_episode(self, data: Dict[str, Any], library_id: Optional[str] = None, season_id: Optional[str] = None) -> MediaItem:
         """解析集数据"""
         provider_ids = data.get('ProviderIds', {})
 
@@ -244,6 +244,10 @@ class JellyfinMediaServer(BaseMediaServer):
             tvdb_id=provider_ids.get('Tvdb'),
             imdb_id=provider_ids.get('Imdb'),
             poster_url=self._get_image_url(data.get('SeriesId'), 'Primary'),
+            library_id=library_id,
+            series_id=str(data.get('SeriesId')) if data.get('SeriesId') is not None else None,
+            season_id=str(season_id or data.get('SeasonId') or data.get('ParentId')) if (season_id or data.get('SeasonId') or data.get('ParentId')) is not None else None,
+            episode_id=str(data.get('Id')) if data.get('Id') is not None else None,
         )
 
     def _get_image_url(self, item_id: str, image_type: str = 'Primary') -> Optional[str]:

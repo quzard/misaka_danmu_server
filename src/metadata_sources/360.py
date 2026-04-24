@@ -612,6 +612,13 @@ class So360MetadataSource(BaseMetadataSource):
                     if not item:
                         self.logger.warning(f"360: 无法获取条目信息 (metadata_id={metadata_id})")
                         return []
+                    # 查询成功后回写缓存，避免下次再重复查询
+                    try:
+                        item_dict = item.model_dump() if hasattr(item, 'model_dump') else item.__dict__
+                        await self.cache_manager.set("360_search_item_", str(metadata_id), item_dict, ttl_seconds=10800)  # 3小时
+                        self.logger.info(f"360: 已将查询结果回写缓存 (metadata_id={metadata_id})")
+                    except Exception as e:
+                        self.logger.warning(f"360: 回写缓存失败: {e}")
 
             # 2. 转换provider名称到360的site名称
             provider_map = { "tencent": "qq", "iqiyi": "qiyi", "youku": "youku", "bilibili": "bilibili", "mgtv": "imgo" }

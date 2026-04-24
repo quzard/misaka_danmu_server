@@ -18,8 +18,8 @@ class TokenResetTask(BasePollingTask):
     name = "token_reset"
     enabled_key = ""  # 空字符串表示始终启用
     interval_key = ""  # 空字符串表示使用硬编码默认值
-    default_interval = 1440  # 24 小时（分钟）
-    min_interval = 60  # 最小 1 小时
+    default_interval = 60  # 每小时检查一次（handler 内部判断凌晨窗口+日期防重复）
+    min_interval = 30  # 最小 30 分钟
     startup_delay = 10  # 启动后 10 秒开始
 
     @staticmethod

@@ -115,6 +115,11 @@ async def webhook_search_and_dispatch_task(
     title_recognition_manager: TitleRecognitionManager,
     # 媒体库整季导入时, 可选: 指定已在媒体库中选中的分集索引列表
     selectedEpisodes: Optional[List[int]] = None,
+    # 媒体服务三级 ID（用于 webhook 删除联动）
+    mediaServerType: Optional[str] = None,
+    mediaServerSeriesId: Optional[str] = None,
+    mediaServerSeasonId: Optional[str] = None,
+    mediaServerEpisodeId: Optional[str] = None,
 ):
     """
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
@@ -191,6 +196,8 @@ async def webhook_search_and_dispatch_task(
                     task_manager=task_manager,
                     title_recognition_manager=title_recognition_manager,
                     selectedEpisodes=selectedEpisodes,
+                    mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                    mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
                 )
                 try:
                     await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -603,6 +610,8 @@ async def webhook_search_and_dispatch_task(
                 task_manager=task_manager,
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
+                mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
             try:
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -725,6 +734,8 @@ async def webhook_search_and_dispatch_task(
                 task_manager=task_manager,
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
+                mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
             try:
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -818,6 +829,8 @@ async def webhook_search_and_dispatch_task(
             task_manager=task_manager,
             title_recognition_manager=title_recognition_manager,
             selectedEpisodes=selectedEpisodes,
+            mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+            mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
         )
         try:
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

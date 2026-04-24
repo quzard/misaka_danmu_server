@@ -34,6 +34,7 @@ const AutoMatchSetting = () => {
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
   const [dynamicModels, setDynamicModels] = useState({}) // 动态获取的模型列表，按提供商ID存储
   const [refreshingModels, setRefreshingModels] = useState(false) // 是否正在刷新模型列表
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false) // 刷新后强制打开模型下拉框
   const [selectedPromptType, setSelectedPromptType] = useState('aiRecognitionPrompt') // 当前选中的提示词类型
   const [selectedMatchPromptType, setSelectedMatchPromptType] = useState('aiPrompt') // AI自动匹配的提示词类型
   const isMobile = useAtomValue(isMobileAtom)
@@ -361,6 +362,9 @@ const AutoMatchSetting = () => {
           [currentProvider]: response.data.models
         }))
 
+        // 刷新成功后强制打开下拉框，让用户从列表中选择
+        setModelDropdownOpen(true)
+
         const newCount = response.data.newCount || 0
         if (newCount > 0) {
           message.success(`刷新成功！发现 ${newCount} 个新模型`)
@@ -577,9 +581,14 @@ const AutoMatchSetting = () => {
                           style={{ flex: 1 }}
                           options={getAvailableModels(getFieldValue('aiProvider'))}
                           placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
-                          filterOption={(inputValue, option) =>
-                            option.value.toLowerCase().includes(inputValue.toLowerCase())
+                          open={modelDropdownOpen || undefined}
+                          filterOption={modelDropdownOpen
+                            ? false
+                            : (inputValue, option) =>
+                                option.value.toLowerCase().includes(inputValue.toLowerCase())
                           }
+                          onSelect={() => setModelDropdownOpen(false)}
+                          onBlur={() => setModelDropdownOpen(false)}
                         />
                       </Form.Item>
                       <Tooltip title="从AI提供商API获取最新模型列表">

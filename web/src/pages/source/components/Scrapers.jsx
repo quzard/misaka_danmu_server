@@ -34,6 +34,7 @@ import {
   setScrapers,
   setSingleScraper,
   getResourceRepo,
+  getRepoRefs,
   saveResourceRepo,
   getScraperVersions,
   loadScraperResources,
@@ -54,6 +55,7 @@ import {
   getScraperDownloadStatus,
   getCurrentScraperDownload,
   cancelScraperDownload,
+  generateRegex,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -78,6 +80,7 @@ import {
   KeyOutlined,
   LockOutlined,
   QuestionCircleOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 
 import ReactMarkdown from 'react-markdown'
@@ -150,6 +153,16 @@ const SortableItem = ({
             <div onClick={handleConfig} className="cursor-pointer">
               <MyIcon icon="setting" size={24} />
             </div>
+            {item.useProxy && (
+              <Tooltip title="已启用代理">
+                <span className="text-blue-500"><MyIcon icon="wangluo" size={18} /></span>
+              </Tooltip>
+            )}
+            {item.logRawResponses && (
+              <Tooltip title="已启用记录原始响应">
+                <span className="text-orange-400"><MyIcon icon="rizhi" size={18} /></span>
+              </Tooltip>
+            )}
             {item.version && (
               <Tag color="blue">{item.version}</Tag>
             )}
@@ -201,6 +214,10 @@ export const Scrapers = () => {
   // 填充默认黑名单加载状态
   const [loadingDefaultBlacklist, setLoadingDefaultBlacklist] = useState(false)
   const [loadingCommonBlacklist, setLoadingCommonBlacklist] = useState(false)
+  const [aiRegexModalOpen, setAiRegexModalOpen] = useState(false)
+  const [aiRegexDesc, setAiRegexDesc] = useState('')
+  const [aiRegexLoading, setAiRegexLoading] = useState(false)
+  const [aiRegexResult, setAiRegexResult] = useState('')
 
   // 资源仓库相关
   const [resourceRepoUrl, setResourceRepoUrl] = useState('')
@@ -229,6 +246,8 @@ export const Scrapers = () => {
 
   // 分支选择相关
   const [selectedBranch, setSelectedBranch] = useState('main')
+  const [repoRefs, setRepoRefs] = useState({ branches: [], tags: [], minServerVersion: null })
+  const [refsLoading, setRefsLoading] = useState(false)
 
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
@@ -352,10 +371,26 @@ export const Scrapers = () => {
       const res = await getResourceRepo()
       setResourceRepoUrl(res.data?.repoUrl || '')
 
-      // 同时加载版本信息
-      await loadVersionInfo()
+      // 同时加载版本信息和分支/标签列表
+      await Promise.all([loadVersionInfo(), loadRepoRefs()])
     } catch (error) {
       console.error('加载资源仓库配置失败:', error)
+    }
+  }
+
+  const loadRepoRefs = async () => {
+    try {
+      setRefsLoading(true)
+      const res = await getRepoRefs()
+      setRepoRefs({
+        branches: res.data?.branches || [],
+        tags: res.data?.tags || [],
+        minServerVersion: res.data?.minServerVersion || null,
+      })
+    } catch (error) {
+      console.error('加载仓库分支/标签失败:', error)
+    } finally {
+      setRefsLoading(false)
     }
   }
 
@@ -1263,6 +1298,7 @@ export const Scrapers = () => {
       setConfirmLoading(false)
       setOpen(false)
       form.resetFields()
+      getInfo() // 刷新列表以更新代理/日志图标状态
     }
   }
 
@@ -1355,6 +1391,43 @@ export const Scrapers = () => {
     } finally {
       setLoadingCommonBlacklist(false)
     }
+  }
+
+  const handleAiGenerate = async () => {
+    if (!aiRegexDesc.trim()) {
+      messageApi.warning('请输入描述')
+      return
+    }
+    setAiRegexLoading(true)
+    setAiRegexResult('')
+    try {
+      const existing = form.getFieldValue(`${setname}EpisodeBlacklistRegex`) || ''
+      const res = await generateRegex(aiRegexDesc.trim(), existing)
+      if (res.data?.regex) {
+        setAiRegexResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的正则表达式')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 正则生成失败')
+    } finally {
+      setAiRegexLoading(false)
+    }
+  }
+
+  const handleApplyAiRegex = () => {
+    if (!aiRegexResult) return
+    const fieldKey = `${setname}EpisodeBlacklistRegex`
+    const existing = form.getFieldValue(fieldKey) || ''
+    if (existing.trim()) {
+      form.setFieldValue(fieldKey, existing.trim() + '|' + aiRegexResult)
+    } else {
+      form.setFieldValue(fieldKey, aiRegexResult)
+    }
+    setAiRegexModalOpen(false)
+    setAiRegexDesc('')
+    setAiRegexResult('')
+    messageApi.success('已追加到黑名单规则')
   }
 
   const handleBiliLogout = () => {
@@ -1648,14 +1721,53 @@ export const Scrapers = () => {
                 value={resourceRepoUrl}
                 onChange={(e) => setResourceRepoUrl(e.target.value)}
               />
-              {/* 分支选择器 */}
+              {/* 分支/版本选择器 */}
               <Select
                 value={selectedBranch}
                 onChange={setSelectedBranch}
-                style={{ width: isMobile ? '100%' : 140 }}
+                loading={refsLoading}
+                style={{ width: isMobile ? '100%' : 180 }}
+                placeholder="选择分支或版本"
+                onDropdownVisibleChange={(open) => {
+                  if (open && repoRefs.branches.length === 0 && repoRefs.tags.length === 0) {
+                    loadRepoRefs()
+                  }
+                }}
               >
-                <Select.Option value="main">main</Select.Option>
-                <Select.Option value="test">test (仅X86)</Select.Option>
+                {repoRefs.branches.length > 0 || repoRefs.tags.length > 0 ? (
+                  <>
+                    {repoRefs.branches.length > 0 && (
+                      <Select.OptGroup label="分支">
+                        {repoRefs.branches.map(b => (
+                          <Select.Option key={`branch-${b}`} value={b}>{b}</Select.Option>
+                        ))}
+                      </Select.OptGroup>
+                    )}
+                    {repoRefs.tags.length > 0 && (
+                      <Select.OptGroup label="版本标签">
+                        {repoRefs.tags.map(t => {
+                          // 比较 tag 版本与 minServerVersion，低于最低要求的禁用
+                          const tagVer = t.replace(/^v/i, '').split('.').map(Number)
+                          const minVer = (repoRefs.minServerVersion || '').split('.').map(Number)
+                          const isBelowMin = minVer.length >= 3 && tagVer.length >= 3 &&
+                            (tagVer[0] < minVer[0] ||
+                              (tagVer[0] === minVer[0] && tagVer[1] < minVer[1]) ||
+                              (tagVer[0] === minVer[0] && tagVer[1] === minVer[1] && tagVer[2] < minVer[2]))
+                          return (
+                            <Select.Option key={`tag-${t}`} value={t} disabled={isBelowMin}>
+                              {t}{isBelowMin ? ' (不兼容当前服务器)' : ''}
+                            </Select.Option>
+                          )
+                        })}
+                      </Select.OptGroup>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Select.Option value="main">main</Select.Option>
+                    <Select.Option value="test">test</Select.Option>
+                  </>
+                )}
               </Select>
               {isMobile ? (
                 <>
@@ -2483,6 +2595,16 @@ export const Scrapers = () => {
                   >
                     填充源默认规则
                   </Button>
+                  <Tooltip title="AI 生成正则">
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RobotOutlined />}
+                      onClick={() => setAiRegexModalOpen(true)}
+                    >
+                      AI 生成
+                    </Button>
+                  </Tooltip>
                 </Space>
               </div>
             }
@@ -2680,6 +2802,56 @@ export const Scrapers = () => {
             </div>
           ) : (
             <Typography.Text type="secondary">暂无版本日志</Typography.Text>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title={<><RobotOutlined /> AI 正则生成助手</>}
+        open={aiRegexModalOpen}
+        onCancel={() => { setAiRegexModalOpen(false); setAiRegexResult('') }}
+        footer={null}
+        destroyOnClose
+        zIndex={1010}
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你想过滤的分集标题，AI 会帮你生成对应的正则表达式。
+            </div>
+            <Input.TextArea
+              value={aiRegexDesc}
+              onChange={e => setAiRegexDesc(e.target.value)}
+              placeholder="例如：过滤掉包含 预告、花絮、特典、PV 的分集"
+              rows={3}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiRegexLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiRegexResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">生成结果：</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all">
+                {aiRegexResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiRegexResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiRegex}>
+                    追加到规则
+                  </Button>
+                </Space>
+              </div>
+            </div>
           )}
         </div>
       </Modal>

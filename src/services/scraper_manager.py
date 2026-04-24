@@ -288,15 +288,12 @@ class ScraperManager:
             await self.config_manager.register_defaults(default_configs_to_register)
             logging.getLogger(__name__).info(f"已为 {len(default_configs_to_register)} 个搜索源注册默认分集黑名单。")
 
-        # 修正：重构同步逻辑以确保 'custom' 源始终存在，并防止意外删除。
+        # 同步数据库：清理不可用的源，确保 'custom' 源始终存在。
         async with self._session_factory() as session:
-            # 1. 仅当发现基于文件的搜索源时，才清理过时的条目。
-            #    这是一个安全措施，防止在发现过程失败时意外清空数据库。
-            #    import 失败的源也保留（不能因为依赖问题就删掉数据库记录）。
-            #    我们总是将 'custom' 添加到要保留的列表中。
-            if discovered_providers:
-                providers_to_keep = discovered_providers + failed_providers + ['custom']
-                await crud.remove_stale_scrapers(session, providers_to_keep)
+            # 1. 清理数据库中不再存在的源（只保留成功加载的 + custom）。
+            #    加载失败的源也会被移除，避免前端显示不可用的源。
+            providers_to_keep = discovered_providers + ['custom']
+            await crud.remove_stale_scrapers(session, providers_to_keep)
             
             # 2. 确保所有发现的搜索源和 'custom' 源都存在于数据库中。
             #    这会添加任何新的搜索源，包括首次添加 'custom'。

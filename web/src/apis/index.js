@@ -475,6 +475,8 @@ export const getSingleScraper = data =>
 
 /** 获取资源仓库配置 */
 export const getResourceRepo = () => api.get('/api/ui/scrapers/resource-repo')
+/** 获取资源仓库的分支和标签列表 */
+export const getRepoRefs = () => api.get('/api/ui/scrapers/repo-refs')
 /** 保存资源仓库配置 */
 export const saveResourceRepo = data => api.put('/api/ui/scrapers/resource-repo', data)
 /** 获取资源包版本信息 */
@@ -741,6 +743,9 @@ export const getRecognition = () =>
 export const setRecognition = data =>
   api.put('/api/ui/settings/title-recognition', data)
 
+export const testRecognition = data =>
+  api.post('/api/ui/settings/title-recognition/test', data)
+
 /** 获取TMDB反查配置 */
 export const getTmdbReverseLookupConfig = () => api.get('/api/ui/config/tmdbReverseLookup')
 
@@ -767,6 +772,10 @@ export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
 
 /** 获取 AI 模型列表 */
 export const getAIModels = (provider, refresh = false) => api.get(`/api/ui/config/ai/models?provider=${provider}&refresh=${refresh}`)
+
+/** AI 生成正则表达式 */
+export const generateRegex = (description, existingRegex = '') =>
+  api.post('/api/ui/config/ai/generate-regex', { description, existingRegex })
 
 /** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
 /** 获取所有媒体服务器 */

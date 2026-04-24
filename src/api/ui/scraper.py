@@ -3,6 +3,7 @@
 """
 
 import logging
+import httpx
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +64,11 @@ async def get_scraper_settings(
             full_setting_data['version'] = None
 
         full_setting_data['verificationEnabled'] = verification_enabled
+
+        # 从 config 表读取该源的日志记录开关（DB key 为下划线格式）
+        log_resp_key = f"scraper_{provider_name}_log_responses"
+        log_resp_str = await config_manager.get(log_resp_key, "false")
+        full_setting_data['logRawResponses'] = str(log_resp_str).lower() == "true"
 
         try:
             s_with_config = models.ScraperSettingWithConfig.model_validate(full_setting_data)
@@ -283,6 +289,21 @@ async def execute_scraper_action(
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        # 从异常链中提取更具体的原因（如 TLS 握手失败、DNS 解析失败等）
+        cause = e.__cause__
+        detail_hint = ""
+        if cause:
+            cause_str = str(cause).lower()
+            if "ssl" in cause_str or "tls" in cause_str or "certificate" in cause_str:
+                detail_hint = "（TLS/SSL 握手失败，可能是 DNS 解析到了错误的 IP 或网络中间件干扰了 HTTPS）"
+            elif "resolve" in cause_str or "getaddrinfo" in cause_str:
+                detail_hint = "（DNS 解析失败）"
+        logger.warning(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时网络连接失败: {type(e).__name__}{detail_hint}")
+        raise HTTPException(status_code=502, detail=f"无法连接到 {providerName} 的服务器{detail_hint}，请检查网络连接或代理设置。")
+    except (httpx.TimeoutException, httpx.ReadTimeout) as e:
+        logger.warning(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时请求超时: {type(e).__name__}")
+        raise HTTPException(status_code=504, detail=f"连接 {providerName} 超时，请检查网络连接或代理设置。")
     except Exception as e:
         logger.error(f"执行搜索源 '{providerName}' 的操作 '{actionName}' 时出错: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"操作执行失败: {str(e)}")

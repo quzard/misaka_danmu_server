@@ -18,9 +18,15 @@ class EmbyWebhook(BaseWebhook):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不是有效的JSON。")
 
         event_type = payload.get("Event")
-        # 我们只关心新媒体入库的事件, 兼容 emby 的 'library.new' 和 jellyfin 的 'item.add'
+
+        # 处理删除事件
+        if event_type == "library.deleted":
+            await self._handle_delete(payload, webhook_source)
+            return
+
+        # 我们只关心新媒体入库的事件
         if event_type not in ["library.new"]:
-            logger.info(f"Webhook: 忽略非 'item.add' 或 'library.new' 的事件 (类型: {event_type})")
+            logger.info(f"Webhook: 忽略非 'library.new' 或 'library.deleted' 的事件 (类型: {event_type})")
             return
 
         item = payload.get("Item", {})
@@ -123,6 +129,11 @@ class EmbyWebhook(BaseWebhook):
             media_type = "tv_series"
             anime_title = series_title
 
+        # 提取媒体服务三级 ID（用于删除联动）
+        emby_item_id = str(item.get("Id", "")) if item.get("Id") else None
+        emby_series_id = str(item.get("SeriesId", "")) if item.get("SeriesId") else None
+        emby_season_id = str(item.get("SeasonId", "")) if item.get("SeasonId") else None
+
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
         _ep_range_str = ep_range_str if item_type == "Series" else ""
         ep_suffix = f"E{episode_number}" if episode_number is not None else _ep_range_str or "全季"
@@ -139,9 +150,51 @@ class EmbyWebhook(BaseWebhook):
             "tvdbId": str(tvdb_id) if tvdb_id else None,
             "bangumiId": str(bangumi_id) if bangumi_id else None,
             "selectedEpisodes": selected_episodes if item_type == "Series" else None,
+            # 媒体服务三级 ID
+            "mediaServerType": "emby",
+            # Episode → SeriesId; Movie → Item.Id 自身; Series → Item.Id 自身
+            "mediaServerSeriesId": emby_series_id or emby_item_id,
+            "mediaServerSeasonId": emby_season_id,
+            # Episode → Item.Id; Movie → Item.Id（电影按单集处理）; Series → None
+            "mediaServerEpisodeId": emby_item_id if item_type in ("Episode", "Movie") else None,
         }
 
         await self.dispatch_task(
             task_title=task_title, unique_key=unique_key,
             payload=task_payload, webhook_source=webhook_source
         )
+
+    async def _handle_delete(self, payload: dict, webhook_source: str):
+        """处理 Emby library.deleted 事件，联动删除弹幕数据。"""
+        from src.tasks.webhook_delete import handle_webhook_delete
+
+        item = payload.get("Item", {})
+        if not item:
+            logger.info("Emby Webhook 删除: 负载中缺少 'Item' 信息，忽略。")
+            return
+
+        item_type = item.get("Type")
+        if item_type not in ["Episode", "Season", "Series", "Movie"]:
+            logger.info(f"Emby Webhook 删除: 忽略非 Episode/Season/Series/Movie 类型 (类型: {item_type})")
+            return
+
+        item_id = str(item.get("Id", ""))
+        series_id = str(item.get("SeriesId", "")) if item.get("SeriesId") else None
+        season_id = str(item.get("SeasonId", "")) if item.get("SeasonId") else None
+        season_number = item.get("ParentIndexNumber") if item_type == "Season" else None
+        title = item.get("SeriesName") or item.get("Name") or item_id
+
+        logger.info(f"Emby Webhook 删除: 收到 {item_type} 删除事件 - '{title}' (ItemId={item_id})")
+
+        async with self._session_factory() as session:
+            await handle_webhook_delete(
+                session=session,
+                config_manager=self.config_manager,
+                server_type="emby",
+                item_type=item_type,
+                item_id=item_id,
+                series_id=series_id,
+                season_id=season_id,
+                season_number=season_number,
+                title=title,
+            )

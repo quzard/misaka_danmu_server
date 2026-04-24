@@ -102,6 +102,7 @@ class Episode(Base):
     danmakuFilePath: Mapped[Optional[str]] = mapped_column("danmaku_file_path", String(1024))
     fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", NaiveDateTime)
     commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
+    mediaServerEpisodeId: Mapped[Optional[str]] = mapped_column("media_server_episode_id", String(500))
 
     source: Mapped["AnimeSource"] = relationship(back_populates="episodes")
 
@@ -164,6 +165,9 @@ class AnimeMetadata(Base):
     tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(500))
     doubanId: Mapped[Optional[str]] = mapped_column("douban_id", String(500))
     bangumiId: Mapped[Optional[str]] = mapped_column("bangumi_id", String(500))
+    mediaServerType: Mapped[Optional[str]] = mapped_column("media_server_type", String(50))
+    mediaServerSeriesId: Mapped[Optional[str]] = mapped_column("media_server_series_id", String(500))
+    mediaServerSeasonId: Mapped[Optional[str]] = mapped_column("media_server_season_id", String(500))
 
     anime: Mapped["Anime"] = relationship(back_populates="metadataRecord")
 
@@ -374,6 +378,9 @@ class MediaItem(Base):
     serverId: Mapped[int] = mapped_column("server_id", BigInteger, ForeignKey("media_servers.id", ondelete="CASCADE"))
     mediaId: Mapped[str] = mapped_column("media_id", String(500))  # 媒体服务器中的ID
     libraryId: Mapped[Optional[str]] = mapped_column("library_id", String(500))  # 所属媒体库ID
+    seriesId: Mapped[Optional[str]] = mapped_column("series_id", String(500))  # 剧集级ID
+    seasonId: Mapped[Optional[str]] = mapped_column("season_id", String(500))  # 季级ID
+    episodeId: Mapped[Optional[str]] = mapped_column("episode_id", String(500))  # 集级ID/电影自身ID
     title: Mapped[str] = mapped_column(String(500))
     mediaType: Mapped[str] = mapped_column("media_type", Enum('movie', 'tv_series', name="media_item_type"))
     season: Mapped[Optional[int]] = mapped_column(Integer)
