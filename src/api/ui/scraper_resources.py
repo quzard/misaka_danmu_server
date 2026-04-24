@@ -398,8 +398,9 @@ async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, st
                     package_data = response.json()
                     version = package_data.get("version", "unknown")
                     changelog = package_data.get("changelog", None)
+                    min_fetchable_version = package_data.get("min_fetchable_version", None)
                     logger.info(f"成功获取版本信息: {version} (尝试 {attempt + 1}/{max_retries})")
-                    return {"version": version, "changelog": changelog}
+                    return {"version": version, "changelog": changelog, "minFetchableVersion": min_fetchable_version}
                 else:
                     logger.warning(f"获取版本失败 HTTP {response.status_code} (尝试 {attempt + 1}/{max_retries})")
         except httpx.TimeoutException:
@@ -455,6 +456,7 @@ async def get_versions(
         # 获取远程版本（当前配置的资源仓库）
         remote_version = None
         remote_changelog = None
+        remote_min_fetchable = None
         repo_url = await config_manager.get("scraper_resource_repo", "")
 
         if repo_url:
@@ -487,6 +489,7 @@ async def get_versions(
             if remote_info:
                 remote_version = remote_info["version"]
                 remote_changelog = remote_info.get("changelog")
+                remote_min_fetchable = remote_info.get("minFetchableVersion")
                 logger.info(f"[版本检查] 用户配置仓库版本: {remote_version}")
             else:
                 logger.warning(f"[版本检查] 用户配置仓库版本获取失败")
@@ -525,7 +528,8 @@ async def get_versions(
             "hasUpdate": remote_version and local_version != "unknown" and remote_version != local_version,
             "localChangelog": local_changelog,
             "remoteChangelog": remote_changelog,
-            "officialChangelog": official_changelog
+            "officialChangelog": official_changelog,
+            "minFetchableVersion": remote_min_fetchable,
         }
 
         # 更新缓存

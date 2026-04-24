@@ -1,7 +1,8 @@
-import { Button, Card, Collapse, Input, InputNumber, Select, Tag } from 'antd'
+import { Button, Card, Collapse, Input, InputNumber, Modal, Select, Space, Tag, Tooltip } from 'antd'
 import { useEffect, useState } from 'react'
 import { useMessage } from '../../../MessageContext'
-import { getRecognition, setRecognition, testRecognition } from '../../../apis'
+import { getRecognition, setRecognition, testRecognition, generateRegex } from '../../../apis'
+import { RobotOutlined } from '@ant-design/icons'
 
 export const Recognition = () => {
   const [loading, setLoading] = useState(true)
@@ -10,6 +11,10 @@ export const Recognition = () => {
   const messageApi = useMessage()
 
   const [text, setText] = useState('')
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiDesc, setAiDesc] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState('')
 
   // 测试工具状态
   const [testTitle, setTestTitle] = useState('')
@@ -47,6 +52,36 @@ export const Recognition = () => {
     }
   }
 
+  const handleAiGenerate = async () => {
+    if (!aiDesc.trim()) {
+      messageApi.warning('请输入需求描述')
+      return
+    }
+    setAiLoading(true)
+    setAiResult('')
+    try {
+      const res = await generateRegex(aiDesc.trim(), text, 'recognition_rules')
+      if (res.data?.regex) {
+        setAiResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的配置规则')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 生成失败')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const handleApplyAiResult = () => {
+    if (!aiResult) return
+    setText(aiResult)
+    setAiModalOpen(false)
+    setAiDesc('')
+    setAiResult('')
+    messageApi.success('已应用 AI 生成的配置')
+  }
+
   const handleTest = async () => {
     if (!testTitle.trim()) {
       messageApi.warning('请输入要测试的标题')
@@ -78,30 +113,53 @@ export const Recognition = () => {
             key: 'help',
             label: <span className="text-sm opacity-75"><strong>📖 配置说明（点击展开）</strong></span>,
             children: (
-              <div className="text-sm opacity-75">
-                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded mb-3">
+              <div className="text-sm opacity-75 space-y-3">
+                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded">
                   <p className="font-semibold text-blue-800 dark:text-blue-300 mb-2">🔍 搜索预处理（在搜索前执行）</p>
                   <ul className="list-disc list-inside space-y-1 text-blue-700 dark:text-blue-400">
-                    <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code></li>
-                    <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
-                    <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
-                    <li><strong>季度预处理：</strong> <code>{'新说唱2025 => {<search_season=8>}'}</code></li>
+                    <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code> — 标题包含该词则跳过搜索</li>
+                    <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code> — 搜索时替换标题</li>
+                    <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code> — 通过定位词提取集数并偏移</li>
+                    <li><strong>复合格式：</strong> <code>某动画 =&gt; 正确名称 &amp;&amp; 第 &lt;&gt; 话 &gt;&gt; EP-1</code> — 同时替换标题和偏移集数</li>
+                    <li><strong>季度预处理：</strong> <code>{'新说唱2025 => {<search_season=8>}'}</code> — 指定搜索时使用的季度</li>
                   </ul>
                 </div>
                 <div className="bg-green-50 dark:bg-green-950/30 p-3 rounded">
                   <p className="font-semibold text-green-800 dark:text-green-300 mb-2">🎯 入库后处理（匹配后执行）</p>
                   <ul className="list-disc list-inside space-y-1 text-green-700 dark:text-green-400">
-                    <li><strong>季度偏移：</strong> <code>{'新说唱2025 => {[title=中国新说唱;season_offset=1>8]}'}</code></li>
-                    <li><strong>元数据替换：</strong> <code>{'错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}'}</code></li>
-                    <li><strong>源特定偏移：</strong> <code>{'某动画 => {[source=tencent;title=正确标题;season_offset=9>13]}'}</code></li>
+                    <li><strong>季度偏移：</strong> <code>{'标题 => {[title=正确标题;season_offset=1>8]}'}</code> — 替换标题并映射季度</li>
+                    <li><strong>源特定偏移：</strong> <code>{'标题 => {[source=tencent;title=正确标题;season_offset=9>13]}'}</code> — 限定特定源</li>
+                    <li><strong>元数据替换：</strong> <code>{'错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}'}</code> — 直接指定TMDB/豆瓣ID</li>
+                    <li><strong>部分集数偏移：</strong> <code>{'某动画(下) => {[ep_range=1-12;ep_offset=+12]}'}</code> — 只对范围内集数偏移</li>
+                    <li><strong>限定源+集偏移：</strong> <code>{'某动画 => {[ep_range=1-24;ep_offset=-24;source=bilibili]}'}</code></li>
                   </ul>
                 </div>
-                <p className="mt-2"><strong>偏移格式：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法)</p>
+                <div className="bg-gray-50 dark:bg-gray-800/30 p-3 rounded">
+                  <p className="font-semibold mb-1">📐 偏移格式参考</p>
+                  <div className="space-y-1">
+                    <p><strong>季度偏移：</strong> <code>1&gt;8</code>(映射) <code>1+7</code>(加法) <code>9-1</code>(减法) <code>*+4</code>(所有季+4) <code>*&gt;1</code>(所有季改为1)</p>
+                    <p><strong>集偏移：</strong> <code>EP+1</code>(加1) <code>EP-1</code>(减1) <code>2*EP</code>(翻倍) <code>2*EP-1</code>(翻倍减1)</p>
+                    <p><strong>部分集偏移范围：</strong> <code>ep_range=1-12</code>(第1~12集) <code>ep_range=13-*</code>(第13集起无上限)</p>
+                  </div>
+                </div>
+                <p className="text-xs opacity-60">💡 <code>#</code> 开头为注释，空行会被忽略，注意 <code>=&gt;</code> <code>&lt;&gt;</code> <code>&gt;&gt;</code> <code>&amp;&amp;</code> 左右需要空格</p>
               </div>
             ),
           }]}
           className="mb-4"
         />
+        <div className="flex justify-end mb-2">
+          <Tooltip title="使用 AI 根据自然语言描述生成识别词配置">
+            <Button
+              type="link"
+              size="small"
+              icon={<RobotOutlined />}
+              onClick={() => setAiModalOpen(true)}
+            >
+              AI 生成
+            </Button>
+          </Tooltip>
+        </div>
         <Input.TextArea
           rows={12}
           value={text}
@@ -190,6 +248,56 @@ BLOCK:预告
           )}
         </div>
       </Card>
+
+      <Modal
+        title={<><RobotOutlined /> AI 识别词配置助手</>}
+        open={aiModalOpen}
+        onCancel={() => { setAiModalOpen(false); setAiResult('') }}
+        footer={null}
+        destroyOnClose
+        width={700}
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你的需求，AI 会按照识别词 DSL 语法生成对应的配置规则。
+            </div>
+            <Input.TextArea
+              value={aiDesc}
+              onChange={e => setAiDesc(e.target.value)}
+              placeholder={'例如：\n• 新说唱2025 搜索时使用"中国新说唱 第8季"，季度偏移 1>8\n• 屏蔽包含"预告"的标题\n• 奔跑吧 替换为 奔跑吧兄弟'}
+              rows={4}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">{text.trim() ? '合并后的完整配置：' : '生成结果：'}</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm whitespace-pre-wrap" style={{ maxHeight: 300, overflow: 'auto' }}>
+                {aiResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiResult}>
+                    应用配置
+                  </Button>
+                </Space>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

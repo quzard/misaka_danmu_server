@@ -1209,8 +1209,9 @@ async def generate_regex(
         raise HTTPException(status_code=400, detail="description 不能为空")
 
     existing_regex = payload.get("existingRegex", "")
+    context = payload.get("context", "")
 
-    result = await ai_matcher_manager.generate_regex(description, existing_regex)
+    result = await ai_matcher_manager.generate_regex(description, existing_regex, context)
     if result is None:
         raise HTTPException(status_code=500, detail="AI 正则生成失败，请检查 AI 配置是否正确")
 

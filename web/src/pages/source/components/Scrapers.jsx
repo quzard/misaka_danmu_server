@@ -405,7 +405,8 @@ export const Scrapers = () => {
         hasUpdate: res.data?.hasUpdate || false,
         localChangelog: res.data?.localChangelog || null,
         remoteChangelog: res.data?.remoteChangelog || null,
-        officialChangelog: res.data?.officialChangelog || null
+        officialChangelog: res.data?.officialChangelog || null,
+        minFetchableVersion: res.data?.minFetchableVersion || null,
       })
       return res.data
     } catch (error) {
@@ -1402,7 +1403,7 @@ export const Scrapers = () => {
     setAiRegexResult('')
     try {
       const existing = form.getFieldValue(`${setname}EpisodeBlacklistRegex`) || ''
-      const res = await generateRegex(aiRegexDesc.trim(), existing)
+      const res = await generateRegex(aiRegexDesc.trim(), existing, 'episode_blacklist')
       if (res.data?.regex) {
         setAiRegexResult(res.data.regex)
       } else {
@@ -1418,16 +1419,11 @@ export const Scrapers = () => {
   const handleApplyAiRegex = () => {
     if (!aiRegexResult) return
     const fieldKey = `${setname}EpisodeBlacklistRegex`
-    const existing = form.getFieldValue(fieldKey) || ''
-    if (existing.trim()) {
-      form.setFieldValue(fieldKey, existing.trim() + '|' + aiRegexResult)
-    } else {
-      form.setFieldValue(fieldKey, aiRegexResult)
-    }
+    form.setFieldValue(fieldKey, aiRegexResult)
     setAiRegexModalOpen(false)
     setAiRegexDesc('')
     setAiRegexResult('')
-    messageApi.success('已追加到黑名单规则')
+    messageApi.success('已应用 AI 生成的规则')
   }
 
   const handleBiliLogout = () => {
@@ -1746,16 +1742,18 @@ export const Scrapers = () => {
                     {repoRefs.tags.length > 0 && (
                       <Select.OptGroup label="版本标签">
                         {repoRefs.tags.map(t => {
-                          // 比较 tag 版本与 minServerVersion，低于最低要求的禁用
-                          const tagVer = t.replace(/^v/i, '').split('.').map(Number)
-                          const minVer = (repoRefs.minServerVersion || '').split('.').map(Number)
-                          const isBelowMin = minVer.length >= 3 && tagVer.length >= 3 &&
+                          // 比较 tag 版本与远程 package.json 中的 min_fetchable_version
+                          // 低于该最低可拉取版本的标记为不可用并禁用
+                          const parseVer = (v) => (v || '').replace(/^v/i, '').split('.').map(Number)
+                          const tagVer = parseVer(t)
+                          const minVer = parseVer(versionInfo.minFetchableVersion)
+                          const isDisabled = minVer.length >= 3 && tagVer.length >= 3 &&
                             (tagVer[0] < minVer[0] ||
                               (tagVer[0] === minVer[0] && tagVer[1] < minVer[1]) ||
                               (tagVer[0] === minVer[0] && tagVer[1] === minVer[1] && tagVer[2] < minVer[2]))
                           return (
-                            <Select.Option key={`tag-${t}`} value={t} disabled={isBelowMin}>
-                              {t}{isBelowMin ? ' (不兼容当前服务器)' : ''}
+                            <Select.Option key={`tag-${t}`} value={t} disabled={isDisabled}>
+                              {t}{isDisabled ? ' (不兼容当前服务器)' : ''}
                             </Select.Option>
                           )
                         })}
@@ -2847,7 +2845,7 @@ export const Scrapers = () => {
                 <Space>
                   <Button onClick={() => setAiRegexResult('')}>清除</Button>
                   <Button type="primary" onClick={handleApplyAiRegex}>
-                    追加到规则
+                    应用规则
                   </Button>
                 </Space>
               </div>

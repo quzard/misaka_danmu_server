@@ -774,8 +774,8 @@ export const clearAICache = () => api.post('/api/ui/config/ai/cache/clear')
 export const getAIModels = (provider, refresh = false) => api.get(`/api/ui/config/ai/models?provider=${provider}&refresh=${refresh}`)
 
 /** AI 生成正则表达式 */
-export const generateRegex = (description, existingRegex = '') =>
-  api.post('/api/ui/config/ai/generate-regex', { description, existingRegex })
+export const generateRegex = (description, existingRegex = '', context = '') =>
+  api.post('/api/ui/config/ai/generate-regex', { description, existingRegex, context })
 
 /** ---------------------------------------------- 媒体服务器 ----------------------------------------------  */
 /** 获取所有媒体服务器 */

@@ -1562,32 +1562,107 @@ class AIMatcher:
             return None
 
 
-    async def generate_regex(self, description: str, existing_regex: str = "") -> Optional[str]:
-        """使用 AI 根据自然语言描述生成正则表达式片段。"""
-        if not self.client and not self.gemini_model:
+    async def generate_regex(self, description: str, existing_regex: str = "", context: str = "") -> Optional[str]:
+        """使用 AI 根据自然语言描述生成或合并正则表达式。"""
+        if not self.client:
             return None
 
-        system_prompt = (
-            "你是一个正则表达式生成助手。用户会用自然语言描述想要过滤/匹配的内容，"
-            "你需要生成对应的正则表达式。\n\n"
-            "规则：\n"
-            "1. 只输出正则表达式本身，不要任何解释、代码块标记或前后缀\n"
-            "2. 多个规则之间用 | 分隔（OR 关系）\n"
-            "3. 不区分大小写（调用方会加 re.IGNORECASE）\n"
-            "4. 保持简洁，不要过度复杂化\n"
-            "5. 如果用户提供了已有规则，不要重复这些规则，只生成新增部分\n"
-        )
+        # 根据 context 生成场景说明
+        context_hints = {
+            "episode_blacklist": (
+                "应用场景：视频平台的分集标题黑名单过滤。\n"
+                "目的是过滤掉非正片内容（如预告、花絮、特辑、宣传片等），保留正片分集。\n"
+                "用户输入的可能是某个具体标题作为例子，你需要提取其中的关键特征词生成通用规则，\n"
+                "而不是直接匹配该具体标题。\n"
+                "例如：用户输入'用格莱美慢镜头打开《蜜语纪》'，应提取'慢镜头|打开'等特征词，\n"
+                "而不是匹配整个标题。\n"
+            ),
+            "danmaku_blacklist": (
+                "应用场景：弹幕内容黑名单过滤。\n"
+                "目的是过滤掉弹幕中的垃圾信息（如广告、刷屏、无意义内容等）。\n"
+                "应生成能匹配一类弹幕的通用规则，而非精确匹配单条弹幕。\n"
+            ),
+            "webhook_filter": (
+                "应用场景：Webhook 媒体标题过滤。\n"
+                "目的是过滤或匹配特定类型的媒体标题（如过滤纪录片、新闻节目等）。\n"
+                "应生成匹配一类标题特征的通用规则。\n"
+            ),
+            "recognition_rules": (
+                "应用场景：弹幕服务器的自定义识别词配置（不是正则表达式，是专用DSL语法）。\n"
+                "这是一个多行文本配置，每行一条规则，注意 => <> >> && 符号左右必须有空格。\n\n"
+                "【搜索预处理规则（在搜索前执行）】\n"
+                "- 屏蔽词：BLOCK:关键词（标题包含该词则跳过搜索）\n"
+                "- 简单替换：旧标题 => 新标题（搜索时将标题替换）\n"
+                "- 集数偏移：前定位词 <> 后定位词 >> EP偏移（通过定位词提取集数并偏移）\n"
+                "  例：第 <> 话 >> EP-1 / Episode <> : >> EP+5\n"
+                "- 复合格式：被替换词 => 替换词 && 前定位词 <> 后定位词 >> EP偏移（同时替换标题和偏移集数）\n"
+                "- 季度预处理：标题 => {<search_season=8>}（指定搜索时使用的季度）\n\n"
+                "【入库后处理规则（匹配后执行）】\n"
+                "- 季度偏移：标题 => {[title=正确标题;season_offset=1>8]}（替换标题并映射季度）\n"
+                "- 源特定偏移：标题 => {[source=tencent;title=正确标题;season_offset=9>13]}（限定特定源）\n"
+                "- 通用季度偏移：标题 => {[title=正确标题;season_offset=*+4]}（所有季+4）\n"
+                "- 元数据替换：标题 => {[tmdbid=12345;type=tv;s=1;e=1]}（直接指定TMDB ID，也支持doubanid）\n"
+                "- 部分集数偏移：标题 => {[ep_range=1-12;ep_offset=+12]}（只对范围内集数偏移）\n"
+                "  ep_range=13-* 表示第13集及之后无上限\n"
+                "  可加 source=bilibili 限定只对特定源生效\n"
+                "  例：某动画 => {[ep_range=1-24;ep_offset=-24;source=bilibili]}\n\n"
+                "【偏移格式参考】\n"
+                "- 季度偏移：1>8(映射) 1+7(加法) 9-1(减法) *+4(所有季+4) *>1(所有季改为1)\n"
+                "- 集偏移运算：EP+1(加1) EP-1(减1) 2*EP(翻倍) 2*EP-1(翻倍减1)\n"
+                "- 部分集偏移范围：ep_range=1-12(第1~12集) ep_range=13-*(第13集起无上限)\n\n"
+                "【注意】\n"
+                "- # 开头的行是注释，空行会被忽略\n"
+                "- 不要输出正则表达式，要输出上述 DSL 语法的规则\n"
+                "- => <> >> && 符号左右必须有空格\n"
+            ),
+        }
+        scene_hint = context_hints.get(context, "")
 
-        user_parts = [f"请根据以下描述生成正则表达式：\n{description}"]
-        if existing_regex:
-            user_parts.append(f"\n当前已有的规则（不要重复这些）：\n{existing_regex[:500]}")
-        user_prompt = "\n".join(user_parts)
+        if context == "recognition_rules":
+            # 识别词配置 — 专用 DSL，不是正则
+            base_role = "你是一个弹幕服务器识别词配置助手。用户会描述需求，你需要按照专用 DSL 语法生成配置规则。"
+            output_rule = "只输出配置规则文本，不要任何解释、代码块标记或前后缀。每行一条规则，# 开头为注释。"
+            if existing_regex.strip():
+                system_prompt = f"{base_role}\n\n{scene_hint}\n{output_rule}\n不要删除或修改任何现有规则，只在合适位置添加新规则。"
+                user_prompt = f"当前配置：\n{existing_regex}\n\n请将以下需求融合进去：\n{description}"
+            else:
+                system_prompt = f"{base_role}\n\n{scene_hint}\n{output_rule}"
+                user_prompt = f"请根据以下需求生成识别词配置：\n{description}"
+        elif existing_regex.strip():
+            system_prompt = (
+                "你是一个正则表达式编辑助手。用户会提供当前已有的正则表达式和新的过滤需求，"
+                "你需要将新规则融合到现有正则中，输出完整的合并后正则表达式。\n\n"
+                + (f"{scene_hint}\n" if scene_hint else "")
+                + "规则：\n"
+                "1. 只输出合并后的完整正则表达式，不要任何解释、代码块标记或前后缀\n"
+                "2. 严格保持现有正则的格式风格和结构不变（如 ^...$|^...$ 的行锚定风格、多行格式等）\n"
+                "3. 新增的规则必须与现有格式完全一致，融合到正确的位置\n"
+                "4. 不要删除或修改任何现有规则，只添加新内容\n"
+                "5. 不区分大小写（调用方会加 re.IGNORECASE）\n"
+                "6. 不要重复已有的规则\n"
+                "7. 提取用户描述中的关键特征词生成通用规则，不要精确匹配用户给出的具体示例文本\n"
+            )
+            user_prompt = f"当前正则表达式：\n{existing_regex}\n\n请将以下需求融合进去：\n{description}"
+        else:
+            system_prompt = (
+                "你是一个正则表达式生成助手。用户会用自然语言描述想要过滤/匹配的内容，"
+                "你需要生成对应的正则表达式。\n\n"
+                + (f"{scene_hint}\n" if scene_hint else "")
+                + "规则：\n"
+                "1. 只输出正则表达式本身，不要任何解释、代码块标记或前后缀\n"
+                "2. 多个规则之间用 | 分隔（OR 关系）\n"
+                "3. 不区分大小写（调用方会加 re.IGNORECASE）\n"
+                "4. 保持简洁，不要过度复杂化\n"
+                "5. 提取用户描述中的关键特征词生成通用规则，不要精确匹配用户给出的具体示例文本\n"
+            )
+            user_prompt = f"请根据以下描述生成正则表达式：\n{description}"
 
         try:
-            if self.gemini_model:
+            if self.provider == "gemini":
                 response = await asyncio.to_thread(
-                    self.gemini_model.generate_content,
-                    f"{system_prompt}\n\n{user_prompt}"
+                    self.client.models.generate_content,
+                    model=self.model,
+                    contents=f"{system_prompt}\n\n{user_prompt}"
                 )
                 content = response.text.strip() if response.text else None
             else:
@@ -1599,7 +1674,7 @@ class AIMatcher:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.0,
-                    **_get_max_tokens_param(self.model, 500)
+                    **_get_max_tokens_param(self.model, 4096)
                 )
                 content = _extract_openai_content(response)
 
