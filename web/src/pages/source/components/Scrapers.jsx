@@ -246,7 +246,7 @@ export const Scrapers = () => {
 
   // 分支选择相关
   const [selectedBranch, setSelectedBranch] = useState('main')
-  const [repoRefs, setRepoRefs] = useState({ branches: [], tags: [] })
+  const [repoRefs, setRepoRefs] = useState({ branches: [], tags: [], minServerVersion: null })
   const [refsLoading, setRefsLoading] = useState(false)
 
   // 下载进度相关
@@ -385,6 +385,7 @@ export const Scrapers = () => {
       setRepoRefs({
         branches: res.data?.branches || [],
         tags: res.data?.tags || [],
+        minServerVersion: res.data?.minServerVersion || null,
       })
     } catch (error) {
       console.error('加载仓库分支/标签失败:', error)
@@ -1744,9 +1745,20 @@ export const Scrapers = () => {
                     )}
                     {repoRefs.tags.length > 0 && (
                       <Select.OptGroup label="版本标签">
-                        {repoRefs.tags.map(t => (
-                          <Select.Option key={`tag-${t}`} value={t}>{t}</Select.Option>
-                        ))}
+                        {repoRefs.tags.map(t => {
+                          // 比较 tag 版本与 minServerVersion，低于最低要求的禁用
+                          const tagVer = t.replace(/^v/i, '').split('.').map(Number)
+                          const minVer = (repoRefs.minServerVersion || '').split('.').map(Number)
+                          const isBelowMin = minVer.length >= 3 && tagVer.length >= 3 &&
+                            (tagVer[0] < minVer[0] ||
+                              (tagVer[0] === minVer[0] && tagVer[1] < minVer[1]) ||
+                              (tagVer[0] === minVer[0] && tagVer[1] === minVer[1] && tagVer[2] < minVer[2]))
+                          return (
+                            <Select.Option key={`tag-${t}`} value={t} disabled={isBelowMin}>
+                              {t}{isBelowMin ? ' (不兼容当前服务器)' : ''}
+                            </Select.Option>
+                          )
+                        })}
                       </Select.OptGroup>
                     )}
                   </>

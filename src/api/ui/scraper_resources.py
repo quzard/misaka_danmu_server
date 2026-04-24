@@ -23,6 +23,7 @@ from src.security import get_current_user
 from src.services import get_download_task_manager
 from src.services.download_task_manager import TaskStatus
 from src.api.dependencies import get_scraper_manager, get_config_manager
+from src._version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,6 +75,20 @@ BACKUP_METADATA_FILE = BACKUP_DIR / "backup_metadata.json"
 # 弹幕源版本信息文件
 SCRAPERS_VERSIONS_FILE = _get_scrapers_dir() / "versions.json"
 SCRAPERS_PACKAGE_FILE = _get_scrapers_dir() / "package.json"
+
+
+def _get_local_min_server_version() -> Optional[str]:
+    """从本地 versions.json 或 package.json 读取 min_server_version"""
+    for f in (SCRAPERS_VERSIONS_FILE, SCRAPERS_PACKAGE_FILE):
+        if f.exists():
+            try:
+                data = json.loads(f.read_text())
+                v = data.get("min_server_version")
+                if v:
+                    return v
+            except Exception:
+                pass
+    return None
 
 
 def get_platform_info() -> Dict[str, str]:
@@ -287,7 +302,7 @@ async def get_repo_refs(
     """从 GitHub/Gitee API 获取仓库的分支列表和最近的标签"""
     repo_url = await config_manager.get("scraper_resource_repo", "")
     if not repo_url:
-        return {"branches": [], "tags": []}
+        return {"branches": [], "tags": [], "appVersion": APP_VERSION, "minServerVersion": _get_local_min_server_version()}
 
     # 解析仓库 URL
     gitee_info = parse_gitee_url(repo_url)
@@ -299,7 +314,7 @@ async def get_repo_refs(
             pass
 
     if not repo_info and not gitee_info:
-        return {"branches": [], "tags": []}
+        return {"branches": [], "tags": [], "appVersion": APP_VERSION, "minServerVersion": _get_local_min_server_version()}
 
     # 构建请求头
     headers = {}
@@ -352,7 +367,12 @@ async def get_repo_refs(
     except Exception as e:
         logger.warning(f"获取仓库 refs 失败: {e}")
 
-    return {"branches": branches, "tags": tags}
+    return {
+        "branches": branches,
+        "tags": tags,
+        "appVersion": APP_VERSION,
+        "minServerVersion": _get_local_min_server_version(),
+    }
 
 
 async def _fetch_package_info_with_retry(package_url: str, headers: Dict[str, str], max_retries: int = 3, proxy: Optional[str] = None) -> Optional[Dict[str, Optional[str]]]:
