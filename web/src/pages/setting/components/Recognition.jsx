@@ -113,27 +113,36 @@ export const Recognition = () => {
             key: 'help',
             label: <span className="text-sm opacity-75"><strong>📖 配置说明（点击展开）</strong></span>,
             children: (
-              <div className="text-sm opacity-75">
-                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded mb-3">
+              <div className="text-sm opacity-75 space-y-3">
+                <div className="bg-blue-50 dark:bg-blue-950/30 p-3 rounded">
                   <p className="font-semibold text-blue-800 dark:text-blue-300 mb-2">🔍 搜索预处理（在搜索前执行）</p>
                   <ul className="list-disc list-inside space-y-1 text-blue-700 dark:text-blue-400">
-                    <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code></li>
-                    <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
-                    <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
-                    <li><strong>复合格式：</strong> <code>某动画 =&gt; 正确名称 &amp;&amp; 第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
-                    <li><strong>季度预处理：</strong> <code>{'新说唱2025 => {<search_season=8>}'}</code></li>
+                    <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code> — 标题包含该词则跳过搜索</li>
+                    <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code> — 搜索时替换标题</li>
+                    <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code> — 通过定位词提取集数并偏移</li>
+                    <li><strong>复合格式：</strong> <code>某动画 =&gt; 正确名称 &amp;&amp; 第 &lt;&gt; 话 &gt;&gt; EP-1</code> — 同时替换标题和偏移集数</li>
+                    <li><strong>季度预处理：</strong> <code>{'新说唱2025 => {<search_season=8>}'}</code> — 指定搜索时使用的季度</li>
                   </ul>
                 </div>
                 <div className="bg-green-50 dark:bg-green-950/30 p-3 rounded">
                   <p className="font-semibold text-green-800 dark:text-green-300 mb-2">🎯 入库后处理（匹配后执行）</p>
                   <ul className="list-disc list-inside space-y-1 text-green-700 dark:text-green-400">
-                    <li><strong>季度偏移：</strong> <code>{'新说唱2025 => {[title=中国新说唱;season_offset=1>8]}'}</code></li>
-                    <li><strong>元数据替换：</strong> <code>{'错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}'}</code></li>
-                    <li><strong>源特定偏移：</strong> <code>{'某动画 => {[source=tencent;title=正确标题;season_offset=9>13]}'}</code></li>
-                    <li><strong>部分集数偏移：</strong> <code>{'某动画(下) => {[ep_range=1-12;ep_offset=+12]}'}</code></li>
+                    <li><strong>季度偏移：</strong> <code>{'标题 => {[title=正确标题;season_offset=1>8]}'}</code> — 替换标题并映射季度</li>
+                    <li><strong>源特定偏移：</strong> <code>{'标题 => {[source=tencent;title=正确标题;season_offset=9>13]}'}</code> — 限定特定源</li>
+                    <li><strong>元数据替换：</strong> <code>{'错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}'}</code> — 直接指定TMDB/豆瓣ID</li>
+                    <li><strong>部分集数偏移：</strong> <code>{'某动画(下) => {[ep_range=1-12;ep_offset=+12]}'}</code> — 只对范围内集数偏移</li>
+                    <li><strong>限定源+集偏移：</strong> <code>{'某动画 => {[ep_range=1-24;ep_offset=-24;source=bilibili]}'}</code></li>
                   </ul>
                 </div>
-                <p className="mt-2"><strong>季度偏移：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法)　<strong>集偏移：</strong> EP+1, 2*EP, 2*EP-1</p>
+                <div className="bg-gray-50 dark:bg-gray-800/30 p-3 rounded">
+                  <p className="font-semibold mb-1">📐 偏移格式参考</p>
+                  <div className="space-y-1">
+                    <p><strong>季度偏移：</strong> <code>1&gt;8</code>(映射) <code>1+7</code>(加法) <code>9-1</code>(减法) <code>*+4</code>(所有季+4) <code>*&gt;1</code>(所有季改为1)</p>
+                    <p><strong>集偏移：</strong> <code>EP+1</code>(加1) <code>EP-1</code>(减1) <code>2*EP</code>(翻倍) <code>2*EP-1</code>(翻倍减1)</p>
+                    <p><strong>部分集偏移范围：</strong> <code>ep_range=1-12</code>(第1~12集) <code>ep_range=13-*</code>(第13集起无上限)</p>
+                  </div>
+                </div>
+                <p className="text-xs opacity-60">💡 <code>#</code> 开头为注释，空行会被忽略，注意 <code>=&gt;</code> <code>&lt;&gt;</code> <code>&gt;&gt;</code> <code>&amp;&amp;</code> 左右需要空格</p>
               </div>
             ),
           }]}
