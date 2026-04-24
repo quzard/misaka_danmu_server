@@ -68,8 +68,20 @@ async def _optimize_database(session: AsyncSession, db_type: str) -> str:
         finally:
             await auto_commit_engine.dispose()
     elif db_type == "mysql":
-        # InnoDB 引擎有自动空间回收机制，OPTIMIZE TABLE 会锁表且耗时极长，无实际收益，跳过。
-        return "MySQL InnoDB 无需手动 OPTIMIZE TABLE，已跳过。"
+        # InnoDB 的 OPTIMIZE TABLE 会全表重建，大表上耗时极长且锁 I/O，不适合定时任务。
+        # 改为 ANALYZE TABLE：仅更新索引统计信息，不锁表、不重建，几毫秒完成。
+        # 在 prune_logs 批量 DELETE 后执行，确保查询优化器使用最新统计。
+        tables_to_analyze = ["task_history", "token_access_log", "external_api_logs"]
+        analyzed = []
+        for table in tables_to_analyze:
+            try:
+                await session.execute(text(f"ANALYZE TABLE `{table}`"))
+                analyzed.append(table)
+            except Exception as e:
+                logger.warning(f"ANALYZE TABLE `{table}` 失败: {e}")
+        if analyzed:
+            return f"MySQL ANALYZE TABLE 完成: {', '.join(analyzed)}。"
+        return "MySQL ANALYZE TABLE: 无可分析的表。"
     else:
         message = f"不支持的数据库类型 '{db_type}'，跳过优化。"
         logger.warning(message)
