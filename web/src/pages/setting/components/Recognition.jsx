@@ -1,7 +1,8 @@
-import { Button, Card, Collapse, Input, InputNumber, Select, Tag } from 'antd'
+import { Button, Card, Collapse, Input, InputNumber, Modal, Select, Space, Tag, Tooltip } from 'antd'
 import { useEffect, useState } from 'react'
 import { useMessage } from '../../../MessageContext'
-import { getRecognition, setRecognition, testRecognition } from '../../../apis'
+import { getRecognition, setRecognition, testRecognition, generateRegex } from '../../../apis'
+import { RobotOutlined } from '@ant-design/icons'
 
 export const Recognition = () => {
   const [loading, setLoading] = useState(true)
@@ -10,6 +11,10 @@ export const Recognition = () => {
   const messageApi = useMessage()
 
   const [text, setText] = useState('')
+  const [aiModalOpen, setAiModalOpen] = useState(false)
+  const [aiDesc, setAiDesc] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiResult, setAiResult] = useState('')
 
   // 测试工具状态
   const [testTitle, setTestTitle] = useState('')
@@ -45,6 +50,36 @@ export const Recognition = () => {
     } finally {
       setIsSaveLoading(false)
     }
+  }
+
+  const handleAiGenerate = async () => {
+    if (!aiDesc.trim()) {
+      messageApi.warning('请输入需求描述')
+      return
+    }
+    setAiLoading(true)
+    setAiResult('')
+    try {
+      const res = await generateRegex(aiDesc.trim(), text, 'recognition_rules')
+      if (res.data?.regex) {
+        setAiResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的配置规则')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 生成失败')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const handleApplyAiResult = () => {
+    if (!aiResult) return
+    setText(aiResult)
+    setAiModalOpen(false)
+    setAiDesc('')
+    setAiResult('')
+    messageApi.success('已应用 AI 生成的配置')
   }
 
   const handleTest = async () => {
@@ -85,6 +120,7 @@ export const Recognition = () => {
                     <li><strong>屏蔽词：</strong> <code>BLOCK:预告</code></li>
                     <li><strong>简单替换：</strong> <code>奔跑吧 =&gt; 奔跑吧兄弟</code></li>
                     <li><strong>集数偏移：</strong> <code>第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
+                    <li><strong>复合格式：</strong> <code>某动画 =&gt; 正确名称 &amp;&amp; 第 &lt;&gt; 话 &gt;&gt; EP-1</code></li>
                     <li><strong>季度预处理：</strong> <code>{'新说唱2025 => {<search_season=8>}'}</code></li>
                   </ul>
                 </div>
@@ -94,14 +130,27 @@ export const Recognition = () => {
                     <li><strong>季度偏移：</strong> <code>{'新说唱2025 => {[title=中国新说唱;season_offset=1>8]}'}</code></li>
                     <li><strong>元数据替换：</strong> <code>{'错误标题 => {[tmdbid=12345;type=tv;s=1;e=1]}'}</code></li>
                     <li><strong>源特定偏移：</strong> <code>{'某动画 => {[source=tencent;title=正确标题;season_offset=9>13]}'}</code></li>
+                    <li><strong>部分集数偏移：</strong> <code>{'某动画(下) => {[ep_range=1-12;ep_offset=+12]}'}</code></li>
                   </ul>
                 </div>
-                <p className="mt-2"><strong>偏移格式：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法)</p>
+                <p className="mt-2"><strong>季度偏移：</strong> 1&gt;8(直接映射), 1+7(加法), 9-1(减法), *+4(通用加法)　<strong>集偏移：</strong> EP+1, 2*EP, 2*EP-1</p>
               </div>
             ),
           }]}
           className="mb-4"
         />
+        <div className="flex justify-end mb-2">
+          <Tooltip title="使用 AI 根据自然语言描述生成识别词配置">
+            <Button
+              type="link"
+              size="small"
+              icon={<RobotOutlined />}
+              onClick={() => setAiModalOpen(true)}
+            >
+              AI 生成
+            </Button>
+          </Tooltip>
+        </div>
         <Input.TextArea
           rows={12}
           value={text}
@@ -190,6 +239,56 @@ BLOCK:预告
           )}
         </div>
       </Card>
+
+      <Modal
+        title={<><RobotOutlined /> AI 识别词配置助手</>}
+        open={aiModalOpen}
+        onCancel={() => { setAiModalOpen(false); setAiResult('') }}
+        footer={null}
+        destroyOnClose
+        width={700}
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你的需求，AI 会按照识别词 DSL 语法生成对应的配置规则。
+            </div>
+            <Input.TextArea
+              value={aiDesc}
+              onChange={e => setAiDesc(e.target.value)}
+              placeholder={'例如：\n• 新说唱2025 搜索时使用"中国新说唱 第8季"，季度偏移 1>8\n• 屏蔽包含"预告"的标题\n• 奔跑吧 替换为 奔跑吧兄弟'}
+              rows={4}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">{text.trim() ? '合并后的完整配置：' : '生成结果：'}</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm whitespace-pre-wrap" style={{ maxHeight: 300, overflow: 'auto' }}>
+                {aiResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiResult}>
+                    应用配置
+                  </Button>
+                </Space>
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

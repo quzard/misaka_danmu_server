@@ -191,7 +191,7 @@ export const OutputManage = () => {
     setAiRegexLoading(true)
     setAiRegexResult('')
     try {
-      const res = await generateRegex(aiRegexDesc.trim(), blacklistPatterns)
+      const res = await generateRegex(aiRegexDesc.trim(), blacklistPatterns, 'danmaku_blacklist')
       if (res.data?.regex) {
         setAiRegexResult(res.data.regex)
       } else {

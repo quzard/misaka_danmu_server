@@ -1403,7 +1403,7 @@ export const Scrapers = () => {
     setAiRegexResult('')
     try {
       const existing = form.getFieldValue(`${setname}EpisodeBlacklistRegex`) || ''
-      const res = await generateRegex(aiRegexDesc.trim(), existing)
+      const res = await generateRegex(aiRegexDesc.trim(), existing, 'episode_blacklist')
       if (res.data?.regex) {
         setAiRegexResult(res.data.regex)
       } else {

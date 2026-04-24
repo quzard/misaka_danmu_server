@@ -130,7 +130,7 @@ export const Webhook = () => {
     setAiRegexResult('')
     try {
       const existing = form.getFieldValue('webhookFilterRegex') || ''
-      const res = await generateRegex(aiRegexDesc.trim(), existing)
+      const res = await generateRegex(aiRegexDesc.trim(), existing, 'webhook_filter')
       if (res.data?.regex) {
         setAiRegexResult(res.data.regex)
       } else {
