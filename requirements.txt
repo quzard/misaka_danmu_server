@@ -8,9 +8,10 @@ apscheduler
 pydantic-settings
 httpx[socks]>=0.23.0
 # 使用固定的 passlib 和 bcrypt 版本以避免兼容性问题
-# passlib>=1.7.4 才与 bcrypt>=4.0 兼容
+# passlib 未适配 bcrypt>=4.1 的 API 变更（__about__ 移除、72字节密码限制）
+# 锁定 bcrypt<4.1 直到 passlib 发布兼容版本
 passlib>=1.7.4
-bcrypt>=4.0.1
+bcrypt>=4.0.1,<4.1
 python-jose[cryptography]
 python-multipart
 # protobuf v5.x 与 Python 3.12 兼容
