@@ -73,6 +73,37 @@ def _get_rp_id(request: Request) -> str:
     return host.split(":")[0]
 
 
+def _get_origin(request: Request) -> str:
+    """
+    从请求中推断客户端真实 origin。
+
+    优先级:
+    1. Origin 请求头（浏览器自动发送，最可靠）
+    2. Referer 请求头（取 scheme://host 部分）
+    3. X-Forwarded-Proto + Host（反向代理场景）
+    4. request.url.scheme + Host（直连场景）
+    """
+    # 1. 优先使用浏览器发送的 Origin 头
+    origin_header = request.headers.get("origin")
+    if origin_header:
+        return origin_header.rstrip("/")
+
+    # 2. 尝试从 Referer 推断
+    referer = request.headers.get("referer")
+    if referer:
+        # 取 scheme://host 部分
+        from urllib.parse import urlparse
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+
+    # 3. X-Forwarded-Proto（反代终结 SSL 时）
+    host = request.headers.get("host", "localhost")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+
+    return f"{proto}://{host}"
+
+
 
 # ======== MFA 状态查询 ========
 
@@ -230,7 +261,7 @@ async def passkey_register_verify(
         raise HTTPException(status_code=400, detail="注册已过期，请重新开始")
 
     rp_id = _get_rp_id(request)
-    origin = f"{request.url.scheme}://{request.headers.get('host', 'localhost')}"
+    origin = _get_origin(request)
 
     try:
         verification = verify_registration_response(
@@ -322,7 +353,7 @@ async def passkey_authenticate_verify(
         raise HTTPException(status_code=400, detail="认证已过期，请重新开始")
 
     rp_id = _get_rp_id(request)
-    origin = f"{request.url.scheme}://{request.headers.get('host', 'localhost')}"
+    origin = _get_origin(request)
 
     # 解析凭证以获取 credential_id，查找对应的 passkey
     try:
