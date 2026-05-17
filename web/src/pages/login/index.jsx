@@ -6,12 +6,14 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   KeyOutlined,
+  ClearOutlined,
 } from '@ant-design/icons'
 import { login, autoLogin, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
 import { useNavigate } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
 import { MfaVerifyModal, base64urlToBuffer, bufferToBase64url } from '../../components/MfaVerifyModal'
+import { clearBrowserCache } from '../../utils/clearCache'
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -246,6 +248,18 @@ export const Login = () => {
               </div>
             </>
           )}
+
+          {/* 清理浏览器缓存 */}
+          <div className="px-6 pb-4 text-center">
+            <Button
+              type="link"
+              size="small"
+              icon={<ClearOutlined />}
+              onClick={clearBrowserCache}
+            >
+              清理浏览器缓存
+            </Button>
+          </div>
         </Card>      )}
 
       {/* MFA 验证弹窗 */}

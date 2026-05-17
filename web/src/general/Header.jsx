@@ -18,6 +18,7 @@ import RealtimeLogModal from '@/components/RealtimeLogModal'
 import CacheManagerModal from '@/components/CacheManagerModal'
 import HistoryLogModal from '@/components/HistoryLogModal'
 import { RateLimitIndicator } from '@/components/RateLimitIndicator'
+import { clearBrowserCache } from '@/utils/clearCache'
 
 // 实时日志图标 (Lucide - scroll-text)
 const RealtimeLogIcon = () => (
@@ -427,6 +428,8 @@ const MobileHeader = ({ activeKey }) => {
       setIsThemeColorOpen(true)
     } else if (item.key === 'cache-manager') {
       setIsCacheModalOpen(true)
+    } else if (item.key === 'clear-browser-cache') {
+      clearBrowserCache()
     } else if (item.key === 'restart-service') {
       // 重启由 Popconfirm 处理，这里不做任何事
     } else if (parentItem?.key === 'user') {
@@ -515,6 +518,11 @@ const MobileHeader = ({ activeKey }) => {
                       {
                         key: 'cache-manager',
                         label: '缓存管理',
+                        icon: 'refresh',
+                      },
+                      {
+                        key: 'clear-browser-cache',
+                        label: '清理浏览器缓存',
                         icon: 'refresh',
                       },
                       ...(dockerAvailable ? [{
@@ -885,6 +893,15 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                     label: (
                       <div onClick={() => setIsCacheModalOpen(true)} className="text-base">
                         缓存管理
+                      </div>
+                    ),
+                  },
+                  {
+                    key: 'clearCache',
+                    icon: <MyIcon icon="refresh" size={16} />,
+                    label: (
+                      <div onClick={clearBrowserCache} className="text-base">
+                        清理浏览器缓存
                       </div>
                     ),
                   },
