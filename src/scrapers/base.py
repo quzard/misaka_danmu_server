@@ -441,23 +441,28 @@ class BaseScraper(ABC):
         """
         return str(provider_episode_id)
 
-    async def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
+    async def _filter_junk_episodes(
+        self,
+        episodes: List["models.ProviderEpisodeInfo"],
+    ) -> Tuple[List["models.ProviderEpisodeInfo"], List[Tuple["models.ProviderEpisodeInfo", str]]]:
         """
         过滤掉垃圾分集（预告、花絮等）
 
         注意：此方法现在从 config 表读取过滤规则，不再使用硬编码的正则表达式。
         如果 config 表中没有配置过滤规则，则不进行过滤。
+
+        Returns:
+            (保留的分集列表, 被过滤的分集列表[(episode, 匹配规则)])
         """
         if not episodes:
-            return episodes
+            return episodes, []
 
         # 从 config 表获取过滤规则，不使用硬编码兜底
         blacklist_pattern = await self.get_episode_blacklist_pattern()
 
         # 如果没有配置过滤规则，直接返回所有分集
         if not blacklist_pattern:
-            self.logger.info(f"{self.provider_name}: 分集过滤结果 (无过滤规则): 共 {len(episodes)} 集")
-            return episodes
+            return episodes, []
 
         filtered_episodes = []
         filtered_out_episodes = []
@@ -471,25 +476,41 @@ class BaseScraper(ABC):
             else:
                 filtered_episodes.append(episode)
 
-        # 打印分集过滤摘要
-        summary_parts = [f"{self.provider_name}: 分集过滤结果:"]
+        return filtered_episodes, filtered_out_episodes
 
-        # 打印过滤掉的分集（这些比较重要，逐条列出）
-        if filtered_out_episodes:
-            summary_parts.append(f"  已过滤 {len(filtered_out_episodes)} 集:")
-            for episode, junk_type in filtered_out_episodes:
-                summary_parts.append(f"    ✗ {episode.title} ({junk_type})")
+    def _log_episodes_result(
+        self,
+        kept_episodes: List["models.ProviderEpisodeInfo"],
+        filtered_out: List[Tuple["models.ProviderEpisodeInfo", str]],
+        elapsed_ms: int,
+        target_episode_index: Optional[int] = None,
+    ) -> None:
+        """
+        统一的分集获取结果日志，同时显示保留和被过滤的分集。
 
-        # 保留的分集只显示数量
-        if filtered_episodes:
-            summary_parts.append(f"  保留 {len(filtered_episodes)} 集")
+        Args:
+            kept_episodes: 保留的分集列表
+            filtered_out: 被过滤的分集列表 [(episode, 匹配规则)]
+            elapsed_ms: 耗时（毫秒）
+            target_episode_index: 如果指定了目标集数，只显示该集
+        """
+        episodes_to_log = (
+            [ep for ep in kept_episodes if ep.episodeIndex == target_episode_index]
+            if target_episode_index is not None
+            else kept_episodes
+        )
 
-        if not filtered_episodes and not filtered_out_episodes:
-            summary_parts.append(f"  无分集数据")
+        log_lines = ["-", f"┌─── {self.provider_name} ({len(episodes_to_log)}个结果, {elapsed_ms}ms) ───"]
+        for ep in episodes_to_log:
+            log_lines.append(f"  - {ep.title}")
 
-        self.logger.info("\n".join(summary_parts))
+        if filtered_out:
+            log_lines.append(f"  已过滤 {len(filtered_out)} 集:")
+            for ep, rule in filtered_out:
+                log_lines.append(f"    ✗ {ep.title} ({rule})")
 
-        return filtered_episodes
+        log_lines.append(f"└─── {self.provider_name} ───")
+        self.logger.info("\n".join(log_lines))
 
     @abstractmethod
     async def close(self):
