@@ -15,8 +15,8 @@ export default defineConfig({
       workbox: {
         // 只缓存核心静态资源，不缓存 API 请求
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // 跳过大文件（>2MB）
-        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+        // 主 JS 包较大（~3MB），需要提高缓存上限
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // 不缓存 API 和数据请求
         navigateFallbackDenylist: [/^\/api\//],
       },
