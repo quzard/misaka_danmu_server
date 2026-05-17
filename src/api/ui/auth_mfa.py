@@ -6,10 +6,12 @@ MFA (多因素认证) 管理 API
 
 import json
 import logging
+import secrets
 import time
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from webauthn import (
@@ -27,16 +29,17 @@ from webauthn.helpers.structs import (
 )
 from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 
-from src.db import models, crud, get_db_session
+from src.db import models, crud, get_db_session, ConfigManager
 from src.db.crud import passkey as passkey_crud
+from src.db.crud import session as session_crud
 from src import security
 from src.utils.otp import generate_secret, get_totp_uri, verify_otp
+from src.api.dependencies import get_config_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # ======== WebAuthn 配置 ========
-# 通过配置或环境变量获取，这里使用合理的默认值
 RP_ID = "localhost"  # 会在运行时从请求中动态推断
 RP_NAME = "Misaka弹幕库"
 
@@ -45,11 +48,15 @@ RP_NAME = "Misaka弹幕库"
 _challenge_store: dict[str, tuple[bytes, float]] = {}
 CHALLENGE_TTL = 300  # 5分钟过期
 
+# ======== MFA Pending 临时令牌存储 ========
+# key: mfa_token, value: (username, user_id, timestamp)
+_mfa_pending_store: dict[str, tuple[str, int, float]] = {}
+MFA_PENDING_TTL = 300  # 5分钟过期
+
 
 def _store_challenge(username: str, challenge: bytes):
     """存储 challenge 并自动清理过期条目"""
     now = time.time()
-    # 清理过期的 challenge
     expired_keys = [k for k, (_, t) in _challenge_store.items() if now - t > CHALLENGE_TTL]
     for k in expired_keys:
         del _challenge_store[k]
@@ -64,6 +71,28 @@ def _get_and_consume_challenge(username: str) -> Optional[bytes]:
     if time.time() - ts > CHALLENGE_TTL:
         return None
     return challenge
+
+
+def create_mfa_token(username: str, user_id: int) -> str:
+    """创建 MFA 临时令牌（证明密码已验证通过）"""
+    now = time.time()
+    # 清理过期令牌
+    expired = [k for k, (_, _, t) in _mfa_pending_store.items() if now - t > MFA_PENDING_TTL]
+    for k in expired:
+        del _mfa_pending_store[k]
+    token = secrets.token_urlsafe(32)
+    _mfa_pending_store[token] = (username, user_id, now)
+    return token
+
+
+def consume_mfa_token(token: str) -> Optional[tuple[str, int]]:
+    """消费 MFA 临时令牌，返回 (username, user_id) 或 None"""
+    if token not in _mfa_pending_store:
+        return None
+    username, user_id, ts = _mfa_pending_store.pop(token)
+    if time.time() - ts > MFA_PENDING_TTL:
+        return None
+    return username, user_id
 
 
 def _get_rp_id(request: Request) -> str:
@@ -420,3 +449,179 @@ async def delete_passkey(
     if not success:
         raise HTTPException(status_code=404, detail="PassKey not found")
     return {"message": "PassKey 已删除"}
+
+
+# ======== 统一 MFA 验证（签发 JWT） ========
+
+async def _issue_jwt_for_user(
+    request: Request,
+    session: AsyncSession,
+    config_manager: ConfigManager,
+    username: str,
+    user_id: int,
+):
+    """MFA 验证通过后签发 JWT 并创建会话，返回 Token 响应体"""
+    access_token, jti, expire_minutes = await security.create_access_token(
+        data={"sub": username}, session=session
+    )
+    # 更新用户登录信息
+    from src.db.crud import user as user_crud
+    await user_crud.update_user_login_info(session, username, access_token)
+
+    # 创建会话记录
+    client_ip = await security.get_real_client_ip(request, config_manager)
+    user_agent = request.headers.get("user-agent", "")
+    await session_crud.create_user_session(
+        session=session,
+        user_id=user_id,
+        jti=jti,
+        ip_address=client_ip,
+        user_agent=user_agent,
+        expires_minutes=expire_minutes,
+    )
+
+    return {"accessToken": access_token, "tokenType": "bearer", "expiresIn": expire_minutes}
+
+
+@router.post("/verify", summary="统一 MFA 验证并签发 JWT")
+async def mfa_verify(
+    request: Request,
+    mfa_token: str = Form(..., description="密码验证后获得的临时 MFA 令牌"),
+    otp_code: Optional[str] = Form(None, description="TOTP 验证码（6位）"),
+    passkey_credential: Optional[str] = Form(None, description="PassKey WebAuthn 凭证 JSON"),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager),
+):
+    """
+    统一 MFA 验证接口。密码验证通过后，前端用 mfaToken 调此接口完成二步验证。
+    支持 TOTP 验证码 或 PassKey 凭证，验证通过后直接签发 JWT。
+    """
+    # 验证 mfa_token
+    result = consume_mfa_token(mfa_token)
+    if not result:
+        raise HTTPException(status_code=401, detail="MFA 令牌无效或已过期")
+    username, user_id = result
+
+    user = await crud.get_user_by_username(session, username)
+    if not user:
+        raise HTTPException(status_code=401, detail="用户不存在")
+
+    # 尝试 TOTP 验证
+    if otp_code:
+        otp_secret = user.get("otpSecret")
+        if otp_secret and verify_otp(otp_secret, otp_code):
+            return await _issue_jwt_for_user(request, session, config_manager, username, user_id)
+        raise HTTPException(status_code=401, detail="验证码错误")
+
+    # 尝试 PassKey 验证
+    if passkey_credential:
+        rp_id = _get_rp_id(request)
+        origin = _get_origin(request)
+
+        # 获取 challenge
+        challenge_key = f"passkey_auth_{username}"
+        challenge = _get_and_consume_challenge(challenge_key)
+        if not challenge:
+            raise HTTPException(status_code=400, detail="PassKey 认证已过期，请重新开始")
+
+        try:
+            cred_data = json.loads(passkey_credential)
+            raw_id = cred_data.get("rawId") or cred_data.get("id", "")
+        except (json.JSONDecodeError, AttributeError):
+            raise HTTPException(status_code=400, detail="无效的凭证数据")
+
+        passkey_record = await passkey_crud.get_passkey_by_credential_id(session, raw_id)
+        if not passkey_record or passkey_record["userId"] != user_id:
+            raise HTTPException(status_code=400, detail="未找到对应的 PassKey")
+
+        try:
+            verification = verify_authentication_response(
+                credential=passkey_credential,
+                expected_challenge=challenge,
+                expected_rp_id=rp_id,
+                expected_origin=origin,
+                credential_public_key=base64url_to_bytes(passkey_record["publicKey"]),
+                credential_current_sign_count=passkey_record["signCount"],
+            )
+        except Exception as e:
+            logger.warning(f"PassKey MFA 验证失败: {e}")
+            raise HTTPException(status_code=400, detail=f"PassKey 验证失败: {str(e)}")
+
+        await passkey_crud.update_passkey_sign_count(session, raw_id, verification.new_sign_count)
+        return await _issue_jwt_for_user(request, session, config_manager, username, user_id)
+
+    raise HTTPException(status_code=400, detail="请提供 TOTP 验证码或 PassKey 凭证")
+
+
+# ======== PassKey 无密码直接登录 ========
+
+@router.post("/passkey/login/options", summary="PassKey 无密码登录 - 获取认证选项")
+async def passkey_login_options(
+    request: Request,
+):
+    """
+    PassKey 无密码登录第一步：生成 WebAuthn 认证选项。
+    不需要输入用户名，浏览器会自动匹配已注册的 PassKey。
+    """
+    rp_id = _get_rp_id(request)
+
+    options = generate_authentication_options(
+        rp_id=rp_id,
+        user_verification=UserVerificationRequirement.PREFERRED,
+    )
+
+    _store_challenge("passkey_login__direct", options.challenge)
+    return {"options": options_to_json(options)}
+
+
+@router.post("/passkey/login/verify", summary="PassKey 无密码登录 - 验证并签发 JWT")
+async def passkey_login_verify(
+    request: Request,
+    credential: str = Form(..., description="WebAuthn 凭证 JSON"),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager),
+):
+    """
+    PassKey 无密码登录第二步：验证凭证并直接签发 JWT。
+    """
+    challenge = _get_and_consume_challenge("passkey_login__direct")
+    if not challenge:
+        raise HTTPException(status_code=400, detail="登录已过期，请重新开始")
+
+    rp_id = _get_rp_id(request)
+    origin = _get_origin(request)
+
+    try:
+        cred_data = json.loads(credential)
+        raw_id = cred_data.get("rawId") or cred_data.get("id", "")
+    except (json.JSONDecodeError, AttributeError):
+        raise HTTPException(status_code=400, detail="无效的凭证数据")
+
+    passkey_record = await passkey_crud.get_passkey_by_credential_id(session, raw_id)
+    if not passkey_record:
+        raise HTTPException(status_code=400, detail="未注册的 PassKey")
+
+    try:
+        verification = verify_authentication_response(
+            credential=credential,
+            expected_challenge=challenge,
+            expected_rp_id=rp_id,
+            expected_origin=origin,
+            credential_public_key=base64url_to_bytes(passkey_record["publicKey"]),
+            credential_current_sign_count=passkey_record["signCount"],
+        )
+    except Exception as e:
+        logger.warning(f"PassKey 直接登录验证失败: {e}")
+        raise HTTPException(status_code=400, detail=f"PassKey 验证失败: {str(e)}")
+
+    await passkey_crud.update_passkey_sign_count(session, raw_id, verification.new_sign_count)
+
+    # 查找用户
+    user = await crud.user.get_user_by_id(session, passkey_record["userId"])
+    if not user:
+        raise HTTPException(status_code=400, detail="用户不存在")
+
+    return await _issue_jwt_for_user(
+        request, session, config_manager,
+        user["username"], user["id"],
+    )

@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Form, Input, Button, Card, message } from 'antd'
+import { Form, Input, Button, Card, Divider } from 'antd'
 import {
   UserOutlined,
   LockOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
+  KeyOutlined,
 } from '@ant-design/icons'
-import { login, autoLogin } from '../../apis'
+import { login, autoLogin, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
 import { useNavigate } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
-import { MfaVerifyModal } from '../../components/MfaVerifyModal'
+import { MfaVerifyModal, base64urlToBuffer, bufferToBase64url } from '../../components/MfaVerifyModal'
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -19,7 +20,9 @@ export const Login = () => {
   const [checkingWhitelist, setCheckingWhitelist] = useState(true)
   const [mfaModalOpen, setMfaModalOpen] = useState(false)
   const [mfaTypes, setMfaTypes] = useState([])
-  const [pendingCredentials, setPendingCredentials] = useState(null)
+  const [mfaToken, setMfaToken] = useState('')
+  const [mfaUsername, setMfaUsername] = useState('')
+  const [passkeyLoginLoading, setPasskeyLoginLoading] = useState(false)
   const navigate = useNavigate()
   const messageApi = useMessage()
 
@@ -80,10 +83,11 @@ export const Login = () => {
         messageApi.error('登录失败，请检查用户名或密码')
       }
     } catch (error) {
-      // 检查是否是 403 MFA 要求（axios 拦截器已将 response.data 展开到 error 上）
+      // 检查是否是 403 MFA 要求
       if (error.code === 403 && error.mfaRequired) {
         setMfaTypes(error.mfaTypes || [])
-        setPendingCredentials(values)
+        setMfaToken(error.mfaToken || '')
+        setMfaUsername(values.username || '')
         setMfaModalOpen(true)
       } else {
         console.error('登录失败:', error)
@@ -94,38 +98,64 @@ export const Login = () => {
     }
   }
 
-  // MFA 验证回调
-  const handleMfaVerify = useCallback(async ({ type, code, verified }) => {
-    if (!pendingCredentials) return
-
-    if (type === 'totp') {
-      try {
-        // 重新提交登录，带上 OTP 验证码
-        const formData = { ...pendingCredentials, otp_password: code }
-        const res = await login(formData)
-        if (res.data.accessToken) {
-          setMfaModalOpen(false)
-          saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
-        }
-      } catch (err) {
-        messageApi.error(err.detail || err.message || '验证码错误')
-        throw err // 让 MfaVerifyModal 知道验证失败
-      }
-    } else if (type === 'passkey' && verified) {
-      // PassKey 验证已在 MfaVerifyModal 中完成，现在用 OTP 占位码登录
-      try {
-        const formData = { ...pendingCredentials, otp_password: 'passkey_verified' }
-        const res = await login(formData)
-        if (res.data.accessToken) {
-          setMfaModalOpen(false)
-          saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
-        }
-      } catch (err) {
-        messageApi.error('PassKey 登录失败')
-        throw err
-      }
+  // MFA 验证成功回调（MfaVerifyModal 直接返回 JWT 数据）
+  const handleMfaSuccess = useCallback((tokenData) => {
+    setMfaModalOpen(false)
+    if (tokenData.accessToken) {
+      saveTokenAndNavigate(tokenData.accessToken, tokenData.expiresIn)
     }
-  }, [pendingCredentials, saveTokenAndNavigate, messageApi])
+  }, [saveTokenAndNavigate])
+
+  // PassKey 无密码直接登录
+  const handlePasskeyLogin = useCallback(async () => {
+    if (!window.PublicKeyCredential) {
+      messageApi.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+      return
+    }
+    setPasskeyLoginLoading(true)
+    try {
+      // 1. 获取认证选项
+      const optionsRes = await getPasskeyLoginOptions()
+      const options = JSON.parse(optionsRes.data.options)
+      options.challenge = base64urlToBuffer(options.challenge)
+      if (options.allowCredentials) {
+        options.allowCredentials = options.allowCredentials.map(c => ({
+          ...c, id: base64urlToBuffer(c.id),
+        }))
+      }
+
+      // 2. 浏览器 WebAuthn
+      const credential = await navigator.credentials.get({ publicKey: options })
+      const credJSON = JSON.stringify({
+        id: credential.id,
+        rawId: credential.id,
+        type: credential.type,
+        response: {
+          authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+          clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+          signature: bufferToBase64url(credential.response.signature),
+          userHandle: credential.response.userHandle
+            ? bufferToBase64url(credential.response.userHandle)
+            : null,
+        },
+      })
+
+      // 3. 服务端验证 → 直接拿 JWT
+      const res = await verifyPasskeyLogin({ credential: credJSON })
+      if (res.data.accessToken) {
+        saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
+      }
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        messageApi.info('PassKey 登录已取消')
+      } else {
+        console.error('PassKey 登录失败:', err)
+        messageApi.error('PassKey 登录失败: ' + (err.detail || err.message || '未知错误'))
+      }
+    } finally {
+      setPasskeyLoginLoading(false)
+    }
+  }, [saveTokenAndNavigate, messageApi])
 
   return (
     <div className="my-6 flex items-center justify-center">
@@ -195,15 +225,33 @@ export const Login = () => {
               </Button>
             </Form.Item>
           </Form>
+
+          {/* PassKey 无密码登录 */}
+          {window.PublicKeyCredential && (
+            <>
+              <Divider plain className="!mt-0 !mb-3 px-6">或</Divider>
+              <div className="px-6 pb-6">
+                <Button
+                  block
+                  icon={<KeyOutlined />}
+                  loading={passkeyLoginLoading}
+                  onClick={handlePasskeyLogin}
+                >
+                  使用 PassKey 登录
+                </Button>
+              </div>
+            </>
+          )}
         </Card>      )}
 
       {/* MFA 验证弹窗 */}
       <MfaVerifyModal
         open={mfaModalOpen}
         onCancel={() => setMfaModalOpen(false)}
-        onVerify={handleMfaVerify}
+        onSuccess={handleMfaSuccess}
         mfaTypes={mfaTypes}
-        username={pendingCredentials?.username || ''}
+        mfaToken={mfaToken}
+        username={mfaUsername}
       />
     </div>
   )

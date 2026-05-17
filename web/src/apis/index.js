@@ -63,41 +63,42 @@ export const revokeOtherSessions = () =>
 /** ---------------------------------------------------MFA 相关------------------------------------------------ */
 /** 获取 MFA 状态 */
 export const getMfaStatus = () => api.get('/api/ui/auth/mfa/status')
-
 /** 生成 TOTP 密钥 */
 export const setupTotp = () => api.post('/api/ui/auth/mfa/totp/setup')
-
 /** 确认 TOTP 设置 */
 export const verifyTotpSetup = data =>
   api.post('/api/ui/auth/mfa/totp/verify-setup', data)
-
 /** 关闭 TOTP */
 export const disableTotp = data =>
   api.post('/api/ui/auth/mfa/totp/disable', data)
-
+/** 统一 MFA 验证（签发 JWT） */
+export const mfaVerify = data =>
+  api.post('/api/ui/auth/mfa/verify', data, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  })
 /** 生成 PassKey 注册选项 */
 export const getPasskeyRegisterOptions = () =>
   api.post('/api/ui/auth/mfa/passkey/register/options')
-
 /** 验证 PassKey 注册 */
 export const verifyPasskeyRegister = data =>
   api.post('/api/ui/auth/mfa/passkey/register/verify', data)
-
-/** 生成 PassKey 认证选项 */
+/** 生成 PassKey 认证选项（MFA 流程） */
 export const getPasskeyAuthOptions = (username = '') =>
   api.post(`/api/ui/auth/mfa/passkey/authenticate/options?username=${encodeURIComponent(username)}`)
-
-/** 验证 PassKey 认证 */
-export const verifyPasskeyAuth = (data, username = '') =>
-  api.post(`/api/ui/auth/mfa/passkey/authenticate/verify?username=${encodeURIComponent(username)}`, data)
-
 /** 重命名 PassKey */
 export const renamePasskey = (passkeyId, data) =>
   api.put(`/api/ui/auth/mfa/passkey/${passkeyId}/rename`, data)
-
 /** 删除 PassKey */
 export const deletePasskey = passkeyId =>
   api.delete(`/api/ui/auth/mfa/passkey/${passkeyId}`)
+/** PassKey 无密码登录 - 获取选项 */
+export const getPasskeyLoginOptions = () =>
+  api.post('/api/ui/auth/mfa/passkey/login/options')
+/** PassKey 无密码登录 - 验证 */
+export const verifyPasskeyLogin = data =>
+  api.post('/api/ui/auth/mfa/passkey/login/verify', data, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  })
 
 /** ---------------------------------------------------首页接口------------------------------------------------ */
 /** 获取日志 */

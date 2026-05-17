@@ -1,15 +1,19 @@
 import { useState, useCallback } from 'react'
 import { Modal, Input, Button, Space, Typography, Divider, message } from 'antd'
 import { SafetyOutlined, KeyOutlined } from '@ant-design/icons'
-import { verifyPasskeyAuth, getPasskeyAuthOptions } from '../apis'
+import { mfaVerify, getPasskeyAuthOptions } from '../apis'
 
 const { Text } = Typography
 
 /**
  * MFA 验证弹窗组件
  * 支持 TOTP 验证码输入和 PassKey 认证
+ *
+ * Props:
+ *  - mfaToken: 密码验证后获得的临时令牌
+ *  - onSuccess(tokenData): MFA 验证成功，返回 JWT 数据
  */
-export const MfaVerifyModal = ({ open, onCancel, onVerify, mfaTypes = [], username = '' }) => {
+export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaToken = '', username = '' }) => {
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [passkeyLoading, setPasskeyLoading] = useState(false)
@@ -17,7 +21,7 @@ export const MfaVerifyModal = ({ open, onCancel, onVerify, mfaTypes = [], userna
   const hasTotp = mfaTypes.includes('totp')
   const hasPasskey = mfaTypes.includes('passkey')
 
-  // TOTP 验证
+  // TOTP 验证 → 直接调 /mfa/verify 拿 JWT
   const handleTotpVerify = useCallback(async () => {
     if (!otpCode || otpCode.length !== 6) {
       message.warning('请输入6位验证码')
@@ -25,13 +29,16 @@ export const MfaVerifyModal = ({ open, onCancel, onVerify, mfaTypes = [], userna
     }
     setLoading(true)
     try {
-      await onVerify({ type: 'totp', code: otpCode })
+      const res = await mfaVerify({ mfa_token: mfaToken, otp_code: otpCode })
+      onSuccess(res.data)
+    } catch (err) {
+      message.error(err.detail || err.message || '验证码错误')
     } finally {
       setLoading(false)
     }
-  }, [otpCode, onVerify])
+  }, [otpCode, mfaToken, onSuccess])
 
-  // PassKey 验证
+  // PassKey 验证 → WebAuthn + /mfa/verify 拿 JWT
   const handlePasskeyVerify = useCallback(async () => {
     if (!window.PublicKeyCredential) {
       message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
@@ -71,22 +78,20 @@ export const MfaVerifyModal = ({ open, onCancel, onVerify, mfaTypes = [], userna
         },
       })
 
-      // 5. 发送到服务器验证
-      const verifyRes = await verifyPasskeyAuth({ credential: credentialJSON }, username)
-      if (verifyRes.data.verified) {
-        await onVerify({ type: 'passkey', verified: true })
-      }
+      // 5. 调 /mfa/verify 拿 JWT（服务端验证 PassKey）
+      const res = await mfaVerify({ mfa_token: mfaToken, passkey_credential: credentialJSON })
+      onSuccess(res.data)
     } catch (err) {
       if (err.name === 'NotAllowedError') {
         message.info('PassKey 验证已取消')
       } else {
         console.error('PassKey 验证失败:', err)
-        message.error('PassKey 验证失败: ' + (err.message || '未知错误'))
+        message.error('PassKey 验证失败: ' + (err.detail || err.message || '未知错误'))
       }
     } finally {
       setPasskeyLoading(false)
     }
-  }, [username, onVerify])
+  }, [username, mfaToken, onSuccess])
 
   const handleKeyDown = e => {
     if (e.key === 'Enter' && hasTotp) {

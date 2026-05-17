@@ -35,8 +35,10 @@ async def login_for_access_token(
     """
     用户登录,返回访问令牌。
 
-    如果用户开启了 MFA（TOTP 或 PassKey），密码验证通过后会返回 403 + MFA 要求信息。
-    前端需要弹出 MFA 验证框，然后重新提交带 otp_password 参数的请求。
+    MFA 流程:
+    1. 密码验证通过 → 检查 MFA → 返回 403 + mfaToken + mfaTypes
+    2. 前端调 /api/ui/auth/mfa/verify 用 mfaToken + (TOTP验证码 或 PassKey凭证) 完成验证并获取 JWT
+    3. 如果提供了 otp_password，则在此接口内直接验证 TOTP（向后兼容简化流程）
     """
     user = await user_crud.get_user_by_username(session, form_data.username)
     if not user or not security.verify_password(form_data.password, user["hashedPassword"]):
@@ -53,43 +55,33 @@ async def login_for_access_token(
     needs_mfa = has_totp or has_passkey
 
     if needs_mfa:
-        # 收集可用的 MFA 类型
         mfa_types = []
         if has_totp:
             mfa_types.append("totp")
         if has_passkey:
             mfa_types.append("passkey")
 
-        # 如果没有提供 OTP 验证码，返回 403 要求 MFA
-        if not otp_password:
+        # 如果提供了 otp_password 且有 TOTP，尝试直接验证（简化流程）
+        if otp_password and has_totp:
+            otp_secret = user.get("otpSecret")
+            if not (otp_secret and verify_otp(otp_secret, otp_password)):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid OTP code",
+                )
+            # TOTP 验证通过，继续签发 token
+        else:
+            # 生成 mfaToken 并返回 403，让前端走 /mfa/verify 流程
+            from src.api.ui.auth_mfa import create_mfa_token
+            mfa_token = create_mfa_token(user["username"], user["id"])
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={
                     "detail": "MFA required",
                     "mfaRequired": True,
                     "mfaTypes": mfa_types,
+                    "mfaToken": mfa_token,
                 }
-            )
-
-        # 有 OTP 验证码，验证 MFA
-        mfa_verified = False
-
-        # 检查是否是 PassKey 验证通过的标记（前端 PassKey 验证成功后传来）
-        if otp_password == "passkey_verified" and has_passkey:
-            # PassKey 验证已在 /mfa/passkey/authenticate/verify 中完成
-            # 这里信任前端标记（因为密码已验证通过）
-            mfa_verified = True
-
-        # 尝试 TOTP 验证
-        if not mfa_verified and has_totp:
-            otp_secret = user.get("otpSecret")
-            if otp_secret and verify_otp(otp_secret, otp_password):
-                mfa_verified = True
-
-        if not mfa_verified:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid OTP code",
             )
 
     # ===== 签发 Token =====
