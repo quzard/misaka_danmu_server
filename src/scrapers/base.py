@@ -475,7 +475,8 @@ class BaseScraper(ABC):
             # 使用从 config 表获取的正则表达式进行过滤
             match = blacklist_pattern.search(episode.title)
             if match:
-                junk_type = match.group(0)
+                # 优先取第2个捕获组（通常是关键词如"幕后""预告"），否则取整个匹配
+                junk_type = match.group(2) if match.lastindex and match.lastindex >= 2 else match.group(0)
                 filtered_out_episodes.append((episode, junk_type))
             else:
                 filtered_episodes.append(episode)
