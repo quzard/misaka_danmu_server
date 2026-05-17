@@ -514,7 +514,7 @@ class BaseScraper(ABC):
         if filtered_out:
             log_lines.append(f"  已过滤 {len(filtered_out)} 集:")
             for ep, rule in filtered_out:
-                log_lines.append(f"    ✗ {ep.title} ({rule})")
+                log_lines.append(f"    ✗ {ep.title} （黑名单正则匹配：{rule}）")
 
         log_lines.append(f"└─── {self.provider_name} ───")
         self.logger.info("\n".join(log_lines))
