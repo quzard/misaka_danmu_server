@@ -36,7 +36,9 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
             "id": user.id,
             "username": user.username,
             "hashedPassword": user.hashedPassword,
-            "token": user.token
+            "token": user.token,
+            "isOtp": user.isOtp,
+            "otpSecret": user.otpSecret,
         }
     return None
 
@@ -66,6 +68,24 @@ async def update_user_login_info(session: AsyncSession, username: str, token: st
     stmt = update(User).where(User.username == username).values(
         token=token,
         tokenUpdate=get_now()
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def enable_user_otp(session: AsyncSession, username: str, otp_secret: str):
+    """为用户启用 TOTP 两步验证"""
+    stmt = update(User).where(User.username == username).values(
+        isOtp=True, otpSecret=otp_secret
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def disable_user_otp(session: AsyncSession, username: str):
+    """为用户关闭 TOTP 两步验证"""
+    stmt = update(User).where(User.username == username).values(
+        isOtp=False, otpSecret=None
     )
     await session.execute(stmt)
     await session.commit()

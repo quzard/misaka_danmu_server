@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Form, Input, Button, Card, message } from 'antd'
 import {
   UserOutlined,
@@ -10,12 +10,16 @@ import { login, autoLogin } from '../../apis'
 import { useNavigate } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
+import { MfaVerifyModal } from '../../components/MfaVerifyModal'
 
 export const Login = () => {
   const [form] = Form.useForm()
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [checkingWhitelist, setCheckingWhitelist] = useState(true)
+  const [mfaModalOpen, setMfaModalOpen] = useState(false)
+  const [mfaTypes, setMfaTypes] = useState([])
+  const [pendingCredentials, setPendingCredentials] = useState(null)
   const navigate = useNavigate()
   const messageApi = useMessage()
 
@@ -50,6 +54,20 @@ export const Login = () => {
       })
   }, [])
 
+  // 保存 token 并跳转
+  const saveTokenAndNavigate = useCallback((accessToken, expiresIn) => {
+    const expiresInMinutes = expiresIn || 4320
+    const expiresInDays = expiresInMinutes / (60 * 24)
+    Cookies.set('danmu_token', accessToken, {
+      expires: expiresInDays,
+      path: '/',
+      secure: location.protocol === 'https:',
+      sameSite: 'lax'
+    })
+    messageApi.success('登录成功！')
+    navigate('/')
+  }, [messageApi, navigate])
+
   // 处理登录逻辑
   const handleLogin = async values => {
     try {
@@ -57,28 +75,57 @@ export const Login = () => {
       const res = await login(values)
 
       if (res.data.accessToken) {
-        // 动态计算 Cookie 过期时间（与后端 JWT 过期时间一致）
-        const expiresInMinutes = res.data.expiresIn || 4320 // 默认 3 天
-        const expiresInDays = expiresInMinutes / (60 * 24)
-
-        Cookies.set('danmu_token', res.data.accessToken, {
-          expires: expiresInDays,
-          path: '/',
-          secure: location.protocol === 'https:',
-          sameSite: 'lax'
-        })
-        messageApi.success('登录成功！')
-        navigate('/')
+        saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
       } else {
         messageApi.error('登录失败，请检查用户名或密码')
       }
     } catch (error) {
-      console.error('登录失败:', error)
-      messageApi.error('登录失败，请检查用户名或密码')
+      // 检查是否是 403 MFA 要求
+      if (error.response && error.response.status === 403 && error.response.data?.mfaRequired) {
+        setMfaTypes(error.response.data.mfaTypes || [])
+        setPendingCredentials(values)
+        setMfaModalOpen(true)
+      } else {
+        console.error('登录失败:', error)
+        messageApi.error('登录失败，请检查用户名或密码')
+      }
     } finally {
       setIsLoading(false)
     }
   }
+
+  // MFA 验证回调
+  const handleMfaVerify = useCallback(async ({ type, code, verified }) => {
+    if (!pendingCredentials) return
+
+    if (type === 'totp') {
+      try {
+        // 重新提交登录，带上 OTP 验证码
+        const formData = { ...pendingCredentials, otp_password: code }
+        const res = await login(formData)
+        if (res.data.accessToken) {
+          setMfaModalOpen(false)
+          saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
+        }
+      } catch (err) {
+        messageApi.error(err.response?.data?.detail || '验证码错误')
+        throw err // 让 MfaVerifyModal 知道验证失败
+      }
+    } else if (type === 'passkey' && verified) {
+      // PassKey 验证已在 MfaVerifyModal 中完成，现在用 OTP 占位码登录
+      try {
+        const formData = { ...pendingCredentials, otp_password: 'passkey_verified' }
+        const res = await login(formData)
+        if (res.data.accessToken) {
+          setMfaModalOpen(false)
+          saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
+        }
+      } catch (err) {
+        messageApi.error('PassKey 登录失败')
+        throw err
+      }
+    }
+  }, [pendingCredentials, saveTokenAndNavigate, messageApi])
 
   return (
     <div className="my-6 flex items-center justify-center">
@@ -149,6 +196,15 @@ export const Login = () => {
             </Form.Item>
           </Form>
         </Card>      )}
+
+      {/* MFA 验证弹窗 */}
+      <MfaVerifyModal
+        open={mfaModalOpen}
+        onCancel={() => setMfaModalOpen(false)}
+        onVerify={handleMfaVerify}
+        mfaTypes={mfaTypes}
+        username={pendingCredentials?.username || ''}
+      />
     </div>
   )
 }

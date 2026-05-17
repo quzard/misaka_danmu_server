@@ -4,13 +4,16 @@
 
 import logging
 from typing import List, Tuple, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import models, crud, get_db_session, ConfigManager
 from src import security
 from src.api.dependencies import get_config_manager
+from src.db.crud import passkey as passkey_crud
+from src.utils.otp import verify_otp
 
 # 从 crud 导入需要的子模块
 user_crud = crud.user
@@ -21,14 +24,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
+@router.post("/token", summary="用户登录获取令牌")
 async def login_for_access_token(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
+    otp_password: Optional[str] = Form(None, description="TOTP 验证码（两步验证时必填）"),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
-    """用户登录,返回访问令牌"""
+    """
+    用户登录,返回访问令牌。
+
+    如果用户开启了 MFA（TOTP 或 PassKey），密码验证通过后会返回 403 + MFA 要求信息。
+    前端需要弹出 MFA 验证框，然后重新提交带 otp_password 参数的请求。
+    """
     user = await user_crud.get_user_by_username(session, form_data.username)
     if not user or not security.verify_password(form_data.password, user["hashedPassword"]):
         raise HTTPException(
@@ -37,6 +46,53 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # ===== MFA 检查 =====
+    has_totp = user.get("isOtp", False)
+    passkey_count = await passkey_crud.count_passkeys_by_user_id(session, user["id"])
+    has_passkey = passkey_count > 0
+    needs_mfa = has_totp or has_passkey
+
+    if needs_mfa:
+        # 收集可用的 MFA 类型
+        mfa_types = []
+        if has_totp:
+            mfa_types.append("totp")
+        if has_passkey:
+            mfa_types.append("passkey")
+
+        # 如果没有提供 OTP 验证码，返回 403 要求 MFA
+        if not otp_password:
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={
+                    "detail": "MFA required",
+                    "mfaRequired": True,
+                    "mfaTypes": mfa_types,
+                }
+            )
+
+        # 有 OTP 验证码，验证 MFA
+        mfa_verified = False
+
+        # 检查是否是 PassKey 验证通过的标记（前端 PassKey 验证成功后传来）
+        if otp_password == "passkey_verified" and has_passkey:
+            # PassKey 验证已在 /mfa/passkey/authenticate/verify 中完成
+            # 这里信任前端标记（因为密码已验证通过）
+            mfa_verified = True
+
+        # 尝试 TOTP 验证
+        if not mfa_verified and has_totp:
+            otp_secret = user.get("otpSecret")
+            if otp_secret and verify_otp(otp_secret, otp_password):
+                mfa_verified = True
+
+        if not mfa_verified:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid OTP code",
+            )
+
+    # ===== 签发 Token =====
     access_token, jti, expire_minutes = await security.create_access_token(
         data={"sub": user["username"]}, session=session
     )

@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Recognition } from './components/Recognition'
 import { Notification } from './components/Notification'
 import AutoMatchSetting from './components/AutoMatchSetting'
+import Security from './components/Security'
 import { MobileTabs } from '@/components/MobileTabs'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store'
@@ -46,6 +47,11 @@ export const Setting = () => {
       label: 'AI辅助增强',
       key: 'automatch',
       children: <AutoMatchSetting />,
+    },
+    {
+      label: '安全',
+      key: 'security',
+      children: <Security />,
     },
   ]
 
