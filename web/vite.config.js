@@ -1,12 +1,28 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import tailwindcss from '@tailwindcss/vite'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
 console.log('当前环境:', process.env.NODE_ENV)
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      workbox: {
+        // 只缓存核心静态资源，不缓存 API 请求
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // 跳过大文件（>2MB）
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+        // 不缓存 API 和数据请求
+        navigateFallbackDenylist: [/^\/api\//],
+      },
+      manifest: false, // 使用 public/manifest.json，不自动生成
+    }),
+  ],
   server: {
     host: '0.0.0.0', // 允许外部访问
     port: 5173,

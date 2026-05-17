@@ -391,6 +391,29 @@ async def favicon():
     """提供网站图标"""
     return FileResponse("web/dist/images/favicon.ico", media_type="image/x-icon")
 
+# --- PWA manifest.json 路由 ---
+@app.get("/manifest.json", include_in_schema=False)
+async def pwa_manifest():
+    """提供 PWA manifest 文件"""
+    return FileResponse("web/dist/manifest.json", media_type="application/manifest+json")
+
+# --- PWA Service Worker 路由 ---
+@app.get("/sw.js", include_in_schema=False)
+async def pwa_service_worker():
+    """提供 PWA Service Worker 文件"""
+    sw_path = Path("web/dist/sw.js")
+    if sw_path.exists():
+        return FileResponse(str(sw_path), media_type="application/javascript")
+    return Response(status_code=404)
+
+@app.get("/workbox-{rest:path}", include_in_schema=False)
+async def pwa_workbox(rest: str):
+    """提供 Workbox 运行时文件"""
+    wb_path = Path(f"web/dist/workbox-{rest}")
+    if wb_path.exists():
+        return FileResponse(str(wb_path), media_type="application/javascript")
+    return Response(status_code=404)
+
 # --- 新增：自定义本地化的 Swagger UI 文档路由 ---
 # 为外部控制API生成独立的 OpenAPI 文档，只包含 API Key 安全方案
 def _control_api_openapi():
