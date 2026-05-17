@@ -230,8 +230,14 @@ async def disable_totp(
     if not security.verify_password(data.password, user["hashedPassword"]):
         raise HTTPException(status_code=400, detail="密码错误")
 
+    # 关闭 TOTP 时连带删除所有 PassKey（TOTP 是 PassKey 的前置条件）
+    passkey_count = await passkey_crud.delete_all_passkeys_by_user_id(session, user["id"])
     await crud.disable_user_otp(session, current_user.username)
-    return {"message": "TOTP 两步验证已关闭"}
+
+    msg = "TOTP 两步验证已关闭"
+    if passkey_count > 0:
+        msg += f"，同时已清除 {passkey_count} 个 PassKey"
+    return {"message": msg}
 
 
 # ======== WebAuthn PassKey ========

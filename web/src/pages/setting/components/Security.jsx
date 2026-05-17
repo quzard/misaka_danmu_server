@@ -302,6 +302,13 @@ const Security = () => {
         okButtonProps={{ danger: true }}
       >
         <Text>关闭两步验证将降低账户安全性。请输入当前密码确认：</Text>
+        {mfaStatus.passkeyCount > 0 && (
+          <div className="mt-2 px-3 py-2 rounded bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
+            <Text type="warning" className="text-sm">
+              ⚠️ 关闭 TOTP 将同时删除已注册的 {mfaStatus.passkeyCount} 个 PassKey
+            </Text>
+          </div>
+        )}
         <Input.Password
           className="mt-3"
           placeholder="当前密码"
