@@ -37,6 +37,10 @@ def get_default_configs(settings=None, ai_prompts=None):
         'externalApiDuplicateTaskThresholdHours': (3, '（外部API）重复任务提交阈值（小时）。在此时长内，不允许为同一媒体提交重复的自动导入任务。0为禁用。'),
         'webhookCustomDomain': ('', '用于拼接Webhook URL的自定义域名。'),
 
+        # 登录安全
+        'loginMaxFailCount': (3, '登录失败次数上限。同一 IP 在达到此次数后将被临时锁定。0为禁用暴力破解防护。'),
+        'loginLockoutMinutes': (60, '登录锁定时长（分钟）。超过失败上限后，该 IP 需等待此时长才能重试。'),
+
         # 代理
         'proxyMode': ('none', '代理模式: none(不使用代理), http_socks(HTTP/SOCKS代理), accelerate(加速代理)'),
         'proxyUrl': ('', '全局HTTP/HTTPS/SOCKS5代理地址。'),

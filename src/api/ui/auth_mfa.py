@@ -32,6 +32,7 @@ from webauthn.helpers import bytes_to_base64url, base64url_to_bytes
 from src.db import models, crud, get_db_session, ConfigManager
 from src.db.crud import passkey as passkey_crud
 from src.db.crud import session as session_crud
+from src.db.crud import user as user_crud
 from src import security
 from src.utils.otp import generate_secret, get_totp_uri, verify_otp
 from src.api.dependencies import get_config_manager
@@ -44,30 +45,36 @@ RP_ID = "localhost"  # 会在运行时从请求中动态推断
 RP_NAME = "Misaka弹幕库"
 
 # ======== Challenge 临时存储 ========
-# key: username, value: (challenge_bytes, timestamp)
+# key: username/session_id, value: (challenge_bytes, timestamp)
 _challenge_store: dict[str, tuple[bytes, float]] = {}
 CHALLENGE_TTL = 300  # 5分钟过期
+CHALLENGE_MAX_SIZE = 10000  # 最大存储条目数，防 DoS
 
 # ======== MFA Pending 临时令牌存储 ========
 # key: mfa_token, value: (username, user_id, timestamp)
 _mfa_pending_store: dict[str, tuple[str, int, float]] = {}
 MFA_PENDING_TTL = 300  # 5分钟过期
+MFA_PENDING_MAX_SIZE = 10000  # 最大存储条目数，防 DoS
 
 
-def _store_challenge(username: str, challenge: bytes):
-    """存储 challenge 并自动清理过期条目"""
+def _store_challenge(key: str, challenge: bytes):
+    """存储 challenge 并自动清理过期条目，限制最大容量"""
     now = time.time()
     expired_keys = [k for k, (_, t) in _challenge_store.items() if now - t > CHALLENGE_TTL]
     for k in expired_keys:
         del _challenge_store[k]
-    _challenge_store[username] = (challenge, now)
+    # 容量限制：如果仍超出上限，清除最旧的条目
+    if len(_challenge_store) >= CHALLENGE_MAX_SIZE:
+        oldest_key = min(_challenge_store, key=lambda k: _challenge_store[k][1])
+        del _challenge_store[oldest_key]
+    _challenge_store[key] = (challenge, now)
 
 
-def _get_and_consume_challenge(username: str) -> Optional[bytes]:
+def _get_and_consume_challenge(key: str) -> Optional[bytes]:
     """获取并消费 challenge"""
-    if username not in _challenge_store:
+    if key not in _challenge_store:
         return None
-    challenge, ts = _challenge_store.pop(username)
+    challenge, ts = _challenge_store.pop(key)
     if time.time() - ts > CHALLENGE_TTL:
         return None
     return challenge
@@ -80,6 +87,10 @@ def create_mfa_token(username: str, user_id: int) -> str:
     expired = [k for k, (_, _, t) in _mfa_pending_store.items() if now - t > MFA_PENDING_TTL]
     for k in expired:
         del _mfa_pending_store[k]
+    # 容量限制
+    if len(_mfa_pending_store) >= MFA_PENDING_MAX_SIZE:
+        oldest_key = min(_mfa_pending_store, key=lambda k: _mfa_pending_store[k][2])
+        del _mfa_pending_store[oldest_key]
     token = secrets.token_urlsafe(32)
     _mfa_pending_store[token] = (username, user_id, now)
     return token
@@ -465,7 +476,6 @@ async def _issue_jwt_for_user(
         data={"sub": username}, session=session
     )
     # 更新用户登录信息
-    from src.db.crud import user as user_crud
     await user_crud.update_user_login_info(session, username, access_token)
 
     # 创建会话记录
@@ -562,6 +572,7 @@ async def passkey_login_options(
     """
     PassKey 无密码登录第一步：生成 WebAuthn 认证选项。
     不需要输入用户名，浏览器会自动匹配已注册的 PassKey。
+    返回中包含 sessionId，前端验证时需回传。
     """
     rp_id = _get_rp_id(request)
 
@@ -570,21 +581,24 @@ async def passkey_login_options(
         user_verification=UserVerificationRequirement.PREFERRED,
     )
 
-    _store_challenge("passkey_login__direct", options.challenge)
-    return {"options": options_to_json(options)}
+    # 使用随机 session_id 作为 challenge key，避免并发冲突
+    session_id = secrets.token_urlsafe(16)
+    _store_challenge(f"passkey_login_{session_id}", options.challenge)
+    return {"options": options_to_json(options), "sessionId": session_id}
 
 
 @router.post("/passkey/login/verify", summary="PassKey 无密码登录 - 验证并签发 JWT")
 async def passkey_login_verify(
     request: Request,
     credential: str = Form(..., description="WebAuthn 凭证 JSON"),
+    session_id: str = Form(..., description="获取认证选项时返回的 sessionId"),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager),
 ):
     """
     PassKey 无密码登录第二步：验证凭证并直接签发 JWT。
     """
-    challenge = _get_and_consume_challenge("passkey_login__direct")
+    challenge = _get_and_consume_challenge(f"passkey_login_{session_id}")
     if not challenge:
         raise HTTPException(status_code=400, detail="登录已过期，请重新开始")
 

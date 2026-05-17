@@ -125,7 +125,7 @@ const Security = () => {
       if (err.name === 'NotAllowedError') {
         message.info('PassKey 注册已取消')
       } else {
-        message.error('PassKey 注册失败: ' + (err.response?.data?.detail || err.message))
+        message.error('PassKey 注册失败，请重试')
       }
     } finally {
       setRegisterLoading(false)

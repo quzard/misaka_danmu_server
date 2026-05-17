@@ -480,11 +480,19 @@ async def custom_swagger_ui_html():
         title="Misaka Danmaku 外部控制 API 文档",
     )
 
-# 新增：配置CORS，允许前端开发服务器访问API
+# CORS 配置
+# 前后端同源部署（SPA）时无需 CORS；开发模式下允许 localhost 来源
+_cors_origins = []
+if settings.environment == "development":
+    _cors_origins = [
+        "http://localhost:5173",   # Vite 开发服务器
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+    ]
 app.add_middleware(
     CORSMiddleware,
-    # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

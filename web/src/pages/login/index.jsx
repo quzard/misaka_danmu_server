@@ -89,6 +89,9 @@ export const Login = () => {
         setMfaToken(error.mfaToken || '')
         setMfaUsername(values.username || '')
         setMfaModalOpen(true)
+      } else if (error.code === 429) {
+        // 暴力破解防护：登录次数过多
+        messageApi.error(error.message || '登录失败次数过多，请稍后重试')
       } else {
         console.error('登录失败:', error)
         messageApi.error('登录失败，请检查用户名或密码')
@@ -117,6 +120,7 @@ export const Login = () => {
       // 1. 获取认证选项
       const optionsRes = await getPasskeyLoginOptions()
       const options = JSON.parse(optionsRes.data.options)
+      const passkeySessionId = optionsRes.data.sessionId
       options.challenge = base64urlToBuffer(options.challenge)
       if (options.allowCredentials) {
         options.allowCredentials = options.allowCredentials.map(c => ({
@@ -141,7 +145,7 @@ export const Login = () => {
       })
 
       // 3. 服务端验证 → 直接拿 JWT
-      const res = await verifyPasskeyLogin({ credential: credJSON })
+      const res = await verifyPasskeyLogin({ credential: credJSON, session_id: passkeySessionId })
       if (res.data.accessToken) {
         saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
       }
@@ -150,7 +154,7 @@ export const Login = () => {
         messageApi.info('PassKey 登录已取消')
       } else {
         console.error('PassKey 登录失败:', err)
-        messageApi.error('PassKey 登录失败: ' + (err.detail || err.message || '未知错误'))
+        messageApi.error('PassKey 登录失败，请重试')
       }
     } finally {
       setPasskeyLoginLoading(false)
