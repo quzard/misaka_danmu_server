@@ -1094,3 +1094,18 @@ export const reorderAnimeGroups = (data) => api.patch('/api/ui/anime/groups/reor
 
 /** 设置或清除条目所属分组（groupId=null 则移出分组） */
 export const setAnimeGroupMembership = (animeId, data) => api.patch(`/api/ui/anime/${animeId}/group`, data)
+
+
+/** ---------------------------------------------------缓存管理相关开始------------------------------------------------ */
+/** 获取缓存统计信息 */
+export const getCacheStats = () => api.get('/api/ui/cache/stats')
+
+/** 获取缓存条目列表 */
+export const getCacheList = (params) => api.get('/api/ui/cache/list', { params })
+
+/** 清除缓存 */
+export const clearCache = (region) => api.delete('/api/ui/cache/clear', { params: { region } })
+
+/** 删除单条缓存 */
+export const deleteCacheKey = (key, region) => api.delete('/api/ui/cache/key', { params: { key, region } })
+/** ---------------------------------------------------缓存管理相关结束------------------------------------------------ */

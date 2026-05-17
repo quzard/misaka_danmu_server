@@ -581,7 +581,7 @@ async def get_rate_limit_status(
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
         provider_state = states_map.get(provider_name)
-        
+
         quota: Union[int, str] = "∞"
         try:
             scraper_instance = scraper_manager.get_scraper(provider_name)
@@ -1106,3 +1106,84 @@ async def stream_update(
     logger.info(f"用户 '{current_user.username}' 开始更新服务 (镜像: {image_name})")
     return StreamingResponse(generate_progress(), media_type="text/event-stream")
 
+
+
+# ==================== 缓存管理 API ====================
+
+@router.get("/cache/stats", summary="获取缓存统计信息")
+async def get_cache_stats(
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """获取缓存的统计信息，包括各 region 的条目数量。"""
+    from src.core.cache import get_cache_backend
+    backend = get_cache_backend()
+
+    regions = ["default", "search", "metadata", "episodes", "comments"]
+    stats = {}
+    total = 0
+    for region in regions:
+        try:
+            region_keys = await backend.keys("*", region=region)
+            count = len(region_keys)
+            if count > 0:
+                stats[region] = count
+                total += count
+        except Exception:
+            pass
+
+    return {"total": total, "regions": stats}
+
+
+@router.get("/cache/list", summary="获取缓存条目列表")
+async def get_cache_list(
+    region: str = Query("search", description="缓存区域"),
+    search: Optional[str] = Query(None, description="搜索关键词"),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(20, ge=1, le=100),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """获取指定 region 下的缓存条目列表。"""
+    from src.core.cache import get_cache_backend
+    backend = get_cache_backend()
+
+    pattern = f"*{search}*" if search else "*"
+    all_keys = await backend.keys(pattern, region=region)
+    all_keys.sort()
+
+    total = len(all_keys)
+    start = (page - 1) * pageSize
+    end = start + pageSize
+    paged_keys = all_keys[start:end]
+
+    return {"total": total, "page": page, "pageSize": pageSize, "region": region, "keys": paged_keys}
+
+
+@router.delete("/cache/clear", summary="清除缓存")
+async def clear_cache(
+    region: Optional[str] = Query(None, description="要清除的区域，不传则清除全部"),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """清除指定区域或全部缓存。"""
+    from src.core.cache import get_cache_backend
+    backend = get_cache_backend()
+
+    count = await backend.clear(region=region)
+    scope = f"区域 '{region}'" if region else "全部"
+    logger.info(f"用户 '{current_user.username}' 清除了{scope}缓存，共 {count} 条")
+    return {"success": True, "cleared": count, "scope": scope}
+
+
+@router.delete("/cache/key", summary="删除单条缓存")
+async def delete_cache_key(
+    key: str = Query(..., description="缓存 key"),
+    region: str = Query("search", description="缓存区域"),
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """删除指定的单条缓存。"""
+    from src.core.cache import get_cache_backend
+    backend = get_cache_backend()
+
+    deleted = await backend.delete(key, region=region)
+    if deleted:
+        logger.info(f"用户 '{current_user.username}' 删除了缓存 key='{key}' region='{region}'")
+    return {"success": deleted, "key": key, "region": region}
