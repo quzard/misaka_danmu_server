@@ -80,9 +80,9 @@ export const Login = () => {
         messageApi.error('登录失败，请检查用户名或密码')
       }
     } catch (error) {
-      // 检查是否是 403 MFA 要求
-      if (error.response && error.response.status === 403 && error.response.data?.mfaRequired) {
-        setMfaTypes(error.response.data.mfaTypes || [])
+      // 检查是否是 403 MFA 要求（axios 拦截器已将 response.data 展开到 error 上）
+      if (error.code === 403 && error.mfaRequired) {
+        setMfaTypes(error.mfaTypes || [])
         setPendingCredentials(values)
         setMfaModalOpen(true)
       } else {
@@ -108,7 +108,7 @@ export const Login = () => {
           saveTokenAndNavigate(res.data.accessToken, res.data.expiresIn)
         }
       } catch (err) {
-        messageApi.error(err.response?.data?.detail || '验证码错误')
+        messageApi.error(err.detail || err.message || '验证码错误')
         throw err // 让 MfaVerifyModal 知道验证失败
       }
     } else if (type === 'passkey' && verified) {

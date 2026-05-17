@@ -34,7 +34,7 @@ export const MfaVerifyModal = ({ open, onCancel, onVerify, mfaTypes = [], userna
   // PassKey 验证
   const handlePasskeyVerify = useCallback(async () => {
     if (!window.PublicKeyCredential) {
-      message.error('当前浏览器不支持 PassKey')
+      message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
       return
     }
 

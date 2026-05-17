@@ -91,7 +91,7 @@ const Security = () => {
   // ========== PassKey ==========
   const handleRegisterPasskey = async () => {
     if (!window.PublicKeyCredential) {
-      message.error('当前浏览器不支持 PassKey / WebAuthn')
+      message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
       return
     }
     setRegisterLoading(true)
