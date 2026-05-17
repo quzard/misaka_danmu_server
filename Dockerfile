@@ -116,6 +116,10 @@ RUN chown -R appuser:appgroup /app
 # 暴露应用运行的端口
 EXPOSE 7768
 
+# 健康检查（群辉 Container Manager 和 Docker 均依赖此判断容器状态）
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7768/api/health')" || exit 1
+
 # OCI 标准镜像标签
 LABEL org.opencontainers.image.title="Misaka Danmu Server" \
       org.opencontainers.image.description="弹幕 API 服务器 - 支持多弹幕源聚合、智能匹配、本地缓存" \

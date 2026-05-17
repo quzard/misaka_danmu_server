@@ -385,6 +385,13 @@ app = FastAPI(
     redoc_url=None         # 禁用ReDoc
 )
 
+# --- 健康检查端点（供 Docker HEALTHCHECK / 群辉 Container Manager 使用）---
+@app.get("/api/health", include_in_schema=False)
+async def health_check():
+    """轻量级健康检查，不需要认证，不查数据库"""
+    return {"status": "ok"}
+
+
 # --- favicon.ico 路由 ---
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
