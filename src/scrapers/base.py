@@ -444,25 +444,29 @@ class BaseScraper(ABC):
     async def _filter_junk_episodes(
         self,
         episodes: List["models.ProviderEpisodeInfo"],
-    ) -> Tuple[List["models.ProviderEpisodeInfo"], List[Tuple["models.ProviderEpisodeInfo", str]]]:
+        return_filtered: bool = False,
+    ):
         """
         过滤掉垃圾分集（预告、花絮等）
 
         注意：此方法现在从 config 表读取过滤规则，不再使用硬编码的正则表达式。
         如果 config 表中没有配置过滤规则，则不进行过滤。
 
-        Returns:
-            (保留的分集列表, 被过滤的分集列表[(episode, 匹配规则)])
+        Args:
+            episodes: 待过滤的分集列表
+            return_filtered: 是否同时返回被过滤的分集信息
+                - False（默认）: 返回 List[ProviderEpisodeInfo]（向后兼容）
+                - True: 返回 (保留的分集列表, 被过滤的分集列表[(episode, 匹配规则)])
         """
         if not episodes:
-            return episodes, []
+            return (episodes, []) if return_filtered else episodes
 
         # 从 config 表获取过滤规则，不使用硬编码兜底
         blacklist_pattern = await self.get_episode_blacklist_pattern()
 
         # 如果没有配置过滤规则，直接返回所有分集
         if not blacklist_pattern:
-            return episodes, []
+            return (episodes, []) if return_filtered else episodes
 
         filtered_episodes = []
         filtered_out_episodes = []
@@ -476,7 +480,9 @@ class BaseScraper(ABC):
             else:
                 filtered_episodes.append(episode)
 
-        return filtered_episodes, filtered_out_episodes
+        if return_filtered:
+            return filtered_episodes, filtered_out_episodes
+        return filtered_episodes
 
     def _log_episodes_result(
         self,

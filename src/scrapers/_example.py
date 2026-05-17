@@ -238,7 +238,7 @@ class ExampleScraper(BaseScraper):
 
             # 使用基类的黑名单过滤垃圾分集（预告、花絮等）
             # 返回 (保留的分集, 被过滤的分集信息)
-            episodes, filtered_out = await self._filter_junk_episodes(episodes)
+            episodes, filtered_out = await self._filter_junk_episodes(episodes, return_filtered=True)
 
             # 写入缓存（需要传入配置键和默认TTL秒数）
             if episodes:
