@@ -17,6 +17,8 @@ from .user import (
     create_user,
     update_user_password,
     update_user_login_info,
+    enable_user_otp,
+    disable_user_otp,
     create_oauth_state,
     consume_oauth_state,
     get_bangumi_auth,
@@ -317,6 +319,9 @@ from .utility import (
     update_scheduled_task_run_times,
 )
 
+# PassKey模块
+from . import passkey
+
 __all__ = [
     # Config
     'get_config_value',
@@ -328,6 +333,8 @@ __all__ = [
     'create_user',
     'update_user_password',
     'update_user_login_info',
+    'enable_user_otp',
+    'disable_user_otp',
     'create_oauth_state',
     'consume_oauth_state',
     'get_bangumi_auth',

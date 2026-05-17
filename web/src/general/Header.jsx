@@ -15,6 +15,7 @@ import SessionManager from '@/components/SessionManager'
 import VersionModal from '@/components/VersionModal'
 import ThemeColorPicker from '@/components/ThemeColorPicker'
 import RealtimeLogModal from '@/components/RealtimeLogModal'
+import CacheManagerModal from '@/components/CacheManagerModal'
 import HistoryLogModal from '@/components/HistoryLogModal'
 import { RateLimitIndicator } from '@/components/RateLimitIndicator'
 
@@ -342,6 +343,7 @@ const MobileHeader = ({ activeKey }) => {
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
+  const [isCacheModalOpen, setIsCacheModalOpen] = useState(false)
   const [passwordForm] = Form.useForm()
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [currentPasswordVisible, setCurrentPasswordVisible] = useState(false)
@@ -423,6 +425,8 @@ const MobileHeader = ({ activeKey }) => {
       setIsSessionModalOpen(true)
     } else if (item.key === 'theme-color') {
       setIsThemeColorOpen(true)
+    } else if (item.key === 'cache-manager') {
+      setIsCacheModalOpen(true)
     } else if (item.key === 'restart-service') {
       // 重启由 Popconfirm 处理，这里不做任何事
     } else if (parentItem?.key === 'user') {
@@ -507,6 +511,11 @@ const MobileHeader = ({ activeKey }) => {
                         key: 'change-password',
                         label: '修改密码',
                         icon: 'key',
+                      },
+                      {
+                        key: 'cache-manager',
+                        label: '缓存管理',
+                        icon: 'refresh',
                       },
                       ...(dockerAvailable ? [{
                         key: 'restart-service',
@@ -649,6 +658,12 @@ const MobileHeader = ({ activeKey }) => {
         open={isThemeColorOpen}
         onClose={() => setIsThemeColorOpen(false)}
       />
+
+      {/* 缓存管理弹窗 */}
+      <CacheManagerModal
+        open={isCacheModalOpen}
+        onClose={() => setIsCacheModalOpen(false)}
+      />
     </>
   )
 }
@@ -660,6 +675,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
+  const [isCacheModalOpen, setIsCacheModalOpen] = useState(false)
   const [form] = Form.useForm()
   const [showPassword1, setShowPassword1] = useState(false)
   const [showPassword2, setShowPassword2] = useState(false)
@@ -863,6 +879,15 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                       </div>
                     ),
                   },
+                  {
+                    key: 'cacheManager',
+                    icon: <MyIcon icon="refresh" size={16} />,
+                    label: (
+                      <div onClick={() => setIsCacheModalOpen(true)} className="text-base">
+                        缓存管理
+                      </div>
+                    ),
+                  },
                   ...(dockerAvailable ? [{
                     key: 'restart',
                     icon: <MyIcon icon="zhongqi" size={16} />,
@@ -1010,6 +1035,12 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
       <ThemeColorPicker
         open={isThemeColorOpen}
         onClose={() => setIsThemeColorOpen(false)}
+      />
+
+      {/* 缓存管理弹窗 */}
+      <CacheManagerModal
+        open={isCacheModalOpen}
+        onClose={() => setIsCacheModalOpen(false)}
       />
     </>
   )

@@ -2,15 +2,22 @@
 认证相关的API端点
 """
 
+import ipaddress
+import hashlib
 import logging
-from typing import List, Tuple, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+import time
+from typing import List, Tuple, Optional, Dict
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Form
 from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import models, crud, get_db_session, ConfigManager
 from src import security
 from src.api.dependencies import get_config_manager
+from src.db.crud import passkey as passkey_crud
+from src.utils.otp import verify_otp
+from src.api.ui.auth_mfa import create_mfa_token
 
 # 从 crud 导入需要的子模块
 user_crud = crud.user
@@ -21,22 +28,145 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/token", response_model=models.Token, summary="用户登录获取令牌")
+# ========== 登录暴力破解防护 ==========
+# key: client_ip, value: (fail_count, first_fail_time)
+_login_fail_tracker: Dict[str, Tuple[int, float]] = {}
+# 清理计数器：每 100 次登录尝试清理一次过期记录
+_login_cleanup_counter = 0
+
+
+def _check_login_rate_limit(client_ip: str, max_fail_count: int, lockout_minutes: int):
+    """
+    检查登录速率限制。如果该 IP 已超过失败上限且在锁定期内，抛出 429 异常。
+    """
+    if max_fail_count <= 0:
+        return  # 功能已禁用
+
+    record = _login_fail_tracker.get(client_ip)
+    if not record:
+        return
+
+    fail_count, first_fail_time = record
+    lockout_seconds = lockout_minutes * 60
+    elapsed = time.time() - first_fail_time
+
+    if fail_count >= max_fail_count:
+        if elapsed < lockout_seconds:
+            remaining = int(lockout_seconds - elapsed)
+            remaining_min = remaining // 60
+            remaining_sec = remaining % 60
+            logger.warning(f"[登录防护] IP {client_ip} 已被锁定，剩余 {remaining_min}分{remaining_sec}秒")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"登录失败次数过多，请 {remaining_min} 分 {remaining_sec} 秒后重试",
+                headers={"Retry-After": str(remaining)},
+            )
+        else:
+            # 锁定期已过，清除记录
+            del _login_fail_tracker[client_ip]
+
+
+def _record_login_failure(client_ip: str):
+    """记录一次登录失败"""
+    global _login_cleanup_counter
+    now = time.time()
+
+    record = _login_fail_tracker.get(client_ip)
+    if record:
+        fail_count, first_fail_time = record
+        _login_fail_tracker[client_ip] = (fail_count + 1, first_fail_time)
+    else:
+        _login_fail_tracker[client_ip] = (1, now)
+
+    # 定期清理过期记录（每 100 次失败清理一次）
+    _login_cleanup_counter += 1
+    if _login_cleanup_counter >= 100:
+        _login_cleanup_counter = 0
+        _cleanup_login_tracker()
+
+
+def _record_login_success(client_ip: str):
+    """登录成功后清除该 IP 的失败记录"""
+    _login_fail_tracker.pop(client_ip, None)
+
+
+def _cleanup_login_tracker(max_age_seconds: int = 7200):
+    """清理超过 max_age_seconds 的过期记录"""
+    now = time.time()
+    expired = [ip for ip, (_, ts) in _login_fail_tracker.items() if now - ts > max_age_seconds]
+    for ip in expired:
+        del _login_fail_tracker[ip]
+
+
+@router.post("/token", summary="用户登录获取令牌")
 async def login_for_access_token(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
+    otp_password: Optional[str] = Form(None, description="TOTP 验证码（两步验证时必填）"),
     session: AsyncSession = Depends(get_db_session),
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
-    """用户登录,返回访问令牌"""
+    """
+    用户登录,返回访问令牌。
+
+    MFA 流程:
+    1. 密码验证通过 → 检查 MFA → 返回 403 + mfaToken + mfaTypes
+    2. 前端调 /api/ui/auth/mfa/verify 用 mfaToken + (TOTP验证码 或 PassKey凭证) 完成验证并获取 JWT
+    3. 如果提供了 otp_password，则在此接口内直接验证 TOTP（向后兼容简化流程）
+    """
+    # ===== 暴力破解防护 =====
+    client_ip = await security.get_real_client_ip(request, config_manager)
+    max_fail_count = int(await config_manager.get("loginMaxFailCount", "3"))
+    lockout_minutes = int(await config_manager.get("loginLockoutMinutes", "60"))
+    _check_login_rate_limit(client_ip, max_fail_count, lockout_minutes)
+
     user = await user_crud.get_user_by_username(session, form_data.username)
     if not user or not security.verify_password(form_data.password, user["hashedPassword"]):
+        _record_login_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # ===== MFA 检查 =====
+    has_totp = user.get("isOtp", False)
+    passkey_count = await passkey_crud.count_passkeys_by_user_id(session, user["id"])
+    has_passkey = passkey_count > 0
+    needs_mfa = has_totp or has_passkey
+
+    if needs_mfa:
+        mfa_types = []
+        if has_totp:
+            mfa_types.append("totp")
+        if has_passkey:
+            mfa_types.append("passkey")
+
+        # 如果提供了 otp_password 且有 TOTP，尝试直接验证（简化流程）
+        if otp_password and has_totp:
+            otp_secret = user.get("otpSecret")
+            if not (otp_secret and verify_otp(otp_secret, otp_password)):
+                _record_login_failure(client_ip)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid OTP code",
+                )
+            # TOTP 验证通过，继续签发 token
+        else:
+            # 生成 mfaToken 并返回 403，让前端走 /mfa/verify 流程
+            mfa_token = create_mfa_token(user["username"], user["id"])
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={
+                    "detail": "MFA required",
+                    "mfaRequired": True,
+                    "mfaTypes": mfa_types,
+                    "mfaToken": mfa_token,
+                }
+            )
+
+    # ===== 签发 Token =====
+    _record_login_success(client_ip)
     access_token, jti, expire_minutes = await security.create_access_token(
         data={"sub": user["username"]}, session=session
     )
@@ -44,7 +174,6 @@ async def login_for_access_token(
     await user_crud.update_user_login_info(session, user["username"], access_token)
 
     # 创建会话记录
-    client_ip = await security.get_real_client_ip(request, config_manager)
     user_agent = request.headers.get("user-agent", "")
     await session_crud.create_user_session(
         session=session,
@@ -71,8 +200,6 @@ async def auto_login(
 
     注意：此接口不依赖 check_ip_whitelist，避免 session 回滚问题
     """
-    import ipaddress
-    import hashlib
 
     # 获取 IP 白名单配置
     ip_whitelist_str = await config_crud.get_config_value(session, "ipWhitelist", "")
@@ -275,3 +402,49 @@ async def revoke_other_sessions(
     count = await session_crud.revoke_other_sessions(session, user_in_db["id"], current_jti)
     return {"revokedCount": count}
 
+
+
+# ========== 登录锁定管理 API ==========
+
+@router.delete("/login-lockout", summary="清除登录锁定")
+async def clear_login_lockout(
+    ip: Optional[str] = None,
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """
+    清除登录暴力破解防护的 IP 锁定记录。
+
+    - 不传 ip 参数：清除所有 IP 的锁定
+    - 传 ip 参数：仅清除指定 IP 的锁定
+    """
+    if ip:
+        removed = _login_fail_tracker.pop(ip, None)
+        if removed:
+            logger.info(f"[登录防护] 管理员 {current_user.username} 清除了 IP {ip} 的登录锁定")
+            return {"message": f"已清除 IP {ip} 的登录锁定", "cleared": 1}
+        return {"message": f"IP {ip} 无锁定记录", "cleared": 0}
+    else:
+        count = len(_login_fail_tracker)
+        _login_fail_tracker.clear()
+        logger.info(f"[登录防护] 管理员 {current_user.username} 清除了所有登录锁定（{count} 条）")
+        return {"message": f"已清除所有登录锁定", "cleared": count}
+
+
+@router.get("/login-lockout", summary="查看登录锁定状态")
+async def get_login_lockout_status(
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """
+    查看当前所有被锁定的 IP 及其失败次数。
+    """
+    now = time.time()
+    result = []
+    for ip, (fail_count, first_fail_time) in _login_fail_tracker.items():
+        elapsed = now - first_fail_time
+        result.append({
+            "ip": ip,
+            "failCount": fail_count,
+            "firstFailTime": int(first_fail_time),
+            "elapsedSeconds": int(elapsed),
+        })
+    return {"lockedIps": result, "total": len(result)}

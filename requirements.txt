@@ -51,3 +51,7 @@ pyTelegramBotAPI
 redis>=5.0.0  # redis-py，含 asyncio 支持
 # MCP Server（Model Context Protocol）支持
 fastapi-mcp>=0.3.0  # 将FastAPI路由暴露为MCP工具
+# 两步验证 (TOTP)
+pyotp  # RFC 6238 TOTP 实现
+# WebAuthn PassKey 支持
+webauthn>=2.0.0  # FIDO2/WebAuthn 服务端实现

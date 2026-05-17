@@ -116,9 +116,14 @@ class User(Base):
     token: Mapped[Optional[str]] = mapped_column(TEXT)
     tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", NaiveDateTime)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
+    # MFA: TOTP 两步验证
+    isOtp: Mapped[bool] = mapped_column("is_otp", Boolean, default=False)
+    otpSecret: Mapped[Optional[str]] = mapped_column("otp_secret", String(500))
 
     # 关联会话
     sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    # 关联 PassKey
+    passkeys: Mapped[list["UserPassKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSession(Base):
@@ -136,6 +141,23 @@ class UserSession(Base):
 
     # 关联用户
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class UserPassKey(Base):
+    """用户 PassKey 凭证表，用于 WebAuthn/FIDO2 无密码认证"""
+    __tablename__ = "user_passkeys"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    userId: Mapped[int] = mapped_column("user_id", BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    credentialId: Mapped[str] = mapped_column("credential_id", String(500), unique=True, index=True)  # base64url 编码的凭证ID
+    publicKey: Mapped[str] = mapped_column("public_key", TEXT)  # base64url 编码的公钥
+    signCount: Mapped[int] = mapped_column("sign_count", BigInteger, default=0)  # 签名计数器，防重放
+    deviceName: Mapped[Optional[str]] = mapped_column("device_name", String(500))  # 设备名称（用户自定义）
+    transports: Mapped[Optional[str]] = mapped_column(String(500))  # 逗号分隔的传输方式，如 "usb,ble,nfc,internal"
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    lastUsedAt: Mapped[Optional[datetime]] = mapped_column("last_used_at", NaiveDateTime)
+
+    # 关联用户
+    user: Mapped["User"] = relationship(back_populates="passkeys")
 
 
 class Scraper(Base):

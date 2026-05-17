@@ -2,6 +2,7 @@
 用户相关的CRUD操作
 """
 
+import hashlib
 import logging
 import secrets
 from datetime import timedelta
@@ -11,6 +12,8 @@ from sqlalchemy import select, update
 
 from ..orm_models import User, BangumiAuth, OauthState
 from src.core.timezone import get_now
+from src.core import settings
+from src.utils.otp import encrypt_otp_secret, decrypt_otp_secret
 from .. import models
 
 logger = logging.getLogger(__name__)
@@ -32,11 +35,17 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     if user:
+        # 透明解密 OTP Secret（兼容旧版明文数据）
+        otp_secret = user.otpSecret
+        if otp_secret:
+            otp_secret = decrypt_otp_secret(otp_secret, settings.jwt.secret_key)
         return {
             "id": user.id,
             "username": user.username,
             "hashedPassword": user.hashedPassword,
-            "token": user.token
+            "token": user.token,
+            "isOtp": user.isOtp,
+            "otpSecret": otp_secret,
         }
     return None
 
@@ -62,10 +71,30 @@ async def update_user_password(session: AsyncSession, username: str, new_hashed_
 
 
 async def update_user_login_info(session: AsyncSession, username: str, token: str):
-    """更新用户的最后登录时间和当前令牌"""
+    """更新用户的最后登录时间和当前令牌（存储 SHA256 摘要而非明文 token）"""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()[:32]
     stmt = update(User).where(User.username == username).values(
-        token=token,
+        token=token_hash,
         tokenUpdate=get_now()
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def enable_user_otp(session: AsyncSession, username: str, otp_secret: str):
+    """为用户启用 TOTP 两步验证（加密存储 OTP Secret）"""
+    encrypted_secret = encrypt_otp_secret(otp_secret, settings.jwt.secret_key)
+    stmt = update(User).where(User.username == username).values(
+        isOtp=True, otpSecret=encrypted_secret
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
+async def disable_user_otp(session: AsyncSession, username: str):
+    """为用户关闭 TOTP 两步验证"""
+    stmt = update(User).where(User.username == username).values(
+        isOtp=False, otpSecret=None
     )
     await session.execute(stmt)
     await session.commit()
