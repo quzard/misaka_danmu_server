@@ -164,7 +164,18 @@ export const Login = () => {
   }, [saveTokenAndNavigate, messageApi])
 
   return (
-    <div className="my-6 flex items-center justify-center">
+    <div className="my-6 flex items-center justify-center relative">
+      {/* 右上角：清理浏览器缓存 */}
+      <Button
+        type="link"
+        size="small"
+        icon={<ClearOutlined />}
+        onClick={clearBrowserCache}
+        className="!absolute top-0 right-4"
+      >
+        清理浏览器缓存
+      </Button>
+
       {/* 白名单检查中显示加载状态 */}
       {checkingWhitelist ? (
         <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto">
@@ -248,18 +259,6 @@ export const Login = () => {
               </div>
             </>
           )}
-
-          {/* 清理浏览器缓存 */}
-          <div className="px-6 pb-4 text-center">
-            <Button
-              type="link"
-              size="small"
-              icon={<ClearOutlined />}
-              onClick={clearBrowserCache}
-            >
-              清理浏览器缓存
-            </Button>
-          </div>
         </Card>      )}
 
       {/* MFA 验证弹窗 */}
