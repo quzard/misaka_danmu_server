@@ -26,6 +26,7 @@ __version__ = "1.0.0"
 
 import logging
 import re
+import time
 from typing import Optional, List
 
 from src.db.models import ProviderSearchInfo, ProviderEpisodeInfo
@@ -204,6 +205,8 @@ class ExampleScraper(BaseScraper):
         Returns:
             ProviderEpisodeInfo 列表，每个元素代表一集
         """
+        _start_time = time.time()
+
         # 先检查缓存（base 类提供的缓存机制）
         cache_key = f"episodes_{media_id}"
         cached = await self._get_from_cache(cache_key)
@@ -212,6 +215,7 @@ class ExampleScraper(BaseScraper):
             return cached
 
         episodes = []
+        filtered_out = []
         try:
             self.logger.info(f"开始获取分集列表: media_id={media_id}")
 
@@ -233,7 +237,8 @@ class ExampleScraper(BaseScraper):
                 ))
 
             # 使用基类的黑名单过滤垃圾分集（预告、花絮等）
-            episodes = await self._filter_junk_episodes(episodes)
+            # 返回 (保留的分集, 被过滤的分集信息)
+            episodes, filtered_out = await self._filter_junk_episodes(episodes)
 
             # 写入缓存（需要传入配置键和默认TTL秒数）
             if episodes:
@@ -241,11 +246,15 @@ class ExampleScraper(BaseScraper):
                                          config_key="example_episodes_cache_ttl",
                                          default_ttl=3600)  # 默认缓存1小时
 
-            self.logger.info(f"成功获取 {len(episodes)} 个分集 (media_id={media_id})")
-
         except Exception as e:
             self.logger.error(f"获取分集列表失败: {e}")
 
+        # 统一日志：同时显示保留的分集和被过滤的分集
+        _elapsed_ms = int((time.time() - _start_time) * 1000)
+        self._log_episodes_result(episodes, filtered_out, _elapsed_ms, target_episode_index)
+
+        if target_episode_index is not None:
+            return [ep for ep in episodes if ep.episodeIndex == target_episode_index]
         return episodes
 
     @track_performance
