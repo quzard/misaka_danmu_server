@@ -1136,26 +1136,57 @@ async def get_cache_stats(
 
 @router.get("/cache/list", summary="获取缓存条目列表")
 async def get_cache_list(
-    region: str = Query("search", description="缓存区域"),
+    region: str = Query("all", description="缓存区域，all 表示全部"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=100),
     current_user: models.User = Depends(security.get_current_user),
 ):
-    """获取指定 region 下的缓存条目列表。"""
+    """获取指定 region 下的缓存条目列表，包含键值预览。"""
+    import json
     from src.core.cache import get_cache_backend
     backend = get_cache_backend()
 
     pattern = f"*{search}*" if search else "*"
-    all_keys = await backend.keys(pattern, region=region)
-    all_keys.sort()
 
-    total = len(all_keys)
+    # 如果是 all，遍历所有已知 region
+    all_regions = ["default", "search", "metadata", "episodes", "comments"]
+    regions_to_query = all_regions if region == "all" else [region]
+
+    all_items = []  # [(region, key)]
+    for r in regions_to_query:
+        try:
+            region_keys = await backend.keys(pattern, region=r)
+            for k in region_keys:
+                all_items.append((r, k))
+        except Exception:
+            pass
+
+    all_items.sort(key=lambda x: (x[0], x[1]))
+
+    total = len(all_items)
     start = (page - 1) * pageSize
     end = start + pageSize
-    paged_keys = all_keys[start:end]
+    paged_items = all_items[start:end]
 
-    return {"total": total, "page": page, "pageSize": pageSize, "region": region, "keys": paged_keys}
+    # 获取键值预览
+    items = []
+    for r, k in paged_items:
+        value_preview = ""
+        try:
+            raw_value = await backend.get(k, region=r)
+            if raw_value is not None:
+                if isinstance(raw_value, (dict, list)):
+                    text = json.dumps(raw_value, ensure_ascii=False)
+                else:
+                    text = str(raw_value)
+                # 截断预览，最多200字符
+                value_preview = text[:200] + ("..." if len(text) > 200 else "")
+        except Exception:
+            value_preview = "<读取失败>"
+        items.append({"region": r, "key": k, "value_preview": value_preview})
+
+    return {"total": total, "page": page, "pageSize": pageSize, "region": region, "items": items}
 
 
 @router.delete("/cache/clear", summary="清除缓存")
