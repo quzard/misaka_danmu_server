@@ -488,22 +488,21 @@ async def custom_swagger_ui_html():
     )
 
 # CORS 配置
-# 前后端同源部署（SPA）时无需 CORS；开发模式下允许 localhost 来源
-_cors_origins = []
+# 前后端同源部署（SPA）时无需 CORS 中间件
+# 仅在开发模式下添加，允许 Vite 开发服务器跨域访问后端 API
 if settings.environment == "development":
-    _cors_origins = [
-        "http://localhost:5173",   # Vite 开发服务器
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://localhost:5173",   # Vite 开发服务器
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # 新增：全局异常处理器，以优雅地处理网络错误
 @app.exception_handler(httpx.ConnectError)
