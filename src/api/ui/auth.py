@@ -402,3 +402,49 @@ async def revoke_other_sessions(
     count = await session_crud.revoke_other_sessions(session, user_in_db["id"], current_jti)
     return {"revokedCount": count}
 
+
+
+# ========== 登录锁定管理 API ==========
+
+@router.delete("/login-lockout", summary="清除登录锁定")
+async def clear_login_lockout(
+    ip: Optional[str] = None,
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """
+    清除登录暴力破解防护的 IP 锁定记录。
+
+    - 不传 ip 参数：清除所有 IP 的锁定
+    - 传 ip 参数：仅清除指定 IP 的锁定
+    """
+    if ip:
+        removed = _login_fail_tracker.pop(ip, None)
+        if removed:
+            logger.info(f"[登录防护] 管理员 {current_user.username} 清除了 IP {ip} 的登录锁定")
+            return {"message": f"已清除 IP {ip} 的登录锁定", "cleared": 1}
+        return {"message": f"IP {ip} 无锁定记录", "cleared": 0}
+    else:
+        count = len(_login_fail_tracker)
+        _login_fail_tracker.clear()
+        logger.info(f"[登录防护] 管理员 {current_user.username} 清除了所有登录锁定（{count} 条）")
+        return {"message": f"已清除所有登录锁定", "cleared": count}
+
+
+@router.get("/login-lockout", summary="查看登录锁定状态")
+async def get_login_lockout_status(
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """
+    查看当前所有被锁定的 IP 及其失败次数。
+    """
+    now = time.time()
+    result = []
+    for ip, (fail_count, first_fail_time) in _login_fail_tracker.items():
+        elapsed = now - first_fail_time
+        result.append({
+            "ip": ip,
+            "failCount": fail_count,
+            "firstFailTime": int(first_fail_time),
+            "elapsedSeconds": int(elapsed),
+        })
+    return {"lockedIps": result, "total": len(result)}
