@@ -83,13 +83,12 @@ export const RateLimitIndicator = () => {
     <Tooltip title={tooltipContent} placement="bottom">
       <div
         onClick={() => navigate('/task?key=ratelimit')}
-        className=""
+        className="bg-black/[0.03] dark:bg-white/[0.06]"
         style={{
           display: 'inline-flex', flexDirection: 'column', gap: 3,
           padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
           minWidth: 90, position: 'relative', transition: 'box-shadow 0.2s',
-          border: '1px solid var(--color-primary)',
-          backgroundColor: 'var(--color-shadow)',
+          border: '1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)',
         }}
         onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'}
         onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
