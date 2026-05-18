@@ -469,14 +469,18 @@ html[data-page-style="liquid-glass"] {
   background-attachment: fixed;
 }
 
-/* 确保 Input.Search 搜索按钮跟随主题色 */
-.ant-input-search .ant-btn-primary {
+/* 确保 Input.Search 搜索按钮跟随主题色（多层选择器提权，覆盖 antd CSS-in-JS） */
+html .ant-input-search .ant-btn-primary,
+html .ant-input-search .ant-input-search-button {
   background-color: var(--color-primary) !important;
   border-color: var(--color-primary) !important;
+  background: var(--color-primary) !important;
 }
-.ant-input-search .ant-btn-primary:hover {
+html .ant-input-search .ant-btn-primary:hover,
+html .ant-input-search .ant-input-search-button:hover {
   background-color: var(--color-primary-dark) !important;
   border-color: var(--color-primary-dark) !important;
+  background: var(--color-primary-dark) !important;
 }
 
 
