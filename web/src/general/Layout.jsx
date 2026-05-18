@@ -43,6 +43,8 @@ export const Layout = () => {
         })
         .catch(() => {
           // 自动登录失败（不在白名单中），跳转登录页
+          Cookies.remove('danmu_token', { path: '/' })
+          setUserinfo(undefined)
           window.location.href = '/login'
         })
     } else {
@@ -58,9 +60,11 @@ export const Layout = () => {
           }
         })
         .catch(err => {
-          // API 返回 401 或其他错误，跳转登录页
-          // fetch.js 的拦截器会自动处理 401 并跳转
+          // API 返回 401 或其他错误，清理本地 token 并跳转登录页，避免卡在“正在加载...”
           console.error('获取用户信息失败:', err)
+          Cookies.remove('danmu_token', { path: '/' })
+          setUserinfo(undefined)
+          window.location.href = '/login'
         })
     }
   }, [])

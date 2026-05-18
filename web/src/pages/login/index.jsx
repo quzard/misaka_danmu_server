@@ -93,8 +93,8 @@ export const Login = () => {
       sameSite: 'lax'
     })
     messageApi.success('登录成功！')
-    navigate('/')
-  }, [messageApi, navigate])
+    window.location.replace('/')
+  }, [messageApi])
 
   // 处理登录逻辑
   const handleLogin = async values => {
@@ -188,17 +188,6 @@ export const Login = () => {
 
   return (
     <div className="my-6 flex items-center justify-center relative">
-      {/* 右上角：清理浏览器缓存 */}
-      <Button
-        type="link"
-        size="small"
-        icon={<ClearOutlined />}
-        onClick={clearBrowserCache}
-        className="!fixed top-4 right-4 z-50"
-      >
-        清理浏览器缓存
-      </Button>
-
       {/* 白名单检查中显示加载状态 */}
       {checkingWhitelist ? (
         <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto">
@@ -208,7 +197,18 @@ export const Login = () => {
         </Card>
       ) : (
         /* 登录卡片容器 */
-        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto">
+        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto relative">
+          {/* 卡片右上角：清理浏览器缓存 */}
+          <Button
+            type="link"
+            size="small"
+            icon={<ClearOutlined />}
+            onClick={clearBrowserCache}
+            className="!absolute top-4 right-4 z-10"
+          >
+            清理浏览器缓存
+          </Button>
+
           {/* 登录标题区域 */}
           <div className="text-center mb-8 pt-4">
             <h2 className="text-[clamp(1.5rem,3vw,2rem)] font-bold text-base-text">
@@ -235,6 +235,7 @@ export const Login = () => {
               <Input
                 prefix={<UserOutlined className="text-gray-400" />}
                 placeholder="请输入用户名"
+                autoComplete="username"
               />
             </Form.Item>
 
@@ -248,6 +249,7 @@ export const Login = () => {
               <Input.Password
                 prefix={<LockOutlined className="text-gray-400" />}
                 placeholder="请输入密码"
+                autoComplete="current-password"
                 visibilityToggle={{
                   visible: showPassword,
                   onVisibleChange: setShowPassword,

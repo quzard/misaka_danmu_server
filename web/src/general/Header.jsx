@@ -7,7 +7,7 @@ import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
 import classNames from 'classnames'
 import { Tag, Dropdown, Modal, Form, Input, Button, Space, Badge, Popconfirm } from 'antd';
-import { logout, changePassword, checkAppUpdate, getDockerStatus, restartService } from '../apis/index.js'
+import { logout, changePassword, checkAppUpdate, getDockerStatus, restartService, getVersion } from '../apis/index.js'
 import Cookies from 'js-cookie'
 import { EyeInvisibleOutlined, EyeOutlined, LockOutlined } from '@ant-design/icons'
 import { Tooltip } from 'antd'
@@ -19,6 +19,17 @@ import CacheManagerModal from '@/components/CacheManagerModal'
 import HistoryLogModal from '@/components/HistoryLogModal'
 import { RateLimitIndicator } from '@/components/RateLimitIndicator'
 import { clearBrowserCache } from '@/utils/clearCache'
+import { useMessage } from '../MessageContext'
+import {
+  useFloating,
+  autoUpdate,
+  offset,
+  shift,
+  useInteractions,
+  useClick,
+  useDismiss,
+  FloatingPortal,
+} from '@floating-ui/react'
 
 // 实时日志图标 (Lucide - scroll-text)
 const RealtimeLogIcon = () => (
@@ -60,18 +71,6 @@ const DocsIcon = () => (
     <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
   </svg>
 )
-import { useMessage } from '../MessageContext'
-import {
-  useFloating,
-  autoUpdate,
-  offset,
-  flip,
-  shift,
-  useInteractions,
-  useClick,
-  useDismiss,
-  FloatingPortal,
-} from '@floating-ui/react'
 
 const navItems = [
   { key: RoutePaths.HOME, label: '首页', icon: 'home' },
@@ -113,7 +112,6 @@ const navItems = [
     { key: 'automatch', label: 'AI辅助增强' },
   ]},
 ]
-import { getVersion } from '../apis/index.js';
 
 const FloatingMenu = ({ trigger, items, onItemClick, activeKey }) => {
   const [isOpen, setIsOpen] = useState(false)

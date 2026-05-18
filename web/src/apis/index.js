@@ -1,5 +1,16 @@
 import api from './fetch'
 
+const toUrlEncodedForm = data => {
+  const form = new URLSearchParams()
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      form.append(key, value)
+    }
+  })
+  return form
+}
+
+
 /** 获取应用版本号 */
 export const getVersion = () => api.get('/api/ui/version')
 
@@ -23,7 +34,7 @@ export const restartService = () => api.post('/api/ui/restart')
 /** -------------------------------------------------用户相关开始------------------------------------------------- */
 /** 登录 */
 export const login = data =>
-  api.post('/api/ui/auth/token', data, {
+  api.post('/api/ui/auth/token', toUrlEncodedForm(data), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   })
 
@@ -73,7 +84,7 @@ export const disableTotp = data =>
   api.post('/api/ui/auth/mfa/totp/disable', data)
 /** 统一 MFA 验证（签发 JWT） */
 export const mfaVerify = data =>
-  api.post('/api/ui/auth/mfa/verify', data, {
+  api.post('/api/ui/auth/mfa/verify', toUrlEncodedForm(data), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   })
 /** 生成 PassKey 注册选项 */
@@ -96,7 +107,7 @@ export const getPasskeyLoginOptions = () =>
   api.post('/api/ui/auth/mfa/passkey/login/options')
 /** PassKey 无密码登录 - 验证 */
 export const verifyPasskeyLogin = data =>
-  api.post('/api/ui/auth/mfa/passkey/login/verify', data, {
+  api.post('/api/ui/auth/mfa/passkey/login/verify', toUrlEncodedForm(data), {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   })
 
