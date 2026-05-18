@@ -14,6 +14,7 @@ import { Tooltip } from 'antd'
 import SessionManager from '@/components/SessionManager'
 import VersionModal from '@/components/VersionModal'
 import ThemeColorPicker from '@/components/ThemeColorPicker'
+import PageStylePicker from '@/components/PageStylePicker'
 import RealtimeLogModal from '@/components/RealtimeLogModal'
 import CacheManagerModal from '@/components/CacheManagerModal'
 import HistoryLogModal from '@/components/HistoryLogModal'
@@ -356,6 +357,7 @@ const MobileHeader = ({ activeKey }) => {
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
+  const [isPageStyleOpen, setIsPageStyleOpen] = useState(false)
   const [isCacheModalOpen, setIsCacheModalOpen] = useState(false)
   const [passwordForm] = Form.useForm()
   const [passwordLoading, setPasswordLoading] = useState(false)
@@ -446,6 +448,8 @@ const MobileHeader = ({ activeKey }) => {
       setIsSessionModalOpen(true)
     } else if (item.key === 'theme-color') {
       setIsThemeColorOpen(true)
+    } else if (item.key === 'page-style') {
+      setIsPageStyleOpen(true)
     } else if (item.key === 'cache-manager') {
       setIsCacheModalOpen(true)
     } else if (item.key === 'clear-browser-cache') {
@@ -476,7 +480,7 @@ const MobileHeader = ({ activeKey }) => {
 
   return (
     <>
-      <div className="fixed bottom-0 left-0 w-full shadow-box z-50 py-2 overflow-hidden bg-base-bg">
+      <div className="fixed bottom-3 left-3 right-3 shadow-box z-50 py-2 px-2 overflow-hidden bg-base-bg rounded-3xl mobile-nav-floating">
         <div className="flex justify-evenly items-center">
           {mobileNavItems.map(it => (
             <>
@@ -524,6 +528,11 @@ const MobileHeader = ({ activeKey }) => {
                         key: 'theme-color',
                         label: '主题色',
                         icon: 'MenuIcon-gexinghua-heise',
+                      },
+                      {
+                        key: 'page-style',
+                        label: '页面样式',
+                        icon: 'fengge',
                       },
                       {
                         key: 'session-manager',
@@ -687,6 +696,12 @@ const MobileHeader = ({ activeKey }) => {
         onClose={() => setIsThemeColorOpen(false)}
       />
 
+      {/* 页面样式切换弹窗 */}
+      <PageStylePicker
+        open={isPageStyleOpen}
+        onClose={() => setIsPageStyleOpen(false)}
+      />
+
       {/* 缓存管理弹窗 */}
       <CacheManagerModal
         open={isCacheModalOpen}
@@ -704,6 +719,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
+  const [isPageStyleOpen, setIsPageStyleOpen] = useState(false)
   const [isCacheModalOpen, setIsCacheModalOpen] = useState(false)
   const [form] = Form.useForm()
   const [showPassword1, setShowPassword1] = useState(false)
@@ -1002,6 +1018,15 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                     ),
                   },
                   {
+                    key: 'pageStyle',
+                    icon: <MyIcon icon="fengge" size={16} />,
+                    label: (
+                      <div onClick={() => setIsPageStyleOpen(true)} className="text-base">
+                        页面样式
+                      </div>
+                    ),
+                  },
+                  {
                     key: 'sessionManager',
                     icon: <MyIcon icon="huihuaguanli" size={16} />,
                     label: (
@@ -1184,6 +1209,12 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
       <ThemeColorPicker
         open={isThemeColorOpen}
         onClose={() => setIsThemeColorOpen(false)}
+      />
+
+      {/* 页面样式切换弹窗 */}
+      <PageStylePicker
+        open={isPageStyleOpen}
+        onClose={() => setIsPageStyleOpen(false)}
       />
 
       {/* 缓存管理弹窗 */}

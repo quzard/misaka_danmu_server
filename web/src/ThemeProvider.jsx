@@ -86,6 +86,13 @@ export const PRESET_THEME_COLORS = [
 
 const DEFAULT_PRIMARY = '#FF6B9B'
 
+// 页面样式（normal: 常规, liquid-glass: 液态玻璃）
+export const PAGE_STYLES = [
+  { key: 'normal', name: '常规' },
+  { key: 'liquid-glass', name: '液态玻璃' },
+]
+const DEFAULT_PAGE_STYLE = 'normal'
+
 // 创建上下文
 const ThemeContext = createContext()
 
@@ -93,6 +100,9 @@ export function ThemeProvider({ children }) {
   const [isDark, setIsDark] = useState(false)
   const [themeColor, setThemeColorState] = useState(() => {
     return localStorage.getItem('themeColor') || DEFAULT_PRIMARY
+  })
+  const [pageStyle, setPageStyleState] = useState(() => {
+    return localStorage.getItem('pageStyle') || DEFAULT_PAGE_STYLE
   })
 
   // 根据主色生成派生色
@@ -128,6 +138,17 @@ export function ThemeProvider({ children }) {
     setThemeColorState(color)
     localStorage.setItem('themeColor', color)
   }
+
+  // 设置页面样式并持久化
+  const setPageStyle = (style) => {
+    setPageStyleState(style)
+    localStorage.setItem('pageStyle', style)
+  }
+
+  // 把 pageStyle 写到 <html> 的 data-page-style 属性，全局 CSS 据此切换
+  useEffect(() => {
+    document.documentElement.setAttribute('data-page-style', pageStyle)
+  }, [pageStyle])
 
   // 初始化：检查系统偏好或本地存储
   useEffect(() => {
@@ -318,7 +339,7 @@ export function ThemeProvider({ children }) {
   }), [colors])
 
   return (
-    <ThemeContext.Provider value={{ isDark, toggleDarkMode, themeColor, setThemeColor }}>
+    <ThemeContext.Provider value={{ isDark, toggleDarkMode, themeColor, setThemeColor, pageStyle, setPageStyle }}>
       <ConfigProvider locale={zhCN} theme={isDark ? darkTheme : lightTheme}>
         {children}
       </ConfigProvider>

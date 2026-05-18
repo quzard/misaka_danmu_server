@@ -83,7 +83,7 @@
   html {
     font-family: 'MyNunito', 'Nunito', 'Comic Sans MS', sans-serif;
   }
-  
+
   /* 移动端使用较小字体 */
   @media (max-width: 768px) {
     html {
@@ -454,4 +454,207 @@ a:hover {
 .mobile-select-compact .ant-select-selection-item {
   line-height: 26px !important;
   font-size: 12px !important;
+}
+
+/* ==========================================
+   液态玻璃样式 (Liquid Glass)
+   通过 <html data-page-style="liquid-glass"> 启用
+   ========================================== */
+html[data-page-style="liquid-glass"] {
+  /* 给整个 body 一个柔和的渐变背景，玻璃效果才有"穿透感" */
+  background:
+    radial-gradient(circle at 20% 10%, var(--color-shadow) 0%, transparent 45%),
+    radial-gradient(circle at 80% 80%, var(--color-shadow) 0%, transparent 50%),
+    var(--color-bg);
+  background-attachment: fixed;
+}
+
+/* 卡片：半透明 + 模糊 + 高光描边 + 大圆角 */
+html[data-page-style="liquid-glass"] .ant-card,
+html[data-page-style="liquid-glass"] .ant-modal-content,
+html[data-page-style="liquid-glass"] .ant-drawer-content,
+html[data-page-style="liquid-glass"] .ant-dropdown-menu,
+html[data-page-style="liquid-glass"] .ant-popover-inner,
+html[data-page-style="liquid-glass"] .ant-tooltip-inner,
+html[data-page-style="liquid-glass"] .ant-message-notice-content,
+html[data-page-style="liquid-glass"] .ant-notification-notice {
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Tooltip 小一点的圆角，避免气泡过圆 */
+html[data-page-style="liquid-glass"] .ant-tooltip-inner {
+  border-radius: 12px !important;
+}
+
+/* Modal 头部/底部圆角配合主体 */
+html[data-page-style="liquid-glass"] .ant-modal-header,
+html[data-page-style="liquid-glass"] .ant-modal-footer {
+  background: transparent !important;
+  border-radius: 0 !important;
+}
+html[data-page-style="liquid-glass"] .ant-modal-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.4) !important;
+}
+
+/* 按钮统一大圆角 + 玻璃效果 */
+html[data-page-style="liquid-glass"] .ant-btn {
+  border-radius: 16px !important;
+}
+html[data-page-style="liquid-glass"] .ant-btn-default {
+  background: rgba(255, 255, 255, 0.5) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Tag 圆角 */
+html[data-page-style="liquid-glass"] .ant-tag {
+  border-radius: 12px !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+}
+
+/* 输入框/选择器 大圆角 */
+html[data-page-style="liquid-glass"] .ant-input,
+html[data-page-style="liquid-glass"] .ant-input-affix-wrapper,
+html[data-page-style="liquid-glass"] .ant-input-number,
+html[data-page-style="liquid-glass"] .ant-select-selector,
+html[data-page-style="liquid-glass"] .ant-picker {
+  border-radius: 14px !important;
+  background: rgba(255, 255, 255, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+}
+
+/* Tab 圆角 */
+html[data-page-style="liquid-glass"] .ant-tabs-tab {
+  border-radius: 12px !important;
+}
+
+/* 列表项圆角 */
+html[data-page-style="liquid-glass"] .ant-list-item {
+  border-radius: 12px !important;
+  margin-bottom: 4px;
+}
+
+/* 暗色模式下的玻璃 — 用半透明深色 + 高光描边 + 大圆角 */
+html[data-page-style="liquid-glass"].dark .ant-card,
+html[data-page-style="liquid-glass"].dark .ant-modal-content,
+html[data-page-style="liquid-glass"].dark .ant-drawer-content,
+html[data-page-style="liquid-glass"].dark .ant-dropdown-menu,
+html[data-page-style="liquid-glass"].dark .ant-popover-inner,
+html[data-page-style="liquid-glass"].dark .ant-tooltip-inner,
+html[data-page-style="liquid-glass"].dark .ant-message-notice-content,
+html[data-page-style="liquid-glass"].dark .ant-notification-notice {
+  background: rgba(30, 41, 59, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-tooltip-inner {
+  border-radius: 12px !important;
+}
+
+/* 暗色按钮/输入框/Tag 圆角 */
+html[data-page-style="liquid-glass"].dark .ant-btn-default {
+  background: rgba(30, 41, 59, 0.5) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-tag {
+  background: rgba(30, 41, 59, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-input,
+html[data-page-style="liquid-glass"].dark .ant-input-affix-wrapper,
+html[data-page-style="liquid-glass"].dark .ant-input-number,
+html[data-page-style="liquid-glass"].dark .ant-select-selector,
+html[data-page-style="liquid-glass"].dark .ant-picker {
+  background: rgba(30, 41, 59, 0.5) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* 顶部导航栏玻璃化 */
+html[data-page-style="liquid-glass"] .bg-base-bg.fixed.top-0 {
+  background: rgba(255, 255, 255, 0.6) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+}
+html[data-page-style="liquid-glass"].dark .bg-base-bg.fixed.top-0 {
+  background: rgba(15, 23, 42, 0.6) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* 底部移动导航栏（悬浮胶囊样式，所有模式下都生效） */
+.mobile-nav-floating {
+  border-radius: 24px !important;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+.dark .mobile-nav-floating {
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* 底部移动导航栏 — 液态玻璃模式下更通透 */
+html[data-page-style="liquid-glass"] .mobile-nav-floating {
+  background: rgba(255, 255, 255, 0.55) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+html[data-page-style="liquid-glass"].dark .mobile-nav-floating {
+  background: rgba(30, 41, 59, 0.55) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 底部移动导航栏玻璃化 */
+html[data-page-style="liquid-glass"] .bg-base-bg.fixed.bottom-0 {
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+}
+html[data-page-style="liquid-glass"].dark .bg-base-bg.fixed.bottom-0 {
+  background: rgba(15, 23, 42, 0.7) !important;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Table、Tabs 等大块内容容器适度透明 */
+html[data-page-style="liquid-glass"] .ant-table {
+  background: transparent !important;
+}
+html[data-page-style="liquid-glass"] .ant-table-thead > tr > th {
+  background: rgba(255, 255, 255, 0.4) !important;
+  backdrop-filter: blur(10px);
+}
+html[data-page-style="liquid-glass"].dark .ant-table-thead > tr > th {
+  background: rgba(30, 41, 59, 0.5) !important;
+  backdrop-filter: blur(10px);
 }
