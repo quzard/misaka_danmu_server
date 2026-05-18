@@ -497,6 +497,49 @@ html body .ant-input-group-addon .ant-input-search-button:hover {
   background: var(--color-primary-dark) !important;
 }
 
+/* Switch 开关跟随主题色 */
+html body .ant-switch.ant-switch-checked {
+  background: var(--color-primary) !important;
+}
+html body .ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
+  background: var(--color-primary-dark) !important;
+}
+
+/* Progress 进度条/圆环跟随主题色 */
+html body .ant-progress-circle .ant-progress-circle-path {
+  stroke: var(--color-primary) !important;
+}
+html body .ant-progress-bg {
+  background-color: var(--color-primary) !important;
+}
+
+/* Tabs 选中项跟随主题色 */
+html body .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--color-primary) !important;
+}
+html body .ant-tabs-ink-bar {
+  background: var(--color-primary) !important;
+}
+
+/* Checkbox/Radio 选中态跟随主题色 */
+html body .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+}
+html body .ant-radio-checked .ant-radio-inner {
+  border-color: var(--color-primary) !important;
+}
+html body .ant-radio-checked .ant-radio-inner::after {
+  background-color: var(--color-primary) !important;
+}
+
+/* 链接文字跟随主题色 */
+html body a.ant-typography,
+html body .ant-typography a {
+  color: var(--color-primary) !important;
+}
+
+
 
 /* FloatingMenu（移动端上拉菜单）液态玻璃化 */
 html[data-page-style="liquid-glass"] .floating-menu-panel {
