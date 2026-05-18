@@ -173,11 +173,12 @@ const FloatingMenu = ({ trigger, items, onItemClick, activeKey }) => {
                   className={classNames(
                     'block w-full px-4 py-2 rounded-md transition-all duration-200 text-sm font-medium text-left',
                     activeKey === item.key
-                      ? 'bg-primary text-white shadow-sm'
+                      ? 'text-white shadow-sm'
                       : 'text-base-text hover:bg-base-hover'
                   )}
                   style={{
-                    animationDelay: `${index * 50}ms`
+                    animationDelay: `${index * 50}ms`,
+                    ...(activeKey === item.key ? { backgroundColor: 'var(--color-primary)' } : {}),
                   }}
                 >
                   <div className="flex items-center justify-start gap-2">
