@@ -619,13 +619,11 @@ html[data-page-style="liquid-glass"] .ant-btn-default {
   border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
 
-/* Tag 圆角 */
+/* Tag 圆角 + 默认态玻璃化（不加 !important 让 antd 自定义 color 的 Tag 保持原色） */
 html[data-page-style="liquid-glass"] .ant-tag {
   border-radius: 12px !important;
-  background: rgba(255, 255, 255, 0.5) !important;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
 
 /* 输入框/选择器 大圆角 */
@@ -698,8 +696,9 @@ html[data-page-style="liquid-glass"].dark .ant-btn-default {
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
 }
 html[data-page-style="liquid-glass"].dark .ant-tag {
-  background: rgba(30, 41, 59, 0.5) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  /* 不用 !important，让 antd 自定义 color Tag 保持原色 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 html[data-page-style="liquid-glass"].dark .ant-input,
 html[data-page-style="liquid-glass"].dark .ant-input-affix-wrapper,
