@@ -194,7 +194,7 @@ export const Login = () => {
         size="small"
         icon={<ClearOutlined />}
         onClick={clearBrowserCache}
-        className="!absolute top-0 right-4"
+        className="!fixed top-4 right-4 z-50"
       >
         清理浏览器缓存
       </Button>
