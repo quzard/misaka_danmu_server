@@ -488,9 +488,19 @@ html[data-page-style="liquid-glass"] .ant-notification-notice {
     inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
 }
 
-/* Tooltip 小一点的圆角，避免气泡过圆 */
+/* Tooltip 小一点的圆角，避免气泡过圆 + 箭头颜色适配 */
 html[data-page-style="liquid-glass"] .ant-tooltip-inner {
   border-radius: 12px !important;
+  color: var(--ant-color-text) !important;
+}
+/* 箭头颜色跟随气泡背景 */
+html[data-page-style="liquid-glass"] .ant-tooltip-arrow::before,
+html[data-page-style="liquid-glass"] .ant-tooltip-arrow::after {
+  background: rgba(255, 255, 255, 0.55) !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-tooltip-arrow::before,
+html[data-page-style="liquid-glass"].dark .ant-tooltip-arrow::after {
+  background: rgba(30, 41, 59, 0.55) !important;
 }
 
 /* Modal 头部/底部圆角配合主体 */
