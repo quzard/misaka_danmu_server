@@ -861,7 +861,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                       key={it.key}
                       menu={{
                         items: [
-                          { key: '_title', label: (<div className="font-bold text-sm cursor-default" style={{ color: 'var(--ant-color-text-secondary)' }}>{it.label}</div>), disabled: true },
+                          { key: '_title', label: (<div className="font-bold text-sm cursor-default" style={{ color: 'var(--color-primary)' }}>{it.label}</div>), disabled: true },
                           { type: 'divider' },
                           ...it.children.map(child => ({ key: child.key, label: child.label })),
                         ],
