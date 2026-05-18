@@ -38,7 +38,8 @@ from src.ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PR
 from src.rate_limiter import RateLimiter
 from src._version import APP_VERSION
 from src import security
-    
+from src.frontend import mount_frontend, register_pwa_routes
+
 logger = logging.getLogger(__name__)
 logger.info(f"当前环境: {settings.environment}")
 
@@ -308,30 +309,7 @@ async def lifespan(app: FastAPI):
 
     # --- 前端服务 ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
-
-    # 无论开发还是生产环境，都需要挂载用户缓存的图片
-    # 这样开发环境下前端通过代理也能访问到这些资源
-    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-
-    # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-    # 并且需要一个"捕获所有"的路由来始终提供 index.html，以支持前端路由。
-    if settings.environment == "development":
-        # 开发环境：所有非API请求都重定向到Vite开发服务器
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_react_app_dev(request: Request, full_path: str):
-            base_url = f"http://{settings.client.host}:{settings.client.port}"
-            return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-    else:
-        # 生产环境：显式挂载静态资源目录
-        app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-        # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
-        app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-        # dist挂载
-        app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
-        # 然后，为所有其他路径提供 index.html 以支持前端路由
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(request: Request, full_path: str):
-            return FileResponse("web/dist/index.html")
+    mount_frontend(app, settings)
 
     yield
 
@@ -392,34 +370,8 @@ async def health_check():
     return {"status": "ok"}
 
 
-# --- favicon.ico 路由 ---
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    """提供网站图标"""
-    return FileResponse("web/dist/images/favicon.ico", media_type="image/x-icon")
-
-# --- PWA manifest.json 路由 ---
-@app.get("/manifest.json", include_in_schema=False)
-async def pwa_manifest():
-    """提供 PWA manifest 文件"""
-    return FileResponse("web/dist/manifest.json", media_type="application/manifest+json")
-
-# --- PWA Service Worker 路由 ---
-@app.get("/sw.js", include_in_schema=False)
-async def pwa_service_worker():
-    """提供 PWA Service Worker 文件"""
-    sw_path = Path("web/dist/sw.js")
-    if sw_path.exists():
-        return FileResponse(str(sw_path), media_type="application/javascript")
-    return Response(status_code=404)
-
-@app.get("/workbox-{rest:path}", include_in_schema=False)
-async def pwa_workbox(rest: str):
-    """提供 Workbox 运行时文件"""
-    wb_path = Path(f"web/dist/workbox-{rest}")
-    if wb_path.exists():
-        return FileResponse(str(wb_path), media_type="application/javascript")
-    return Response(status_code=404)
+# --- 前端 PWA 路由（favicon / manifest / registerSW / sw / workbox）---
+register_pwa_routes(app)
 
 # --- 新增：自定义本地化的 Swagger UI 文档路由 ---
 # 为外部控制API生成独立的 OpenAPI 文档，只包含 API Key 安全方案
