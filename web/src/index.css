@@ -595,6 +595,18 @@ html[data-page-style="liquid-glass"] .ant-picker {
   background: rgba(255, 255, 255, 0.5) !important;
   border: 1px solid rgba(255, 255, 255, 0.6) !important;
 }
+/* Input.Search 组合框：整体容器圆角，内部 input 不单独圆角（避免与按钮之间出现缝隙） */
+html[data-page-style="liquid-glass"] .ant-input-search .ant-input,
+html[data-page-style="liquid-glass"] .ant-input-search .ant-input-affix-wrapper {
+  border-radius: 0 !important;
+  border-top-left-radius: 14px !important;
+  border-bottom-left-radius: 14px !important;
+}
+html[data-page-style="liquid-glass"] .ant-input-search .ant-input-search-button {
+  border-radius: 0 !important;
+  border-top-right-radius: 14px !important;
+  border-bottom-right-radius: 14px !important;
+}
 
 /* Tab 圆角 */
 html[data-page-style="liquid-glass"] .ant-tabs-tab {
