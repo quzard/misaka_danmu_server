@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
 import { Tooltip } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { getRateLimitStatus } from '@/apis'
+import { useRateLimitSSE } from '@/hooks/useRateLimitSSE'
 
 /**
  * 导航栏流控状态 Tag 指示器
@@ -27,24 +26,8 @@ const BarRow = ({ label, percent, color }) => (
 )
 
 export const RateLimitIndicator = () => {
-  const [data, setData] = useState(null)
+  const { data } = useRateLimitSSE()
   const navigate = useNavigate()
-  const timerRef = useRef(null)
-
-  const fetchStatus = async () => {
-    try {
-      const res = await getRateLimitStatus()
-      setData(res.data)
-    } catch {
-      // 静默失败
-    }
-  }
-
-  useEffect(() => {
-    fetchStatus()
-    timerRef.current = setInterval(fetchStatus, 30000)
-    return () => clearInterval(timerRef.current)
-  }, [])
 
   if (!data || !data.enabled) return null
 

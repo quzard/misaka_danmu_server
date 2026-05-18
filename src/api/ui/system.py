@@ -2,6 +2,7 @@
 System相关的API端点
 """
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Any, Dict, Union
@@ -542,21 +543,18 @@ async def delete_ua_rule(
 
 
 
-@router.get("/rate-limit/status", response_model=RateLimitStatusResponse, summary="获取所有流控规则的状态")
-async def get_rate_limit_status(
-    session: AsyncSession = Depends(get_db_session),
-    scraper_manager: ScraperManager = Depends(get_scraper_manager),
-    rate_limiter: RateLimiter = Depends(get_rate_limiter)
-):
-    """获取所有流控规则的当前状态，包括全局和各源的配额使用情况。"""
-    # 在获取状态前，先触发一次全局流控的检查，这会强制重置过期的计数器
+async def _build_rate_limit_status_data(
+    session: AsyncSession,
+    scraper_manager: ScraperManager,
+    rate_limiter: RateLimiter,
+) -> dict:
+    """构建流控状态数据（供普通请求和 SSE 流复用）。"""
+    # 触发一次全局流控检查，强制重置过期的计数器
     try:
         await rate_limiter.check("__ui_status_check__")
     except RateLimitExceededError:
-        # 我们只关心检查和重置的副作用，不关心它是否真的超限，所以忽略此错误
         pass
     except Exception as e:
-        # 记录其他潜在错误，但不中断状态获取
         logger.error(f"在获取流控状态时，检查全局流控失败: {e}")
 
     global_enabled = rate_limiter.enabled
@@ -569,14 +567,11 @@ async def get_rate_limit_status(
     global_state = states_map.get("__global__")
     seconds_until_reset = 0
     if global_state:
-        # 使用 get_now() 确保时区一致性
         time_since_reset = get_now().replace(tzinfo=None) - global_state.lastResetTime
         seconds_until_reset = max(0, int(period_seconds - time_since_reset.total_seconds()))
 
     provider_items = []
-    # 修正：从数据库获取所有已配置的搜索源，而不是调用一个不存在的方法
     all_scrapers_raw = await crud.get_all_scraper_settings(session)
-    # 修正：在显示流控状态时，排除不产生网络请求的 'custom' 源
     all_scrapers = [s for s in all_scrapers_raw if s['providerName'] != 'custom']
     for scraper_setting in all_scrapers:
         provider_name = scraper_setting['providerName']
@@ -591,7 +586,6 @@ async def get_rate_limit_status(
         except ValueError:
             pass
 
-        # 获取 display_name（从 scraper 类属性读取，优先显示友好名称）
         display_name = None
         scraper_class = scraper_manager.get_scraper_class(provider_name)
         if scraper_class:
@@ -604,10 +598,8 @@ async def get_rate_limit_status(
             quota=quota
         ))
 
-    # 修正：将秒数转换为可读的字符串以匹配响应模型
     global_period_str = f"{period_seconds} 秒"
 
-    # 获取后备流控状态 (合并match和search)
     fallback_match_state = states_map.get("__fallback_match__")
     fallback_search_state = states_map.get("__fallback_search__")
 
@@ -634,6 +626,55 @@ async def get_rate_limit_status(
     )
 
 
+@router.get("/rate-limit/status", response_model=RateLimitStatusResponse, summary="获取所有流控规则的状态")
+async def get_rate_limit_status(
+    request: Request,
+    stream: bool = Query(False, description="启用SSE流式推送模式"),
+    session: AsyncSession = Depends(get_db_session),
+    scraper_manager: ScraperManager = Depends(get_scraper_manager),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+):
+    """
+    获取所有流控规则的当前状态，包括全局和各源的配额使用情况。
+
+    - 默认模式 (stream=false): 返回一次性 JSON 响应
+    - SSE模式 (stream=true): 通过 Server-Sent Events 每秒推送最新状态
+    """
+    if not stream:
+        return await _build_rate_limit_status_data(session, scraper_manager, rate_limiter)
+
+    # SSE 流式推送模式
+    session_factory = request.app.state.db_session_factory
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    async with session_factory() as sse_session:
+                        data = await _build_rate_limit_status_data(
+                            sse_session, scraper_manager, rate_limiter
+                        )
+                        payload = json.dumps(data.model_dump(), ensure_ascii=False)
+                        yield f"data: {payload}\n\n"
+                except Exception as e:
+                    logger.error(f"SSE 流控状态推送异常: {e}")
+                    yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            logger.debug("SSE 流控状态流连接被客户端关闭")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # ==================== Docker 容器管理 API ====================
 
 from src.utils.docker_utils import (
@@ -645,7 +686,6 @@ from src.utils.docker_utils import (
     recreate_container_with_image,
     get_current_container_id,
 )
-import json
 
 
 class DockerStatusResponse(BaseModel):

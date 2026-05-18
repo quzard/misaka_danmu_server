@@ -1,5 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
-import { getRateLimitStatus } from '../../../apis/index.js'
+import { useRateLimitSSE } from '../../../hooks/useRateLimitSSE'
 import { MyIcon } from '@/components/MyIcon'
 import {
   Card,
@@ -22,28 +21,7 @@ const periodLabelMap = {
 }
 
 export const RateLimitPanel = () => {
-  const [status, setStatus] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const timer = useRef()
-
-  const fetchStatus = async () => {
-    try {
-      const res = await getRateLimitStatus()
-      setStatus(res.data)
-      if (loading) setLoading(false)
-    } catch (error) {
-      console.error('获取流控状态失败:', error)
-      if (loading) setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchStatus()
-    timer.current = setInterval(fetchStatus, 5000) // Refresh every 5 seconds
-    return () => {
-      clearInterval(timer.current)
-    }
-  }, [])
+  const { data: status, loading } = useRateLimitSSE()
 
   return (
     <div className="my-6">
