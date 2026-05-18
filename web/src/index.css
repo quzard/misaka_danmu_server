@@ -251,6 +251,11 @@ a:hover {
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
+/* 全局卡片间距 */
+.ant-card + .ant-card {
+  margin-top: 20px;
+}
+
 /* 移动端优化 */
 @media (max-width: 768px) {
   /* 移动端页面容器边距优化 */
