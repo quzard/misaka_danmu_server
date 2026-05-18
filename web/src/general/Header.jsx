@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RoutePaths } from './RoutePaths.jsx'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
-import { useAtom, useAtomValue } from 'jotai'
+import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import DarkModeToggle from '@/components/DarkModeToggle.jsx';
 import { MyIcon } from '@/components/MyIcon'
@@ -353,6 +353,7 @@ const MobileHeader = ({ activeKey }) => {
   const [dockerAvailable, setDockerAvailable] = useState(false)
   const [restartLoading, setRestartLoading] = useState(false)
   const messageApi = useMessage()
+  const setUserinfo = useSetAtom(userinfoAtom)
 
   // 检查 Docker 套接字是否可用
   useEffect(() => {
@@ -369,10 +370,17 @@ const MobileHeader = ({ activeKey }) => {
   }, [])
 
   const onLogout = async () => {
-    await logout()
-    Cookies.remove('danmu_token', { path: '/' })
-    // 刷新页面清理前端状态（定时器、WebSocket、缓存等）
-    window.location.href = RoutePaths.LOGIN
+    try {
+      await logout()
+    } catch (error) {
+      // 即使服务端会话已失效，也必须清理本地登录状态，避免旧 token 残留导致无法重新登录
+      console.warn('退出登录接口调用失败，已继续清理本地登录状态:', error)
+    } finally {
+      Cookies.remove('danmu_token', { path: '/' })
+      setUserinfo(undefined)
+      // 刷新页面清理前端状态（定时器、WebSocket、缓存等）
+      window.location.href = RoutePaths.LOGIN
+    }
   }
 
   const handleRestart = async () => {
@@ -680,6 +688,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
   const navigate = useNavigate()
   const userinfo = useAtomValue(userinfoAtom)
   const messageApi = useMessage()
+  const setUserinfo = useSetAtom(userinfoAtom)
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false)
   const [isThemeColorOpen, setIsThemeColorOpen] = useState(false)
@@ -707,10 +716,17 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
   }, [])
 
   const onLogout = async () => {
-    await logout()
-    Cookies.remove('danmu_token', { path: '/' })
-    // 刷新页面清理前端状态（定时器、WebSocket、缓存等）
-    window.location.href = RoutePaths.LOGIN
+    try {
+      await logout()
+    } catch (error) {
+      // 即使服务端会话已失效，也必须清理本地登录状态，避免旧 token 残留导致无法重新登录
+      console.warn('退出登录接口调用失败，已继续清理本地登录状态:', error)
+    } finally {
+      Cookies.remove('danmu_token', { path: '/' })
+      setUserinfo(undefined)
+      // 刷新页面清理前端状态（定时器、WebSocket、缓存等）
+      window.location.href = RoutePaths.LOGIN
+    }
   }
 
   const handleRestart = async () => {

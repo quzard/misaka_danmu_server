@@ -8,7 +8,7 @@ import {
   KeyOutlined,
   ClearOutlined,
 } from '@ant-design/icons'
-import { login, autoLogin, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
+import { login, autoLogin, getUserInfo, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
 import { useNavigate } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
@@ -28,20 +28,33 @@ export const Login = () => {
   const navigate = useNavigate()
   const messageApi = useMessage()
 
-  // 页面加载时尝试白名单自动登录
+  // 页面加载时先校验已保存登录状态，失效后再尝试白名单自动登录
   useEffect(() => {
-    const token = Cookies.get('danmu_token')
+    let cancelled = false
 
-    // 如果已有 token，直接跳转到主页
-    if (token) {
-      navigate('/')
-      return
-    }
+    const checkLoginState = async () => {
+      const token = Cookies.get('danmu_token')
 
-    // 尝试白名单自动登录
-    autoLogin()
-      .then(res => {
-        // 自动登录成功，保存 token
+      // 如果已有 token，必须先校验有效性，避免残留旧 token 导致跳首页后 401 循环
+      if (token) {
+        try {
+          const res = await getUserInfo()
+          if (!cancelled && res.data?.username) {
+            navigate('/')
+          }
+          return
+        } catch (error) {
+          Cookies.remove('danmu_token', { path: '/' })
+          if (!cancelled) {
+            setCheckingWhitelist(false)
+          }
+          return
+        }
+      }
+
+      // 尝试白名单自动登录
+      try {
+        const res = await autoLogin()
         const { accessToken, expiresIn } = res.data
         const expiresInDays = expiresIn / (60 * 24)
         Cookies.set('danmu_token', accessToken, {
@@ -50,14 +63,24 @@ export const Login = () => {
           secure: location.protocol === 'https:',
           sameSite: 'lax'
         })
-        messageApi.success('白名单自动登录成功！')
-        navigate('/')
-      })
-      .catch(() => {
+        if (!cancelled) {
+          messageApi.success('白名单自动登录成功！')
+          navigate('/')
+        }
+      } catch (error) {
         // 不在白名单中，显示登录表单
-        setCheckingWhitelist(false)
-      })
-  }, [])
+        if (!cancelled) {
+          setCheckingWhitelist(false)
+        }
+      }
+    }
+
+    checkLoginState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [messageApi, navigate])
 
   // 保存 token 并跳转
   const saveTokenAndNavigate = useCallback((accessToken, expiresIn) => {
