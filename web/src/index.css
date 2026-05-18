@@ -276,7 +276,7 @@ a:hover {
 
   /* 移动端卡片优化 */
   .ant-card {
-    margin-bottom: 12px;
+    margin-bottom: 20px;
   }
 
   .ant-card-head {
