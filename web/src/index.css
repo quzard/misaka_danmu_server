@@ -469,6 +469,17 @@ html[data-page-style="liquid-glass"] {
   background-attachment: fixed;
 }
 
+/* 确保 Input.Search 搜索按钮跟随主题色 */
+.ant-input-search .ant-btn-primary {
+  background-color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+}
+.ant-input-search .ant-btn-primary:hover {
+  background-color: var(--color-primary-dark) !important;
+  border-color: var(--color-primary-dark) !important;
+}
+
+
 /* 卡片：半透明 + 模糊 + 高光描边 + 大圆角 */
 html[data-page-style="liquid-glass"] .ant-card,
 html[data-page-style="liquid-glass"] .ant-modal-content,
