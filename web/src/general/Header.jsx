@@ -480,7 +480,7 @@ const MobileHeader = ({ activeKey }) => {
 
   return (
     <>
-      <div className="fixed bottom-3 left-3 right-3 shadow-box z-50 py-2 px-2 overflow-hidden bg-base-bg rounded-3xl mobile-nav-floating">
+      <div className="fixed bottom-5 left-4 right-4 shadow-box z-50 py-2.5 px-2 overflow-hidden bg-base-bg rounded-3xl mobile-nav-floating">
         <div className="flex justify-evenly items-center">
           {mobileNavItems.map(it => (
             <>
