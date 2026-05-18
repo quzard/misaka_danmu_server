@@ -573,7 +573,7 @@ html[data-page-style="liquid-glass"] .ant-btn-default {
   background: rgba(255, 255, 255, 0.5) !important;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
 
 /* Tag 圆角 */
@@ -582,7 +582,7 @@ html[data-page-style="liquid-glass"] .ant-tag {
   background: rgba(255, 255, 255, 0.5) !important;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
 
 /* 输入框/选择器 大圆角 */
@@ -593,7 +593,7 @@ html[data-page-style="liquid-glass"] .ant-select-selector,
 html[data-page-style="liquid-glass"] .ant-picker {
   border-radius: 14px !important;
   background: rgba(255, 255, 255, 0.5) !important;
-  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
 /* Input.Search 组合框：整体容器圆角，内部 input 不单独圆角（避免与按钮之间出现缝隙） */
 html[data-page-style="liquid-glass"] .ant-input-search .ant-input,
