@@ -99,7 +99,7 @@ export const RateLimitPanel = () => {
             </Card>
 
             {/* 中间卡片区 - 左右分栏 */}
-            <Row gutter={16} className="!mb-6">
+            <Row gutter={[16, 16]} className="!mb-6">
               {/* 左侧卡片 - 弹幕下载流控 */}
               <Col xs={24} lg={12}>
                 <Card type="inner" title={<span><MyIcon icon="celve-cebiandaohang-liukongcelve" size={16} style={{ marginRight: 6 }} />弹幕下载流控</span>} className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
