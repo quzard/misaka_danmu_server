@@ -1,6 +1,6 @@
-import { Modal } from 'antd'
 import { CheckOutlined } from '@ant-design/icons'
 import { useThemeMode, PAGE_STYLES } from '../ThemeProvider'
+import { ResponsiveModal } from './ResponsiveModal'
 
 const PageStylePicker = ({ open, onClose }) => {
   const { pageStyle, setPageStyle } = useThemeMode()
@@ -25,13 +25,12 @@ const PageStylePicker = ({ open, onClose }) => {
   }
 
   return (
-    <Modal
+    <ResponsiveModal
       title="页面样式"
       open={open}
       onCancel={onClose}
       footer={null}
       width={420}
-      centered
     >
       <div className="py-2">
         <div className="text-sm text-gray-500 dark:text-gray-400 mb-3">
@@ -107,7 +106,7 @@ const PageStylePicker = ({ open, onClose }) => {
           💡 液态玻璃样式会让卡片、弹窗等元素呈现毛玻璃质感，建议在亮色/暗色模式下都试试效果~
         </div>
       </div>
-    </Modal>
+    </ResponsiveModal>
   )
 }
 
