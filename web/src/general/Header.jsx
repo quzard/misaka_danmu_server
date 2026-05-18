@@ -807,8 +807,11 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
             aria-hidden="true"
           >
             {navItems.map(it => (
-              <div key={it.key} className="flex items-center gap-1 mx-2 text-base font-semibold">
-                <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 18 }} />
+              <div key={it.key} className="flex items-center gap-1.5 mx-2 text-base font-semibold">
+                <i
+                  className={`iconfont ${it.iconfontIcon}`}
+                  style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                />
                 <span>{it.label}</span>
               </div>
             ))}
@@ -844,7 +847,10 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                         )}
                         onClick={() => navigate(it.key)}
                       >
-                        <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 20 }} />
+                        <i
+                          className={`iconfont ${it.iconfontIcon}`}
+                          style={{ fontSize: 22, width: 24, height: 24, lineHeight: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        />
                       </div>
                     </Dropdown>
                   )
@@ -859,7 +865,10 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                       )}
                       onClick={() => navigate(it.key)}
                     >
-                      <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 20 }} />
+                      <i
+                        className={`iconfont ${it.iconfontIcon}`}
+                        style={{ fontSize: 22, width: 24, height: 24, lineHeight: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                      />
                     </div>
                   </Tooltip>
                 )
@@ -882,12 +891,15 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   >
                     <div
                       className={classNames(
-                        'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1',
+                        'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1.5',
                         { 'text-primary': isActive }
                       )}
                       onClick={() => navigate(it.key)}
                     >
-                      <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 16 }} />
+                      <i
+                        className={`iconfont ${it.iconfontIcon}`}
+                        style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                      />
                       <span>{it.label}</span>
                     </div>
                   </Dropdown>
@@ -897,12 +909,15 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                 <div
                   key={it.key}
                   className={classNames(
-                    'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1',
+                    'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1.5',
                     { 'text-primary': isActive }
                   )}
                   onClick={() => navigate(it.key)}
                 >
-                  <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 16 }} />
+                  <i
+                    className={`iconfont ${it.iconfontIcon}`}
+                    style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  />
                   <span>{it.label}</span>
                 </div>
               )
