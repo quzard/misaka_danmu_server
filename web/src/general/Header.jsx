@@ -73,37 +73,37 @@ const DocsIcon = () => (
 )
 
 const navItems = [
-  { key: RoutePaths.HOME, label: '首页', icon: 'home', iconfontIcon: 'icon-zhuye' },
-  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary', iconfontIcon: 'icon-cunchuku' },
-  { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu', iconfontIcon: 'icon-renwuguanliqi', children: [
+  { key: RoutePaths.HOME, label: '首页', icon: 'home', iconfontIcon: 'icon-home' },
+  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary', iconfontIcon: 'icon-tvlibrary' },
+  { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu', iconfontIcon: 'icon-renwu', children: [
     { key: 'task', label: '进行中的任务' },
     { key: 'webhook', label: 'Webhook 任务' },
     { key: 'schedule', label: '定时任务' },
     { key: 'ratelimit', label: '流控面板' },
   ]},
-  { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmu', iconfontIcon: 'icon-danmupeizhi', children: [
+  { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmu', iconfontIcon: 'icon-danmu', children: [
     { key: 'token', label: 'Token管理' },
     { key: 'output', label: '弹幕输出配置' },
     { key: 'storage', label: '弹幕存储配置' },
     { key: 'fallback', label: '设置' },
   ]},
-  { key: RoutePaths.MEDIA_FETCH, label: '媒体获取', icon: 'movie', iconfontIcon: 'icon-duomeitixiazai', children: [
+  { key: RoutePaths.MEDIA_FETCH, label: '媒体获取', icon: 'movie', iconfontIcon: 'icon-movie', children: [
     { key: 'library-scan', label: '媒体库读取' },
     { key: 'local-scan', label: '本地扫描' },
   ]},
-  { key: RoutePaths.SOURCE, label: '搜索源', icon: 'search', iconfontIcon: 'icon-yuncunchupeizhi', children: [
+  { key: RoutePaths.SOURCE, label: '搜索源', icon: 'search', iconfontIcon: 'icon-search', children: [
     { key: 'scrapers', label: '弹幕搜索源' },
     { key: 'metadata', label: '元信息搜索源' },
     { key: 'global-filter', label: '设置' },
   ]},
-  { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi', iconfontIcon: 'icon-APIkongzhi', children: [
+  { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi', iconfontIcon: 'icon-controlapi', children: [
     { key: 'apikey', label: 'API密钥' },
     { key: 'settings', label: '设置' },
     { key: 'apilogs', label: 'API访问日志' },
     { key: 'mcp', label: 'MCP' },
     { key: 'apidoc', label: 'API文档' },
   ]},
-  { key: RoutePaths.SETTING, label: '设置', icon: 'setting', iconfontIcon: 'icon-shezhi01', children: [
+  { key: RoutePaths.SETTING, label: '设置', icon: 'setting', iconfontIcon: 'icon-setting', children: [
     { key: 'parameters', label: '参数配置' },
     { key: 'proxy', label: '代理设置' },
     { key: 'webhook', label: 'Webhook' },
@@ -112,6 +112,19 @@ const navItems = [
     { key: 'automatch', label: 'AI辅助增强' },
   ]},
 ]
+
+// 导航图标统一样式
+// compact=true 时固定 box 尺寸（icon-only 模式需要对齐）
+// compact=false 时只设字号，宽高自然流动（避免亚像素裁切导致模糊）
+const navIconStyle = (size, scale, compact = false) => ({
+  fontSize: size,
+  ...(compact ? { width: size + 2, height: size + 2 } : {}),
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  ...(scale ? { transform: `scale(${scale})` } : {}),
+})
+
 
 const FloatingMenu = ({ trigger, items, onItemClick, activeKey }) => {
   const [isOpen, setIsOpen] = useState(false)
@@ -221,7 +234,8 @@ export const Header = () => {
   }, []);
   useEffect(() => {
     const checkScreenSize = () => {
-      setIsMobile(window.innerWidth <= 768)
+      // 阈值 900px：低于此宽度桌面端导航即使 icon-only 也容易和右侧工具栏挤压重叠，切到移动端底部 tab 更友好
+      setIsMobile(window.innerWidth <= 900)
     }
     checkScreenSize()
     window.addEventListener('resize', checkScreenSize)
@@ -796,7 +810,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
     <>
       <div className="fixed top-0 left-0 w-full shadow-box z-50 py-2 bg-base-bg">
         <div className="flex justify-start items-center max-w-[1200px] mx-auto w-full px-6 gap-4">
-          <div onClick={() => navigate(RoutePaths.HOME)}>
+          <div onClick={() => navigate(RoutePaths.HOME)} className="flex-shrink-0">
             <img src="/images/logo.png" className="h-12 cursor-pointer" />
           </div>
           {/* 隐藏的测量行：icon+文字完整渲染，用于计算自然宽度 */}
@@ -807,10 +821,10 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
             aria-hidden="true"
           >
             {navItems.map(it => (
-              <div key={it.key} className="flex items-center gap-1.5 mx-2 text-base font-semibold">
+              <div key={it.key} className="flex items-center gap-1 mx-1 text-sm font-semibold whitespace-nowrap">
                 <i
                   className={`iconfont ${it.iconfontIcon}`}
-                  style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  style={navIconStyle(16, it.iconScale)}
                 />
                 <span>{it.label}</span>
               </div>
@@ -831,7 +845,7 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                       key={it.key}
                       menu={{
                         items: [
-                          { key: '_title', label: (<div className="font-semibold text-xs opacity-60 cursor-default">{it.label}</div>), disabled: true },
+                          { key: '_title', label: (<div className="font-bold text-sm cursor-default" style={{ color: 'var(--ant-color-text-secondary)' }}>{it.label}</div>), disabled: true },
                           { type: 'divider' },
                           ...it.children.map(child => ({ key: child.key, label: child.label })),
                         ],
@@ -842,14 +856,14 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                     >
                       <div
                         className={classNames(
-                          'cursor-pointer mx-1 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
+                          'cursor-pointer mx-0.5 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
                           { 'text-primary': isActive }
                         )}
                         onClick={() => navigate(it.key)}
                       >
                         <i
                           className={`iconfont ${it.iconfontIcon}`}
-                          style={{ fontSize: 22, width: 24, height: 24, lineHeight: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                          style={navIconStyle(22, it.iconScale, true)}
                         />
                       </div>
                     </Dropdown>
@@ -860,14 +874,14 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   <Tooltip key={it.key} title={it.label}>
                     <div
                       className={classNames(
-                        'cursor-pointer mx-1 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
+                        'cursor-pointer mx-0.5 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
                         { 'text-primary': isActive }
                       )}
                       onClick={() => navigate(it.key)}
                     >
                       <i
                         className={`iconfont ${it.iconfontIcon}`}
-                        style={{ fontSize: 22, width: 24, height: 24, lineHeight: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={navIconStyle(22, it.iconScale, true)}
                       />
                     </div>
                   </Tooltip>
@@ -891,14 +905,14 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                   >
                     <div
                       className={classNames(
-                        'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1.5',
+                        'text-sm font-semibold cursor-pointer mx-1 flex items-center gap-1 whitespace-nowrap',
                         { 'text-primary': isActive }
                       )}
                       onClick={() => navigate(it.key)}
                     >
                       <i
                         className={`iconfont ${it.iconfontIcon}`}
-                        style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                        style={navIconStyle(16, it.iconScale)}
                       />
                       <span>{it.label}</span>
                     </div>
@@ -909,21 +923,21 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
                 <div
                   key={it.key}
                   className={classNames(
-                    'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1.5',
+                    'text-sm font-semibold cursor-pointer mx-1 flex items-center gap-1 whitespace-nowrap',
                     { 'text-primary': isActive }
                   )}
                   onClick={() => navigate(it.key)}
                 >
                   <i
                     className={`iconfont ${it.iconfontIcon}`}
-                    style={{ fontSize: 18, width: 20, height: 20, lineHeight: '20px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                    style={navIconStyle(16, it.iconScale)}
                   />
                   <span>{it.label}</span>
                 </div>
               )
             })}
           </div>
-          <div className="flex items-center justify-center gap-4 ml-auto">
+          <div className="flex items-center justify-center gap-4 ml-auto flex-shrink-0">
             <RateLimitIndicator />
             <Tooltip title="实时日志">
               <div onClick={onRealtimeLog} className="cursor-pointer" style={{ color: '#1890ff', fontSize: 20 }}>
