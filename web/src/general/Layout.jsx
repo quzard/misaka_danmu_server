@@ -23,7 +23,8 @@ export const Layout = () => {
         .then(res => {
           // 自动登录成功，保存 token
           const { accessToken, expiresIn } = res.data
-          const expiresInDays = expiresIn / (60 * 24)
+          const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
+          const expiresInDays = expiresInMinutes / (60 * 24)
           Cookies.set('danmu_token', accessToken, {
             expires: expiresInDays,
             path: '/',

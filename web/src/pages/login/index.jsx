@@ -56,7 +56,8 @@ export const Login = () => {
       try {
         const res = await autoLogin()
         const { accessToken, expiresIn } = res.data
-        const expiresInDays = expiresIn / (60 * 24)
+        const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
+        const expiresInDays = expiresInMinutes / (60 * 24)
         Cookies.set('danmu_token', accessToken, {
           expires: expiresInDays,
           path: '/',
@@ -84,7 +85,8 @@ export const Login = () => {
 
   // 保存 token 并跳转
   const saveTokenAndNavigate = useCallback((accessToken, expiresIn) => {
-    const expiresInMinutes = expiresIn || 4320
+    // expiresIn 为 -1 表示永不过期，使用 365 天；为 0/undefined 使用默认 3 天
+    const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
     const expiresInDays = expiresInMinutes / (60 * 24)
     Cookies.set('danmu_token', accessToken, {
       expires: expiresInDays,
