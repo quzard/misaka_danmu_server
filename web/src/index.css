@@ -469,6 +469,42 @@ html[data-page-style="liquid-glass"] {
   background-attachment: fixed;
 }
 
+/* 文字颜色保障：亮色模式下文字必须够深；暗色模式下文字必须够浅 */
+html[data-page-style="liquid-glass"]:not(.dark) .ant-card,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-modal-content,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-drawer-content,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-dropdown-menu {
+  color: #1f2937 !important;
+}
+html[data-page-style="liquid-glass"]:not(.dark) .ant-card-head-title,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-modal-title,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-drawer-title,
+html[data-page-style="liquid-glass"]:not(.dark) .ant-typography,
+html[data-page-style="liquid-glass"]:not(.dark) h1,
+html[data-page-style="liquid-glass"]:not(.dark) h2,
+html[data-page-style="liquid-glass"]:not(.dark) h3,
+html[data-page-style="liquid-glass"]:not(.dark) h4,
+html[data-page-style="liquid-glass"]:not(.dark) h5 {
+  color: #111827 !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-card,
+html[data-page-style="liquid-glass"].dark .ant-modal-content,
+html[data-page-style="liquid-glass"].dark .ant-drawer-content,
+html[data-page-style="liquid-glass"].dark .ant-dropdown-menu {
+  color: #f1f5f9 !important;
+}
+html[data-page-style="liquid-glass"].dark .ant-card-head-title,
+html[data-page-style="liquid-glass"].dark .ant-modal-title,
+html[data-page-style="liquid-glass"].dark .ant-drawer-title,
+html[data-page-style="liquid-glass"].dark .ant-typography,
+html[data-page-style="liquid-glass"].dark h1,
+html[data-page-style="liquid-glass"].dark h2,
+html[data-page-style="liquid-glass"].dark h3,
+html[data-page-style="liquid-glass"].dark h4,
+html[data-page-style="liquid-glass"].dark h5 {
+  color: #f8fafc !important;
+}
+
 /* 卡片：半透明 + 模糊 + 高光描边 + 大圆角 */
 html[data-page-style="liquid-glass"] .ant-card,
 html[data-page-style="liquid-glass"] .ant-modal-content,
