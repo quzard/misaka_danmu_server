@@ -13,12 +13,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
-        // 只缓存核心静态资源，不缓存 API 请求
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // 只缓存核心静态资源，不缓存 API 请求和 index.html
+        // 注意：不缓存 html，确保每次导航都从服务器获取最新 index.html
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}'],
         // 主 JS 包较大（~3MB），需要提高缓存上限
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // 不缓存 API 和数据请求
         navigateFallbackDenylist: [/^\/api\//],
+        // 导航请求始终走网络优先，确保更新后立即生效
+        navigateFallback: null,
       },
       manifest: false, // 使用 public/manifest.json，不自动生成
     }),

@@ -56,7 +56,10 @@ def mount_frontend(app: FastAPI, app_settings) -> None:
             # 静态资源缺失时直接 404，防止浏览器把 HTML 当 JS/CSS 执行
             if Path(full_path).suffix.lower() in _STATIC_FILE_SUFFIXES:
                 return Response(status_code=404)
-            return FileResponse("web/dist/index.html")
+            return FileResponse(
+                "web/dist/index.html",
+                headers=_no_store_headers(),
+            )
 
 
 def register_pwa_routes(app: FastAPI) -> None:
