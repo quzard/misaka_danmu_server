@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Modal, Input, Button, Space, Typography, Divider, message } from 'antd'
 import { SafetyOutlined, KeyOutlined } from '@ant-design/icons'
 import { mfaVerify, getPasskeyAuthOptions } from '../apis'
+import { isPasskeySupported } from '../utils/passkey'
 
 const { Text } = Typography
 
@@ -19,7 +20,8 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
   const [passkeyLoading, setPasskeyLoading] = useState(false)
 
   const hasTotp = mfaTypes.includes('totp')
-  const hasPasskey = mfaTypes.includes('passkey')
+  // PassKey 仅在 HTTPS 模式下启用，避免和同 IP 不同端口的其它应用冲突
+  const hasPasskey = mfaTypes.includes('passkey') && isPasskeySupported()
 
   // TOTP 验证 → 直接调 /mfa/verify 拿 JWT
   const handleTotpVerify = useCallback(async () => {
@@ -40,8 +42,8 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
 
   // PassKey 验证 → WebAuthn + /mfa/verify 拿 JWT
   const handlePasskeyVerify = useCallback(async () => {
-    if (!window.PublicKeyCredential) {
-      message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+    if (!isPasskeySupported()) {
+      message.error('PassKey 仅在 HTTPS 模式下可用')
       return
     }
 

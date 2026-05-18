@@ -13,6 +13,7 @@ import {
   renamePasskey, deletePasskey
 } from '../../../apis'
 import { base64urlToBuffer, bufferToBase64url } from '../../../components/MfaVerifyModal'
+import { isPasskeySupported } from '../../../utils/passkey'
 
 const { Text, Paragraph } = Typography
 
@@ -90,8 +91,8 @@ const Security = () => {
 
   // ========== PassKey ==========
   const handleRegisterPasskey = async () => {
-    if (!window.PublicKeyCredential) {
-      message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+    if (!isPasskeySupported()) {
+      message.error('PassKey 仅在 HTTPS 模式下可用')
       return
     }
     setRegisterLoading(true)
@@ -214,7 +215,7 @@ const Security = () => {
         title={<><KeyOutlined className="mr-2" />PassKey / 生物识别</>}
         size="small"
         extra={
-          mfaStatus.totpEnabled ? (
+          isPasskeySupported() && mfaStatus.totpEnabled ? (
             <Button
               type="primary"
               size="small"
@@ -227,7 +228,18 @@ const Security = () => {
           ) : null
         }
       >
-        {!mfaStatus.totpEnabled ? (
+        {!isPasskeySupported() ? (
+          <div className="text-center py-6">
+            <Text type="secondary">
+              <SafetyOutlined className="mr-1" />
+              PassKey 仅在 HTTPS 模式下可用
+            </Text>
+            <br />
+            <Text type="secondary" className="text-xs">
+              请通过 HTTPS 反向代理访问，以避免与同 IP 不同端口的其它应用冲突
+            </Text>
+          </div>
+        ) : !mfaStatus.totpEnabled ? (
           <div className="text-center py-6">
             <Text type="secondary">
               <SafetyOutlined className="mr-1" />

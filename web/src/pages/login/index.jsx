@@ -14,6 +14,7 @@ import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
 import { MfaVerifyModal, base64urlToBuffer, bufferToBase64url } from '../../components/MfaVerifyModal'
 import { clearBrowserCache } from '../../utils/clearCache'
+import { isPasskeySupported } from '../../utils/passkey'
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -138,8 +139,8 @@ export const Login = () => {
 
   // PassKey 无密码直接登录
   const handlePasskeyLogin = useCallback(async () => {
-    if (!window.PublicKeyCredential) {
-      messageApi.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+    if (!isPasskeySupported()) {
+      messageApi.error('PassKey 仅在 HTTPS 模式下可用')
       return
     }
     setPasskeyLoginLoading(true)
@@ -270,8 +271,8 @@ export const Login = () => {
             </Form.Item>
           </Form>
 
-          {/* PassKey 无密码登录 */}
-          {window.PublicKeyCredential && (
+          {/* PassKey 无密码登录（仅 HTTPS 模式可用） */}
+          {isPasskeySupported() && (
             <>
               <Divider plain className="!mt-0 !mb-3 px-6">或</Divider>
               <div className="px-6 pb-6">
