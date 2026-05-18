@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef, useLayoutEffect, useCallback } from 'react'
 import { RoutePaths } from './RoutePaths.jsx'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai'
@@ -73,37 +73,37 @@ const DocsIcon = () => (
 )
 
 const navItems = [
-  { key: RoutePaths.HOME, label: '首页', icon: 'home' },
-  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary' },
-  { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu', children: [
+  { key: RoutePaths.HOME, label: '首页', icon: 'home', iconfontIcon: 'icon-zhuye' },
+  { key: RoutePaths.LIBRARY, label: '弹幕库', icon: 'tvlibrary', iconfontIcon: 'icon-cunchuku' },
+  { key: RoutePaths.TASK, label: '任务管理器', icon: 'renwu', iconfontIcon: 'icon-renwuguanliqi', children: [
     { key: 'task', label: '进行中的任务' },
     { key: 'webhook', label: 'Webhook 任务' },
     { key: 'schedule', label: '定时任务' },
     { key: 'ratelimit', label: '流控面板' },
   ]},
-  { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmu', children: [
+  { key: RoutePaths.BULLET, label: '弹幕', icon: 'danmu', iconfontIcon: 'icon-danmupeizhi', children: [
     { key: 'token', label: 'Token管理' },
     { key: 'output', label: '弹幕输出配置' },
     { key: 'storage', label: '弹幕存储配置' },
     { key: 'fallback', label: '设置' },
   ]},
-  { key: RoutePaths.MEDIA_FETCH, label: '媒体获取', icon: 'movie', children: [
+  { key: RoutePaths.MEDIA_FETCH, label: '媒体获取', icon: 'movie', iconfontIcon: 'icon-duomeitixiazai', children: [
     { key: 'library-scan', label: '媒体库读取' },
     { key: 'local-scan', label: '本地扫描' },
   ]},
-  { key: RoutePaths.SOURCE, label: '搜索源', icon: 'search', children: [
+  { key: RoutePaths.SOURCE, label: '搜索源', icon: 'search', iconfontIcon: 'icon-yuncunchupeizhi', children: [
     { key: 'scrapers', label: '弹幕搜索源' },
     { key: 'metadata', label: '元信息搜索源' },
     { key: 'global-filter', label: '设置' },
   ]},
-  { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi', children: [
+  { key: RoutePaths.CONTROL, label: '外部控制', icon: 'controlapi', iconfontIcon: 'icon-APIkongzhi', children: [
     { key: 'apikey', label: 'API密钥' },
     { key: 'settings', label: '设置' },
     { key: 'apilogs', label: 'API访问日志' },
     { key: 'mcp', label: 'MCP' },
     { key: 'apidoc', label: 'API文档' },
   ]},
-  { key: RoutePaths.SETTING, label: '设置', icon: 'setting', children: [
+  { key: RoutePaths.SETTING, label: '设置', icon: 'setting', iconfontIcon: 'icon-shezhi01', children: [
     { key: 'parameters', label: '参数配置' },
     { key: 'proxy', label: '代理设置' },
     { key: 'webhook', label: 'Webhook' },
@@ -699,6 +699,29 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
   const [dockerAvailable, setDockerAvailable] = useState(false)
   const [restartLoading, setRestartLoading] = useState(false)
 
+  // ---- 导航挤压检测 ----
+  const [compactNav, setCompactNav] = useState(false)
+  const navContainerRef = useRef(null)
+  const navMeasureRef = useRef(null)
+
+  useEffect(() => {
+    const container = navContainerRef.current
+    const measure = navMeasureRef.current
+    if (!container || !measure) return
+
+    const ro = new ResizeObserver(() => {
+      // 可用宽度 = 容器被 flex 分配的实际宽度
+      const available = container.clientWidth
+      // 自然宽度 = 隐藏的测量行（icon+文字完整渲染）的 scrollWidth
+      const natural = measure.scrollWidth
+      setCompactNav(available < natural)
+    })
+    ro.observe(container)
+    // 也监听父容器大小变化
+    if (container.parentElement) ro.observe(container.parentElement)
+    return () => ro.disconnect()
+  }, [])
+
   // 检查 Docker 套接字是否可用
   useEffect(() => {
     const checkDocker = async () => {
@@ -776,48 +799,114 @@ const DesktopHeader = ({ activeKey, version, docsUrl, hasUpdate, onVersionClick,
           <div onClick={() => navigate(RoutePaths.HOME)}>
             <img src="/images/logo.png" className="h-12 cursor-pointer" />
           </div>
-          <div className="flex items-center justify-center">
+          {/* 隐藏的测量行：icon+文字完整渲染，用于计算自然宽度 */}
+          <div
+            ref={navMeasureRef}
+            className="flex items-center"
+            style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'nowrap', pointerEvents: 'none', height: 0, overflow: 'hidden' }}
+            aria-hidden="true"
+          >
             {navItems.map(it => (
-              it.children ? (
-                <Dropdown
-                  key={it.key}
-                  menu={{
-                    items: it.children.map(child => ({
-                      key: child.key,
-                      label: child.label,
-                    })),
-                    onClick: ({ key: childKey }) => {
-                      navigate(`${it.key}?key=${childKey}`)
-                    },
-                  }}
-                >
-                  <div
-                    className={classNames(
-                      'text-base font-semibold cursor-pointer mx-3',
-                      {
-                        'text-primary': activeKey === it.key,
-                      }
-                    )}
-                    onClick={() => navigate(it.key)}
+              <div key={it.key} className="flex items-center gap-1 mx-2 text-base font-semibold">
+                <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 18 }} />
+                <span>{it.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 实际导航 */}
+          <div ref={navContainerRef} className="flex items-center justify-center min-w-0 flex-1">
+            {navItems.map(it => {
+              const isActive = activeKey === it.key
+
+              // ---- 挤压态：icon-only ----
+              if (compactNav) {
+                if (it.children) {
+                  // 有子项时用 Dropdown，顶部显示分类标题
+                  return (
+                    <Dropdown
+                      key={it.key}
+                      menu={{
+                        items: [
+                          { key: '_title', label: (<div className="font-semibold text-xs opacity-60 cursor-default">{it.label}</div>), disabled: true },
+                          { type: 'divider' },
+                          ...it.children.map(child => ({ key: child.key, label: child.label })),
+                        ],
+                        onClick: ({ key: childKey }) => {
+                          if (childKey !== '_title') navigate(`${it.key}?key=${childKey}`)
+                        },
+                      }}
+                    >
+                      <div
+                        className={classNames(
+                          'cursor-pointer mx-1 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
+                          { 'text-primary': isActive }
+                        )}
+                        onClick={() => navigate(it.key)}
+                      >
+                        <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 20 }} />
+                      </div>
+                    </Dropdown>
+                  )
+                }
+                // 无子项时用 Tooltip
+                return (
+                  <Tooltip key={it.key} title={it.label}>
+                    <div
+                      className={classNames(
+                        'cursor-pointer mx-1 p-1.5 rounded-md transition-colors hover:bg-[var(--ant-color-bg-text-hover)]',
+                        { 'text-primary': isActive }
+                      )}
+                      onClick={() => navigate(it.key)}
+                    >
+                      <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 20 }} />
+                    </div>
+                  </Tooltip>
+                )
+              }
+
+              // ---- 正常态：icon + 文字 ----
+              if (it.children) {
+                return (
+                  <Dropdown
+                    key={it.key}
+                    menu={{
+                      items: it.children.map(child => ({
+                        key: child.key,
+                        label: child.label,
+                      })),
+                      onClick: ({ key: childKey }) => {
+                        navigate(`${it.key}?key=${childKey}`)
+                      },
+                    }}
                   >
-                    {it.label}
-                  </div>
-                </Dropdown>
-              ) : (
+                    <div
+                      className={classNames(
+                        'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1',
+                        { 'text-primary': isActive }
+                      )}
+                      onClick={() => navigate(it.key)}
+                    >
+                      <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 16 }} />
+                      <span>{it.label}</span>
+                    </div>
+                  </Dropdown>
+                )
+              }
+              return (
                 <div
                   key={it.key}
                   className={classNames(
-                    'text-base font-semibold cursor-pointer mx-3',
-                    {
-                      'text-primary': activeKey === it.key,
-                    }
+                    'text-base font-semibold cursor-pointer mx-2 flex items-center gap-1',
+                    { 'text-primary': isActive }
                   )}
                   onClick={() => navigate(it.key)}
                 >
-                  {it.label}
+                  <i className={`iconfont ${it.iconfontIcon}`} style={{ fontSize: 16 }} />
+                  <span>{it.label}</span>
                 </div>
               )
-            ))}
+            })}
           </div>
           <div className="flex items-center justify-center gap-4 ml-auto">
             <RateLimitIndicator />
