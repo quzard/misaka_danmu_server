@@ -595,6 +595,12 @@ html[data-page-style="liquid-glass"] .ant-picker {
   background: rgba(255, 255, 255, 0.5) !important;
   border: 1px solid color-mix(in srgb, var(--color-primary) 25%, rgba(0, 0, 0, 0.1)) !important;
 }
+/* ant-input-affix-wrapper 内部的 input 不要边框和背景（避免双层） */
+html[data-page-style="liquid-glass"] .ant-input-affix-wrapper .ant-input {
+  border: none !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+}
 /* Input.Search 组合框：整体容器圆角，内部 input 不单独圆角（避免与按钮之间出现缝隙） */
 html[data-page-style="liquid-glass"] .ant-input-search .ant-input,
 html[data-page-style="liquid-glass"] .ant-input-search .ant-input-affix-wrapper {
