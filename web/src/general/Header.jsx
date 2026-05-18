@@ -487,10 +487,8 @@ const MobileHeader = ({ activeKey }) => {
               {!it.children?.length ? (
                 <div
                   key={it.key}
-                  className={classNames(
-                    'text-center flex-1',
-                    it.key === activeKey && 'text-primary'
-                  )}
+                  className="text-center flex-1"
+                  style={it.key === activeKey ? { color: 'var(--color-primary)' } : undefined}
                   onClick={() => {
                     navigate(it.key)
                   }}
@@ -505,11 +503,12 @@ const MobileHeader = ({ activeKey }) => {
                   key={it.key}
                   trigger={
                     <div
-                      className={classNames(
-                        'text-center flex-1',
-                        it.children.map(o => o.key).includes(activeKey) &&
-                          'text-primary'
-                      )}
+                      className="text-center flex-1"
+                      style={
+                        it.children.map(o => o.key).includes(activeKey)
+                          ? { color: 'var(--color-primary)' }
+                          : undefined
+                      }
                     >
                       <div>
                         <MyIcon icon={it.icon} size={26} />
