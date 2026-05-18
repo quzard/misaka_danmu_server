@@ -480,6 +480,22 @@ html body .ant-btn-primary:not(.ant-btn-dangerous):hover {
   border-color: var(--color-primary-dark) !important;
   background: var(--color-primary-dark) !important;
 }
+/* Input.Search 的搜索按钮有 ant-input-search-button 专属样式，需单独覆盖 */
+html body .ant-input-search .ant-input-search-button,
+html body .ant-input-search .ant-input-search-button.ant-btn-primary,
+html body .ant-input-group-addon .ant-input-search-button {
+  background-color: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  background: var(--color-primary) !important;
+  color: #fff !important;
+}
+html body .ant-input-search .ant-input-search-button:hover,
+html body .ant-input-search .ant-input-search-button.ant-btn-primary:hover,
+html body .ant-input-group-addon .ant-input-search-button:hover {
+  background-color: var(--color-primary-dark) !important;
+  border-color: var(--color-primary-dark) !important;
+  background: var(--color-primary-dark) !important;
+}
 
 
 /* FloatingMenu（移动端上拉菜单）液态玻璃化 */
