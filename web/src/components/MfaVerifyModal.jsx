@@ -106,7 +106,7 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
       onCancel={onCancel}
       footer={null}
       destroyOnClose
-      width={400}
+      width="min(420px, calc(100vw - 32px))"
     >
       <div className="py-4">
         <Text type="secondary">
@@ -116,26 +116,31 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
         {hasTotp && (
           <div className="mt-4">
             <Text strong><SafetyOutlined className="mr-1" />验证器验证码</Text>
-            <div className="mt-2">
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  placeholder="请输入6位验证码"
-                  maxLength={6}
-                  value={otpCode}
-                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={handleKeyDown}
-                  size="large"
-                  autoFocus
-                />
-                <Button
-                  type="primary"
-                  size="large"
-                  loading={loading}
-                  onClick={handleTotpVerify}
-                >
-                  验证
-                </Button>
-              </Space.Compact>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="one-time-code"
+                name="one-time-code"
+                placeholder="请输入6位验证码"
+                maxLength={6}
+                value={otpCode}
+                onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={handleKeyDown}
+                size="large"
+                autoFocus
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="w-full"
+              />
+              <Button
+                type="primary"
+                size="large"
+                loading={loading}
+                onClick={handleTotpVerify}
+                className="w-full sm:w-auto sm:min-w-20"
+              >
+                验证
+              </Button>
             </div>
           </div>
         )}

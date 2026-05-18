@@ -197,14 +197,14 @@ export const Login = () => {
         </Card>
       ) : (
         /* 登录卡片容器 */
-        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto relative">
+        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto relative px-2 sm:px-0">
           {/* 卡片右上角：清理浏览器缓存 */}
           <Button
             type="link"
             size="small"
             icon={<ClearOutlined />}
             onClick={clearBrowserCache}
-            className="!absolute top-4 right-4 z-10"
+            className="!absolute top-3 right-3 z-10 sm:top-4 sm:right-4"
           >
             清理浏览器缓存
           </Button>
