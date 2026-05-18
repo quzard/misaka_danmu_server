@@ -480,6 +480,29 @@ html[data-page-style="liquid-glass"] {
 }
 
 
+/* FloatingMenu（移动端上拉菜单）液态玻璃化 */
+html[data-page-style="liquid-glass"] .floating-menu-panel {
+  background: rgba(255, 255, 255, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+}
+html[data-page-style="liquid-glass"].dark .floating-menu-panel {
+  background: rgba(30, 41, 59, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+
+
 /* 卡片：半透明 + 模糊 + 高光描边 + 大圆角 */
 html[data-page-style="liquid-glass"] .ant-card,
 html[data-page-style="liquid-glass"] .ant-modal-content,

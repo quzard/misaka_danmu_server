@@ -162,7 +162,7 @@ const FloatingMenu = ({ trigger, items, onItemClick, activeKey }) => {
             {...getFloatingProps()}
             className="z-[1000]"
           >
-            <div className="space-y-2 bg-base-card backdrop-blur-sm rounded-lg shadow-xl border border-gray-200/50 dark:border-gray-800/30 p-2">
+            <div className="floating-menu-panel space-y-2 bg-base-card backdrop-blur-sm rounded-2xl shadow-xl border border-gray-200/50 dark:border-gray-800/30 p-2">
               {items.map((item, index) => (
                 <button
                   key={item.key}
