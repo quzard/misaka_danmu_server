@@ -93,8 +93,8 @@ export const Login = () => {
       sameSite: 'lax'
     })
     messageApi.success('登录成功！')
-    window.location.replace('/')
-  }, [messageApi])
+    navigate('/')
+  }, [messageApi, navigate])
 
   // 处理登录逻辑
   const handleLogin = async values => {
