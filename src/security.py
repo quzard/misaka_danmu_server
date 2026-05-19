@@ -73,6 +73,7 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
 # IP 白名单会话缓存
 # key: (client_ip, ua_hash), value: (user, timestamp, ttl_seconds, jti)
 _whitelist_session_cache: Dict[Tuple[str, str], Tuple[models.User, float, int, str]] = {}
+_WHITELIST_CACHE_MAX_SIZE = 1000  # 最大缓存条目数，防止内存无限增长
 
 
 def clear_whitelist_session_cache():
@@ -297,7 +298,11 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                 # 即使数据库记录失败，仍然允许访问（但不缓存）
                 return user
 
-            # 缓存结果并打印一次日志
+            # 缓存结果并打印一次日志（限制缓存大小防止内存增长）
+            if len(_whitelist_session_cache) >= _WHITELIST_CACHE_MAX_SIZE:
+                # 清除最旧的缓存条目
+                oldest_key = min(_whitelist_session_cache, key=lambda k: _whitelist_session_cache[k][1])
+                del _whitelist_session_cache[oldest_key]
             _whitelist_session_cache[cache_key] = (user, current_time, ttl_seconds, jti)
             logger.info(f"IP {client_ip_str} 在白名单中，已建立免登录会话（有效期 {expire_minutes if expire_minutes != -1 else '永久'} 分钟）")
             return user

@@ -274,11 +274,6 @@ class SqlConsole:
                 if confirm.lower() != "yes":
                     print("  ❌ 已取消")
                     return True
-            else:
-                confirm = input("  确认执行? (y/N): ")
-                if confirm.lower() not in ("y", "yes"):
-                    print("  ❌ 已取消")
-                    return True
 
         t0 = time.time()
         async with self.session_factory() as session:

@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
 import { Tooltip } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { getRateLimitStatus } from '@/apis'
+import { useRateLimitSSE } from '@/hooks/useRateLimitSSE'
 
 /**
  * 导航栏流控状态 Tag 指示器
@@ -27,24 +26,8 @@ const BarRow = ({ label, percent, color }) => (
 )
 
 export const RateLimitIndicator = () => {
-  const [data, setData] = useState(null)
+  const { data } = useRateLimitSSE()
   const navigate = useNavigate()
-  const timerRef = useRef(null)
-
-  const fetchStatus = async () => {
-    try {
-      const res = await getRateLimitStatus()
-      setData(res.data)
-    } catch {
-      // 静默失败
-    }
-  }
-
-  useEffect(() => {
-    fetchStatus()
-    timerRef.current = setInterval(fetchStatus, 30000)
-    return () => clearInterval(timerRef.current)
-  }, [])
 
   if (!data || !data.enabled) return null
 
@@ -83,11 +66,12 @@ export const RateLimitIndicator = () => {
     <Tooltip title={tooltipContent} placement="bottom">
       <div
         onClick={() => navigate('/task?key=ratelimit')}
-        className="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800"
+        className="bg-black/[0.03] dark:bg-white/[0.06]"
         style={{
           display: 'inline-flex', flexDirection: 'column', gap: 3,
-          padding: '4px 8px', borderRadius: 4, cursor: 'pointer',
+          padding: '4px 8px', borderRadius: 6, cursor: 'pointer',
           minWidth: 90, position: 'relative', transition: 'box-shadow 0.2s',
+          border: '1px solid color-mix(in srgb, var(--color-primary) 30%, transparent)',
         }}
         onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.12)'}
         onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}

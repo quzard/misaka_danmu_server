@@ -116,3 +116,11 @@ async def count_passkeys_by_user_id(session: AsyncSession, user_id: int) -> int:
     stmt = select(UserPassKey).where(UserPassKey.userId == user_id)
     result = await session.execute(stmt)
     return len(result.scalars().all())
+
+
+async def delete_all_passkeys_by_user_id(session: AsyncSession, user_id: int) -> int:
+    """删除用户的所有 PassKey，返回删除数量"""
+    stmt = delete(UserPassKey).where(UserPassKey.userId == user_id)
+    result = await session.execute(stmt)
+    await session.commit()
+    return result.rowcount

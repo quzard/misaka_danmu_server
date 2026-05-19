@@ -6,12 +6,15 @@ import {
   EyeOutlined,
   EyeInvisibleOutlined,
   KeyOutlined,
+  ClearOutlined,
 } from '@ant-design/icons'
-import { login, autoLogin, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
+import { login, autoLogin, getUserInfo, getPasskeyLoginOptions, verifyPasskeyLogin } from '../../apis'
 import { useNavigate } from 'react-router-dom'
 import Cookies from 'js-cookie'
 import { useMessage } from '../../MessageContext'
 import { MfaVerifyModal, base64urlToBuffer, bufferToBase64url } from '../../components/MfaVerifyModal'
+import { clearBrowserCache } from '../../utils/clearCache'
+import { isPasskeySupported } from '../../utils/passkey'
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -26,40 +29,65 @@ export const Login = () => {
   const navigate = useNavigate()
   const messageApi = useMessage()
 
-  // 页面加载时尝试白名单自动登录
+  // 页面加载时先校验已保存登录状态，失效后再尝试白名单自动登录
   useEffect(() => {
-    const token = Cookies.get('danmu_token')
+    let cancelled = false
 
-    // 如果已有 token，直接跳转到主页
-    if (token) {
-      navigate('/')
-      return
-    }
+    const checkLoginState = async () => {
+      const token = Cookies.get('danmu_token')
 
-    // 尝试白名单自动登录
-    autoLogin()
-      .then(res => {
-        // 自动登录成功，保存 token
+      // 如果已有 token，必须先校验有效性，避免残留旧 token 导致跳首页后 401 循环
+      if (token) {
+        try {
+          const res = await getUserInfo()
+          if (!cancelled && res.data?.username) {
+            navigate('/')
+          }
+          return
+        } catch (error) {
+          Cookies.remove('danmu_token', { path: '/' })
+          if (!cancelled) {
+            setCheckingWhitelist(false)
+          }
+          return
+        }
+      }
+
+      // 尝试白名单自动登录
+      try {
+        const res = await autoLogin()
         const { accessToken, expiresIn } = res.data
-        const expiresInDays = expiresIn / (60 * 24)
+        const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
+        const expiresInDays = expiresInMinutes / (60 * 24)
         Cookies.set('danmu_token', accessToken, {
           expires: expiresInDays,
           path: '/',
           secure: location.protocol === 'https:',
           sameSite: 'lax'
         })
-        messageApi.success('白名单自动登录成功！')
-        navigate('/')
-      })
-      .catch(() => {
+        if (!cancelled) {
+          messageApi.success('白名单自动登录成功！')
+          navigate('/')
+        }
+      } catch (error) {
         // 不在白名单中，显示登录表单
-        setCheckingWhitelist(false)
-      })
-  }, [])
+        if (!cancelled) {
+          setCheckingWhitelist(false)
+        }
+      }
+    }
+
+    checkLoginState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [messageApi, navigate])
 
   // 保存 token 并跳转
   const saveTokenAndNavigate = useCallback((accessToken, expiresIn) => {
-    const expiresInMinutes = expiresIn || 4320
+    // expiresIn 为 -1 表示永不过期，使用 365 天；为 0/undefined 使用默认 3 天
+    const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
     const expiresInDays = expiresInMinutes / (60 * 24)
     Cookies.set('danmu_token', accessToken, {
       expires: expiresInDays,
@@ -111,8 +139,8 @@ export const Login = () => {
 
   // PassKey 无密码直接登录
   const handlePasskeyLogin = useCallback(async () => {
-    if (!window.PublicKeyCredential) {
-      messageApi.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+    if (!isPasskeySupported()) {
+      messageApi.error('PassKey 仅在 HTTPS 模式下可用')
       return
     }
     setPasskeyLoginLoading(true)
@@ -162,7 +190,7 @@ export const Login = () => {
   }, [saveTokenAndNavigate, messageApi])
 
   return (
-    <div className="my-6 flex items-center justify-center">
+    <div className="my-6 flex items-center justify-center relative">
       {/* 白名单检查中显示加载状态 */}
       {checkingWhitelist ? (
         <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto">
@@ -172,7 +200,18 @@ export const Login = () => {
         </Card>
       ) : (
         /* 登录卡片容器 */
-        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto">
+        <Card className="w-full max-w-md rounded-xl shadow-lg overflow-hidden mx-auto relative px-2 sm:px-0">
+          {/* 卡片右上角：清理浏览器缓存 */}
+          <Button
+            type="link"
+            size="small"
+            icon={<ClearOutlined />}
+            onClick={clearBrowserCache}
+            className="!absolute top-3 right-3 z-10 sm:top-4 sm:right-4"
+          >
+            清理浏览器缓存
+          </Button>
+
           {/* 登录标题区域 */}
           <div className="text-center mb-8 pt-4">
             <h2 className="text-[clamp(1.5rem,3vw,2rem)] font-bold text-base-text">
@@ -199,6 +238,7 @@ export const Login = () => {
               <Input
                 prefix={<UserOutlined className="text-gray-400" />}
                 placeholder="请输入用户名"
+                autoComplete="username"
               />
             </Form.Item>
 
@@ -212,6 +252,7 @@ export const Login = () => {
               <Input.Password
                 prefix={<LockOutlined className="text-gray-400" />}
                 placeholder="请输入密码"
+                autoComplete="current-password"
                 visibilityToggle={{
                   visible: showPassword,
                   onVisibleChange: setShowPassword,
@@ -230,8 +271,8 @@ export const Login = () => {
             </Form.Item>
           </Form>
 
-          {/* PassKey 无密码登录 */}
-          {window.PublicKeyCredential && (
+          {/* PassKey 无密码登录（仅 HTTPS 模式可用） */}
+          {isPasskeySupported() && (
             <>
               <Divider plain className="!mt-0 !mb-3 px-6">或</Divider>
               <div className="px-6 pb-6">

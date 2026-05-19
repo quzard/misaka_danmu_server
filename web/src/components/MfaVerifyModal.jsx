@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { Modal, Input, Button, Space, Typography, Divider, message } from 'antd'
 import { SafetyOutlined, KeyOutlined } from '@ant-design/icons'
 import { mfaVerify, getPasskeyAuthOptions } from '../apis'
+import { isPasskeySupported } from '../utils/passkey'
 
 const { Text } = Typography
 
@@ -19,7 +20,8 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
   const [passkeyLoading, setPasskeyLoading] = useState(false)
 
   const hasTotp = mfaTypes.includes('totp')
-  const hasPasskey = mfaTypes.includes('passkey')
+  // PassKey 仅在 HTTPS 模式下启用，避免和同 IP 不同端口的其它应用冲突
+  const hasPasskey = mfaTypes.includes('passkey') && isPasskeySupported()
 
   // TOTP 验证 → 直接调 /mfa/verify 拿 JWT
   const handleTotpVerify = useCallback(async () => {
@@ -40,8 +42,8 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
 
   // PassKey 验证 → WebAuthn + /mfa/verify 拿 JWT
   const handlePasskeyVerify = useCallback(async () => {
-    if (!window.PublicKeyCredential) {
-      message.error('当前环境不支持 PassKey，请使用 HTTPS 或 localhost 访问')
+    if (!isPasskeySupported()) {
+      message.error('PassKey 仅在 HTTPS 模式下可用')
       return
     }
 
@@ -106,7 +108,7 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
       onCancel={onCancel}
       footer={null}
       destroyOnClose
-      width={400}
+      width="min(420px, calc(100vw - 32px))"
     >
       <div className="py-4">
         <Text type="secondary">
@@ -116,26 +118,31 @@ export const MfaVerifyModal = ({ open, onCancel, onSuccess, mfaTypes = [], mfaTo
         {hasTotp && (
           <div className="mt-4">
             <Text strong><SafetyOutlined className="mr-1" />验证器验证码</Text>
-            <div className="mt-2">
-              <Space.Compact style={{ width: '100%' }}>
-                <Input
-                  placeholder="请输入6位验证码"
-                  maxLength={6}
-                  value={otpCode}
-                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={handleKeyDown}
-                  size="large"
-                  autoFocus
-                />
-                <Button
-                  type="primary"
-                  size="large"
-                  loading={loading}
-                  onClick={handleTotpVerify}
-                >
-                  验证
-                </Button>
-              </Space.Compact>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="one-time-code"
+                name="one-time-code"
+                placeholder="请输入6位验证码"
+                maxLength={6}
+                value={otpCode}
+                onChange={e => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={handleKeyDown}
+                size="large"
+                autoFocus
+                autoComplete="one-time-code"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="w-full"
+              />
+              <Button
+                type="primary"
+                size="large"
+                loading={loading}
+                onClick={handleTotpVerify}
+                className="w-full sm:w-auto sm:min-w-20"
+              >
+                验证
+              </Button>
             </div>
           </div>
         )}

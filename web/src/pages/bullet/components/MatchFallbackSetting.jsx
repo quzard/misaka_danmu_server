@@ -422,8 +422,8 @@ export const MatchFallbackSetting = () => {
                   size="small"
                   className={`transition-all duration-200 ${
                     isTokenSelectionDisabled
-                      ? 'bg-gray-50 border-gray-200 opacity-60'
-                      : 'bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200 shadow-sm hover:shadow-md'
+                      ? 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 opacity-60'
+                      : 'bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800 shadow-sm hover:shadow-md'
                   }`}
                   bodyStyle={{ padding: '16px' }}
                 >
@@ -452,8 +452,8 @@ export const MatchFallbackSetting = () => {
                                 className={`
                                   relative p-3 rounded-lg border transition-all duration-200 cursor-pointer
                                   ${isTokenSelectionDisabled
-                                    ? 'bg-gray-100 border-gray-200 cursor-not-allowed'
-                                    : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'
+                                    ? 'bg-gray-100 dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-not-allowed'
+                                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-sm'
                                   }
                                 `}
                               >
@@ -463,13 +463,13 @@ export const MatchFallbackSetting = () => {
                                   className="absolute top-2 right-2"
                                 />
                                 <div className="pr-6">
-                                  <div className="font-medium text-gray-900 mb-1">
+                                  <div className="font-medium text-gray-900 dark:text-gray-100 mb-1">
                                     {token.name}
                                   </div>
                                   <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
                                     token.isEnabled
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-red-100 text-red-800'
+                                      ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+                                      : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'
                                   }`}>
                                     <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
                                       token.isEnabled ? 'bg-green-500' : 'bg-red-500'
@@ -482,7 +482,7 @@ export const MatchFallbackSetting = () => {
                           </div>
                         </Checkbox.Group>
                       </Form.Item>
-                      <div className="mt-4 pt-4 border-t border-gray-200 flex justify-end">
+                      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 flex justify-end">
                         <Button
                           type="primary"
                           loading={tokensSaving}

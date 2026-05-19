@@ -792,7 +792,7 @@ def recreate_container_with_image(
             # ── 传统 docker run 模式 ──
             yield from _recreate_via_docker_run(
                 client, name, container_id, new_image, helper_image,
-                config, host_config
+                config, host_config, attrs
             )
 
     except NotFound:
@@ -891,10 +891,11 @@ def _recreate_via_compose(
 
 def _recreate_via_docker_run(
     client, name: str, container_id: str, new_image: str,
-    helper_image: str, config: dict, host_config: dict
+    helper_image: str, config: dict, host_config: dict, attrs: dict
 ) -> Generator[Dict[str, Any], None, None]:
     """
     通过 docker stop/rm/create/start 重建容器（传统 docker run 模式）。
+    保留原容器的网络配置，包括自定义网络。
     """
     import shlex
 
@@ -930,9 +931,27 @@ def _recreate_via_docker_run(
     for env in env_list:
         create_args.extend(['-e', env])
 
-    # --network
+    # --network: 始终保留原容器的网络配置
+    # 从 NetworkSettings.Networks 获取实际连接的网络列表
+    network_settings = attrs.get('NetworkSettings', {})
+    connected_networks = list((network_settings.get('Networks') or {}).keys())
     network_mode = host_config.get('NetworkMode', '')
-    if network_mode and network_mode not in ('default', 'bridge'):
+
+    # 主网络：create 时通过 --network 指定（第一个网络）
+    primary_network = None
+    extra_networks = []
+
+    if network_mode == 'host':
+        # host 网络模式直接指定
+        create_args.extend(['--network', 'host'])
+    elif connected_networks:
+        # 有实际连接的网络，保留所有
+        primary_network = connected_networks[0]
+        extra_networks = connected_networks[1:]
+        create_args.extend(['--network', primary_network])
+        logger.info(f"保留网络配置: primary={primary_network}, extra={extra_networks}")
+    elif network_mode:
+        # 兜底：使用 NetworkMode
         create_args.extend(['--network', network_mode])
 
     # --hostname (仅当不是容器 ID 时)
@@ -950,6 +969,15 @@ def _recreate_via_docker_run(
 
     # 构建 shell 脚本（由辅助容器执行）
     quoted_args = ' '.join(shlex.quote(a) for a in create_args)
+
+    # 额外网络连接命令（容器启动后追加）
+    extra_net_cmds = ''
+    for net in extra_networks:
+        extra_net_cmds += (
+            f'echo "=== 连接额外网络: {net} ==="; '
+            f'docker network connect {shlex.quote(net)} {shlex.quote(name)}; '
+        )
+
     script = (
         f'set -e; '
         f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
@@ -959,12 +987,14 @@ def _recreate_via_docker_run(
         f'docker rm {shlex.quote(name)}; '
         f'echo "=== 创建新容器 (镜像: {new_image}) ==="; '
         f'docker create --name {shlex.quote(name)} {quoted_args} {shlex.quote(new_image)}; '
+        f'{extra_net_cmds}'
         f'echo "=== 启动新容器 ==="; '
         f'docker start {shlex.quote(name)}; '
         f'echo "=== 重建完成 ==="'
     )
 
-    logger.info(f"重建脚本: docker create --name {name} {quoted_args} {new_image}")
+    logger.info(f"重建脚本: docker create --name {name} {quoted_args} {new_image}"
+                f"{f', 额外网络: {extra_networks}' if extra_networks else ''}")
 
     # 确保辅助镜像存在
     try:

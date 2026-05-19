@@ -1694,7 +1694,7 @@ export const Scrapers = () => {
   return (
     <div className="my-6">
       {/* 资源仓库配置卡片 */}
-      <Card title="资源仓库" className="mb-4">
+      <Card title="资源仓库" className="mb-6">
         <div className="space-y-4">
           <div>
             <div className="mb-2 text-sm text-gray-600">
