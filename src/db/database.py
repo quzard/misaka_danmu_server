@@ -81,6 +81,25 @@ def _get_db_url(include_db_name: bool = True, for_server: bool = False) -> URL:
         host=settings.database.host, port=settings.database.port, database=database, query=query,
     )
 
+
+def _patch_aiomysql_pre_ping(engine) -> None:
+    """
+    SQLAlchemy 的 pymysql dialect 会以 ping() 形式做 pool_pre_ping。
+    aiomysql 的同步适配连接在部分版本中要求 ping(reconnect)，启动时会抛
+    TypeError: missing 1 required positional argument: 'reconnect'。
+    """
+    if get_db_type() != "mysql":
+        return
+
+    def do_ping(dbapi_connection):
+        try:
+            dbapi_connection.ping(False)
+        except TypeError:
+            dbapi_connection.ping()
+        return True
+
+    engine.sync_engine.dialect.do_ping = do_ping
+
 def _log_db_connection_error(context_message: str, e: Exception):
     """
     按照三个方面记录数据库连接错误：连接、用户名密码、权限
@@ -158,6 +177,7 @@ async def create_db_engine_and_session(app: FastAPI):
             })
 
         engine = create_async_engine(db_url, **engine_args)
+        _patch_aiomysql_pre_ping(engine)
         session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
         app.state.db_engine = engine
