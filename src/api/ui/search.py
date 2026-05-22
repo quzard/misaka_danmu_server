@@ -175,9 +175,9 @@ async def search_anime_provider(
             except Exception as e:
                 logger.warning(f"缓存后端读取失败，回退到数据库: {e}")
         if cached_results_data is None:
-            cached_results_data = await crud.get_cache(session, cache_key)
+            cached_results_data = await crud.get_cache(session, f"search:{cache_key}")
         if cached_supplemental_results is None:
-            cached_supplemental_results = await crud.get_cache(session, supplemental_cache_key)
+            cached_supplemental_results = await crud.get_cache(session, f"search:{supplemental_cache_key}")
 
         if cached_results_data is not None and cached_supplemental_results is not None:
             logger.info(f"搜索缓存命中: '{cache_key}'")
@@ -249,16 +249,77 @@ async def search_anime_provider(
         # 修正：检查是否有任何启用的辅助源或强制辅助源
         has_any_aux_source = await metadata_manager.has_any_enabled_aux_source()
 
-        # 🚀 V2.1.6优化: 提前启动元数据查询，与搜索并行
+        # 🚀 V2.1.6优化: 提前启动元数据查询+季度信息获取，与搜索并行
+        # 预热内容：搜TMDB → AI选最佳匹配 → 获取季度信息（全部完成后缓存）
         metadata_prefetch_task = None
         if ai_matcher and metadata_manager:
-            async def prefetch_metadata():
+            async def prefetch_metadata_full():
+                """完整预热：搜TMDB + AI选匹配 + 获取季度信息"""
+                import time as _pf_time
+                _pf_start = _pf_time.perf_counter()
                 try:
                     from src.utils.season_mapper import _get_cached_metadata_search
-                    return await _get_cached_metadata_search(search_title, metadata_manager, logger)
-                except Exception:
+                    from src.db import models as _models
+                    _prefetch_logger = logging.getLogger(__name__)
+
+                    # 步骤1: 搜TMDB
+                    metadata_results = await _get_cached_metadata_search(search_title, metadata_manager, _prefetch_logger)
+                    _step1_ms = (_pf_time.perf_counter() - _pf_start) * 1000
+                    _prefetch_logger.info(f"🔥 预热步骤1 搜TMDB: {len(metadata_results) if metadata_results else 0}个结果 ({_step1_ms:.0f}ms)")
+                    if not metadata_results:
+                        return {"metadata_results": [], "seasons_info": None, "best_match": None}
+
+                    # 步骤2: AI选最佳匹配（如果多个结果）
+                    best_match = metadata_results[0]
+                    if len(metadata_results) > 1:
+                        # 快速路径：第一个结果标题完全匹配时直接用，不调 AI
+                        from thefuzz import fuzz as _pf_fuzz
+                        first_similarity = _pf_fuzz.ratio(search_title.lower(), metadata_results[0].title.lower())
+                        if first_similarity >= 90:
+                            _prefetch_logger.info(f"🔥 预热步骤2 快速路径: 第一个结果'{metadata_results[0].title}'与搜索词相似度{first_similarity}%，跳过AI选择")
+                        else:
+                            try:
+                                provider_results = [
+                                    _models.ProviderSearchInfo(
+                                        provider="tmdb", mediaId=r.tmdbId or r.id,
+                                        title=r.title, type=r.type or "unknown",
+                                        season=1, year=r.year, imageUrl=r.imageUrl, episodeCount=None
+                                    ) for r in metadata_results
+                                ]
+                                query_info = {"title": search_title, "season": None, "episode": None, "year": None, "type": None}
+                                selected_index = await ai_matcher.select_best_match(query_info, provider_results, {})
+                                if selected_index is not None and 0 <= selected_index < len(metadata_results):
+                                    best_match = metadata_results[selected_index]
+                            except Exception:
+                                pass
+                    _step2_ms = (_pf_time.perf_counter() - _pf_start) * 1000
+                    _prefetch_logger.info(f"🔥 预热步骤2 AI选匹配: best='{best_match.title}' ({_step2_ms:.0f}ms)")
+
+                    # 步骤3: 获取季度信息（只对TV类型）
+                    seasons_info = None
+                    tv_match = best_match if best_match.type == 'tv' else None
+                    if not tv_match:
+                        for r in metadata_results:
+                            if r.type == 'tv':
+                                tv_match = r
+                                break
+                    if tv_match:
+                        try:
+                            seasons_info = await metadata_manager.get_seasons("tmdb", tv_match.id)
+                        except Exception:
+                            pass
+                    _step3_ms = (_pf_time.perf_counter() - _pf_start) * 1000
+                    _prefetch_logger.info(f"🔥 预热步骤3 获取季度: {len(seasons_info) if seasons_info else 0}季 ({_step3_ms:.0f}ms)")
+
+                    return {
+                        "metadata_results": metadata_results,
+                        "seasons_info": seasons_info,
+                        "best_match": tv_match or best_match
+                    }
+                except Exception as e:
+                    _prefetch_logger.warning(f"🔥 预热失败: {e}")
                     return None
-            metadata_prefetch_task = asyncio.create_task(prefetch_metadata())
+            metadata_prefetch_task = asyncio.create_task(prefetch_metadata_full())
 
         # 构建搜索标题列表：包含原始标题和季度映射后的标题
         search_titles = [search_title]
@@ -269,15 +330,22 @@ async def search_anime_provider(
         if not has_any_aux_source:
             logger.info("未配置或未启用任何有效的辅助搜索源，直接进行全网搜索。")
             supplemental_results = []
+            aux_title_type_map = {}
             # 修正:变量名统一
             timer.step_start("弹幕源搜索")
             all_results = await manager.search_all(search_titles, episode_info=episode_info)
-            # 收集单源搜索耗时信息
+            # 收集单源搜索耗时信息（分组显示）
             from src.utils.search_timer import SubStepTiming
-            source_timing_sub_steps = [
-                SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
-                for name, dur, cnt in manager.last_search_timing
-            ]
+            source_timing_sub_steps = []
+            for name, dur, cnt in manager.last_search_timing:
+                if name.startswith("补充:"):
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name[3:], duration_ms=dur, result_count=cnt, group="补充源")
+                    )
+                else:
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
+                    )
             timer.step_end(details=f"{len(all_results)}个结果", sub_steps=source_timing_sub_steps)
             logger.info(f"直接搜索完成，找到 {len(all_results)} 个原始结果。")
             results = all_results
@@ -298,26 +366,51 @@ async def search_anime_provider(
             logger.info(f"将使用标题列表 {search_titles} 进行全网搜索...")
 
             timer.step_start("并行搜索(弹幕源+辅助源)")
-            # 1. 并行启动两个任务
+            # 1. 先启动辅助源搜索（让它先发出HTTP请求，避免被弹幕源占满事件循环）
+            import time as _search_time
+
+            async def _timed_supp_search():
+                """包装辅助源搜索，记录耗时"""
+                _start = _search_time.monotonic()
+                result = await metadata_manager.search_supplemental_sources(search_title, current_user)
+                _dur = (_search_time.monotonic() - _start) * 1000
+                return result, _dur
+
+            supp_task = asyncio.create_task(_timed_supp_search())
+            # 让出事件循环，让辅助源有机会开始HTTP请求
+            await asyncio.sleep(0)
+
+            # 2. 再启动弹幕源搜索
             main_task = asyncio.create_task(
                 manager.search_all(search_titles, episode_info=episode_info)
             )
 
-            supp_task = asyncio.create_task(
-                metadata_manager.search_supplemental_sources(search_title, current_user)
-            )
-
             # 2. 等待两个任务都完成
-            all_results, (all_possible_aliases, supplemental_results) = await asyncio.gather(
+            all_results, ((all_possible_aliases, supplemental_results, aux_title_type_map), _) = await asyncio.gather(
                 main_task, supp_task
             )
 
-            # 收集单源搜索耗时信息
+            # 收集单源搜索耗时信息（分组显示）
             from src.utils.search_timer import SubStepTiming
-            source_timing_sub_steps = [
-                SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
-                for name, dur, cnt in manager.last_search_timing
-            ]
+            source_timing_sub_steps = []
+
+            # 弹幕源 + 补充源分组
+            for name, dur, cnt in manager.last_search_timing:
+                if name.startswith("补充:"):
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name[3:], duration_ms=dur, result_count=cnt, group="补充源")
+                    )
+                else:
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
+                    )
+
+            # 辅助源分组（别名获取）
+            for name, dur, cnt in metadata_manager.last_aux_search_timing:
+                source_timing_sub_steps.append(
+                    SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="辅助源(别名)")
+                )
+
             timer.step_end(
                 details=f"弹幕{len(all_results)}个+辅助{len(supplemental_results)}个",
                 sub_steps=source_timing_sub_steps
@@ -405,6 +498,20 @@ async def search_anime_provider(
             logger.info(f"标题 '{item.title}' 包含电影关键词，类型从 'tv_series' 修正为 'movie'。")
             item.type = 'movie'
 
+    # 根据辅助源（TMDB/360等）的类型信息修正弹幕源结果
+    # 注意：只有当弹幕源返回的类型为 'unknown' 时才用辅助源覆盖
+    # 弹幕源自己返回的 tv_series/movie 等明确类型优先级更高
+    if aux_title_type_map:
+        type_corrected = 0
+        for item in results:
+            if item.title in aux_title_type_map and item.type in ('unknown', None, ''):
+                aux_type = aux_title_type_map[item.title]
+                logger.debug(f"辅助源类型修正: '{item.title}' {item.type} → {aux_type}")
+                item.type = aux_type
+                type_corrected += 1
+        if type_corrected:
+            logger.info(f"辅助源类型修正: 共修正 {type_corrected} 个结果的媒体类型")
+
     # 如果用户在搜索词中明确指定了季度，则对结果进行过滤
     if season_to_filter:
         original_count = len(results)
@@ -458,9 +565,9 @@ async def search_anime_provider(
                 await _backend.set(cache_key, results_to_cache, ttl=10800, region="search")
             except Exception as e:
                 logger.warning(f"缓存后端写入失败，回退到数据库: {e}")
-                await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800)
+                await crud.set_cache(session, f"search:{cache_key}", results_to_cache, ttl_seconds=10800)
         else:
-            await crud.set_cache(session, cache_key, results_to_cache, ttl_seconds=10800)
+            await crud.set_cache(session, f"search:{cache_key}", results_to_cache, ttl_seconds=10800)
     # 缓存补充结果（即使为空也缓存，避免翻页时因缓存缺失而重新执行完整搜索）
     supplemental_data = [item.model_dump() for item in supplemental_results] if supplemental_results else []
     _backend = get_cache_backend()
@@ -469,26 +576,38 @@ async def search_anime_provider(
             await _backend.set(supplemental_cache_key, supplemental_data, ttl=10800, region="search")
         except Exception as e:
             logger.warning(f"缓存后端写入失败，回退到数据库: {e}")
-            await crud.set_cache(session, supplemental_cache_key, supplemental_data, ttl_seconds=10800)
+            await crud.set_cache(session, f"search:{supplemental_cache_key}", supplemental_data, ttl_seconds=10800)
     else:
-        await crud.set_cache(session, supplemental_cache_key, supplemental_data, ttl_seconds=10800)
+        await crud.set_cache(session, f"search:{supplemental_cache_key}", supplemental_data, ttl_seconds=10800)
     timer.step_end()
     # --- 缓存逻辑结束 ---
 
 
 
-    # 🚀 V2.1.6: 使用统一的AI类型和季度映射修正函数
+    # 🚀 V2.1.6: 使用统一的AI类型和季度映射修正函数（使用预热数据加速）
     if ai_matcher and metadata_manager:
         try:
             timer.step_start("AI映射修正")
             logger.info("🔄 开始AI映射修正...")
-            # 获取预取的元数据结果（如果有）
-            prefetched_metadata = None
+            # 获取预热的完整数据（TMDB搜索 + AI选匹配 + 季度信息）
+            prefetched_full = None
             if metadata_prefetch_task:
                 try:
-                    prefetched_metadata = await metadata_prefetch_task
-                except Exception:
-                    pass
+                    prefetched_full = await metadata_prefetch_task
+                    logger.info(f"🔥 预热数据获取完成: {type(prefetched_full).__name__}, "
+                               f"metadata={len(prefetched_full.get('metadata_results', [])) if isinstance(prefetched_full, dict) else 'N/A'}, "
+                               f"seasons={'有' if isinstance(prefetched_full, dict) and prefetched_full.get('seasons_info') else '无'}")
+                except Exception as e:
+                    logger.warning(f"🔥 预热数据获取失败: {e}")
+            else:
+                logger.info("🔥 无预热任务（ai_matcher或metadata_manager未就绪）")
+
+            # 传入预热数据：metadata_results 用于跳过搜索，seasons_info 用于跳过获取季度
+            prefetched_metadata = None
+            prefetched_seasons = None
+            if prefetched_full and isinstance(prefetched_full, dict):
+                prefetched_metadata = prefetched_full.get("metadata_results")
+                prefetched_seasons = prefetched_full.get("seasons_info")
 
             mapping_result = await ai_type_and_season_mapping_and_correction(
                 search_title=search_title,
@@ -497,7 +616,8 @@ async def search_anime_provider(
                 ai_matcher=ai_matcher,
                 logger=logger,
                 similarity_threshold=60.0,
-                prefetched_metadata_results=prefetched_metadata
+                prefetched_metadata_results=prefetched_metadata,
+                prefetched_seasons_info=prefetched_seasons
             )
 
             # 应用修正结果

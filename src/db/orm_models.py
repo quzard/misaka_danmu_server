@@ -102,6 +102,7 @@ class Episode(Base):
     danmakuFilePath: Mapped[Optional[str]] = mapped_column("danmaku_file_path", String(1024))
     fetchedAt: Mapped[Optional[datetime]] = mapped_column("fetched_at", NaiveDateTime)
     commentCount: Mapped[int] = mapped_column("comment_count", Integer, default=0)
+    mediaServerEpisodeId: Mapped[Optional[str]] = mapped_column("media_server_episode_id", String(500))
 
     source: Mapped["AnimeSource"] = relationship(back_populates="episodes")
 
@@ -115,9 +116,14 @@ class User(Base):
     token: Mapped[Optional[str]] = mapped_column(TEXT)
     tokenUpdate: Mapped[Optional[datetime]] = mapped_column("token_update", NaiveDateTime)
     createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime)
+    # MFA: TOTP 两步验证
+    isOtp: Mapped[bool] = mapped_column("is_otp", Boolean, default=False)
+    otpSecret: Mapped[Optional[str]] = mapped_column("otp_secret", String(500))
 
     # 关联会话
     sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    # 关联 PassKey
+    passkeys: Mapped[list["UserPassKey"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class UserSession(Base):
@@ -135,6 +141,23 @@ class UserSession(Base):
 
     # 关联用户
     user: Mapped["User"] = relationship(back_populates="sessions")
+
+
+class UserPassKey(Base):
+    """用户 PassKey 凭证表，用于 WebAuthn/FIDO2 无密码认证"""
+    __tablename__ = "user_passkeys"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    userId: Mapped[int] = mapped_column("user_id", BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
+    credentialId: Mapped[str] = mapped_column("credential_id", String(500), unique=True, index=True)  # base64url 编码的凭证ID
+    publicKey: Mapped[str] = mapped_column("public_key", TEXT)  # base64url 编码的公钥
+    signCount: Mapped[int] = mapped_column("sign_count", BigInteger, default=0)  # 签名计数器，防重放
+    deviceName: Mapped[Optional[str]] = mapped_column("device_name", String(500))  # 设备名称（用户自定义）
+    transports: Mapped[Optional[str]] = mapped_column(String(500))  # 逗号分隔的传输方式，如 "usb,ble,nfc,internal"
+    createdAt: Mapped[datetime] = mapped_column("created_at", NaiveDateTime, default=get_now)
+    lastUsedAt: Mapped[Optional[datetime]] = mapped_column("last_used_at", NaiveDateTime)
+
+    # 关联用户
+    user: Mapped["User"] = relationship(back_populates="passkeys")
 
 
 class Scraper(Base):
@@ -164,6 +187,9 @@ class AnimeMetadata(Base):
     tvdbId: Mapped[Optional[str]] = mapped_column("tvdb_id", String(500))
     doubanId: Mapped[Optional[str]] = mapped_column("douban_id", String(500))
     bangumiId: Mapped[Optional[str]] = mapped_column("bangumi_id", String(500))
+    mediaServerType: Mapped[Optional[str]] = mapped_column("media_server_type", String(50))
+    mediaServerSeriesId: Mapped[Optional[str]] = mapped_column("media_server_series_id", String(500))
+    mediaServerSeasonId: Mapped[Optional[str]] = mapped_column("media_server_season_id", String(500))
 
     anime: Mapped["Anime"] = relationship(back_populates="metadataRecord")
 
@@ -201,6 +227,12 @@ class TokenAccessLog(Base):
     accessTime: Mapped[datetime] = mapped_column("access_time", NaiveDateTime)
     status: Mapped[str] = mapped_column(String(500))
     path: Mapped[Optional[str]] = mapped_column(String(512))
+    method: Mapped[Optional[str]] = mapped_column(String(10))
+    requestHeaders: Mapped[Optional[str]] = mapped_column("request_headers", TEXT, nullable=True)
+    requestBody: Mapped[Optional[str]] = mapped_column("request_body", TEXT)
+    responseHeaders: Mapped[Optional[str]] = mapped_column("response_headers", TEXT, nullable=True)
+    responseBody: Mapped[Optional[str]] = mapped_column("response_body", TEXT)
+    statusCode: Mapped[Optional[int]] = mapped_column("status_code", Integer)
 
     __table_args__ = (Index('idx_token_id_time', 'token_id', 'access_time'),)
 
@@ -221,6 +253,7 @@ class BangumiAuth(Base):
     accessToken: Mapped[str] = mapped_column("access_token", TEXT)
     refreshToken: Mapped[Optional[str]] = mapped_column("refresh_token", TEXT)
     expiresAt: Mapped[Optional[datetime]] = mapped_column("expires_at", NaiveDateTime)
+    redirectUri: Mapped[Optional[str]] = mapped_column("redirect_uri", String(512))
     authorizedAt: Mapped[Optional[datetime]] = mapped_column("authorized_at", NaiveDateTime)
 
 class OauthState(Base):
@@ -374,6 +407,9 @@ class MediaItem(Base):
     serverId: Mapped[int] = mapped_column("server_id", BigInteger, ForeignKey("media_servers.id", ondelete="CASCADE"))
     mediaId: Mapped[str] = mapped_column("media_id", String(500))  # 媒体服务器中的ID
     libraryId: Mapped[Optional[str]] = mapped_column("library_id", String(500))  # 所属媒体库ID
+    seriesId: Mapped[Optional[str]] = mapped_column("series_id", String(500))  # 剧集级ID
+    seasonId: Mapped[Optional[str]] = mapped_column("season_id", String(500))  # 季级ID
+    episodeId: Mapped[Optional[str]] = mapped_column("episode_id", String(500))  # 集级ID/电影自身ID
     title: Mapped[str] = mapped_column(String(500))
     mediaType: Mapped[str] = mapped_column("media_type", Enum('movie', 'tv_series', name="media_item_type"))
     season: Mapped[Optional[int]] = mapped_column(Integer)

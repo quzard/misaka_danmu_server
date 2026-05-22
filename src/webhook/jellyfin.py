@@ -51,8 +51,14 @@ class JellyfinWebhook(BaseWebhook):
 
         # 从这里开始，代码与之前相同，处理已解析的 payload
         event_type = payload.get("NotificationType")
+
+        # 处理删除事件
+        if event_type == "ItemRemoved":
+            await self._handle_delete(payload, webhook_source)
+            return
+
         if event_type not in ["ItemAdded"]:
-            logger.info(f"Webhook: 忽略非 'ItemAdded' 的事件 (类型: {event_type})")
+            logger.info(f"Webhook: 忽略非 'ItemAdded' 或 'ItemRemoved' 的事件 (类型: {event_type})")
             return
 
         item_type = payload.get("ItemType")
@@ -73,42 +79,47 @@ class JellyfinWebhook(BaseWebhook):
                 year = datetime.fromisoformat(premiere_date_str.replace("Z", "+00:00")).year
             except (ValueError, TypeError):
                 logger.warning(f"Webhook: 无法从Jellyfin的PremiereDate '{premiere_date_str}' 解析年份。")
-        
+
         # 根据媒体类型分别处理
         if item_type == "Episode":
             series_title = payload.get("SeriesName")
             # 修正：使用正确的键名来获取季度和集数
             season_number = payload.get("SeasonNumber")
             episode_number = payload.get("EpisodeNumber")
-            
+
             if not all([series_title, season_number is not None, episode_number is not None]):
                 logger.warning(f"Webhook: 忽略一个剧集，因为缺少系列标题、季度或集数信息。")
                 return
 
             logger.info(f"Jellyfin Webhook: 解析到剧集 - 标题: '{series_title}', 类型: Episode, 季: {season_number}, 集: {episode_number}")
             logger.info(f"Webhook: 收到剧集 '{series_title}' S{season_number:02d}E{episode_number:02d}' 的入库通知。")
-            
+
             task_title = f"Webhook（jellyfin）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
             search_keyword = f"{series_title} S{season_number:02d}E{episode_number:02d}"
             media_type = "tv_series"
             anime_title = series_title
-            
+
         elif item_type == "Movie":
             movie_title = payload.get("Name")
             if not movie_title:
                 logger.warning(f"Webhook: 忽略一个电影，因为缺少标题信息。")
                 return
-            
+
             logger.info(f"Jellyfin Webhook: 解析到电影 - 标题: '{movie_title}', 类型: Movie")
             logger.info(f"Webhook: 收到电影 '{movie_title}' 的入库通知。")
-            
+
             task_title = f"Webhook（jellyfin）搜索: {movie_title}"
             search_keyword = movie_title
             media_type = "movie"
             season_number = 1
             episode_number = 1 # 电影按单集处理
             anime_title = movie_title
-        
+
+        # 提取媒体服务三级 ID（用于删除联动）
+        jf_item_id = payload.get("ItemId")
+        jf_series_id = payload.get("SeriesId")
+        jf_season_id = payload.get("SeasonId")
+
         # 新逻辑：总是触发全网搜索任务，并附带元数据ID
         unique_key = f"webhook-search-{anime_title}-S{season_number}-E{episode_number}"
         logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
@@ -122,9 +133,46 @@ class JellyfinWebhook(BaseWebhook):
             "imdbId": str(imdb_id) if imdb_id else None,
             "tvdbId": str(tvdb_id) if tvdb_id else None,
             "bangumiId": str(bangumi_id) if bangumi_id else None,
+            # 媒体服务三级 ID
+            "mediaServerType": "jellyfin",
+            # Episode → SeriesId; Movie → ItemId 自身（电影没有 SeriesId）
+            "mediaServerSeriesId": str(jf_series_id) if jf_series_id else (str(jf_item_id) if jf_item_id and item_type == "Movie" else None),
+            "mediaServerSeasonId": str(jf_season_id) if jf_season_id else None,
+            # Episode → ItemId; Movie → ItemId（电影按单集处理）
+            "mediaServerEpisodeId": str(jf_item_id) if jf_item_id and item_type in ("Episode", "Movie") else None,
         }
 
         await self.dispatch_task(
             task_title=task_title, unique_key=unique_key,
             payload=task_payload, webhook_source=webhook_source
         )
+
+    async def _handle_delete(self, payload: dict, webhook_source: str):
+        """处理 Jellyfin ItemRemoved 事件，联动删除弹幕数据。"""
+        from src.tasks.webhook_delete import handle_webhook_delete
+
+        item_type = payload.get("ItemType")
+        if item_type not in ["Episode", "Season", "Series", "Movie"]:
+            logger.info(f"Jellyfin Webhook 删除: 忽略非 Episode/Season/Series/Movie 类型 (类型: {item_type})")
+            return
+
+        item_id = payload.get("ItemId") or ""
+        series_id = payload.get("SeriesId")
+        season_id = payload.get("SeasonId")
+        season_number = payload.get("SeasonNumber") if item_type == "Season" else None
+        title = payload.get("SeriesName") or payload.get("Name") or str(item_id)
+
+        logger.info(f"Jellyfin Webhook 删除: 收到 {item_type} 删除事件 - '{title}' (ItemId={item_id})")
+
+        async with self._session_factory() as session:
+            await handle_webhook_delete(
+                session=session,
+                config_manager=self.config_manager,
+                server_type="jellyfin",
+                item_type=item_type,
+                item_id=str(item_id),
+                series_id=str(series_id) if series_id else None,
+                season_id=str(season_id) if season_id else None,
+                season_number=season_number,
+                title=title,
+            )

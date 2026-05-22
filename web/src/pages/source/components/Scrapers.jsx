@@ -11,6 +11,7 @@ import {
   Modal,
   Row,
   Select,
+  Slider,
   Spin,
   Switch,
   Space,
@@ -34,6 +35,7 @@ import {
   setScrapers,
   setSingleScraper,
   getResourceRepo,
+  getRepoRefs,
   saveResourceRepo,
   getScraperVersions,
   loadScraperResources,
@@ -54,6 +56,7 @@ import {
   getScraperDownloadStatus,
   getCurrentScraperDownload,
   cancelScraperDownload,
+  generateRegex,
 } from '../../../apis'
 import { MyIcon } from '@/components/MyIcon'
 import {
@@ -78,6 +81,7 @@ import {
   KeyOutlined,
   LockOutlined,
   QuestionCircleOutlined,
+  RobotOutlined,
 } from '@ant-design/icons'
 
 import ReactMarkdown from 'react-markdown'
@@ -128,7 +132,7 @@ const SortableItem = ({
           <div {...attributes} {...listeners} style={{ cursor: 'grab' }}>
             <MyIcon icon="drag" size={24} />
           </div>
-          <div>{item.providerName}</div>
+          <div>{item.displayName || item.providerName}</div>
         </div>
         <div className={`flex ${isMobile ? 'ml-auto' : 'items-center justify-around'} gap-4`}>
           {item.providerName === 'bilibili' && (
@@ -150,19 +154,25 @@ const SortableItem = ({
             <div onClick={handleConfig} className="cursor-pointer">
               <MyIcon icon="setting" size={24} />
             </div>
+            {item.useProxy && (
+              <Tooltip title="已启用代理">
+                <span className="text-blue-500"><MyIcon icon="wangluo" size={18} /></span>
+              </Tooltip>
+            )}
+            {item.logRawResponses && (
+              <Tooltip title="已启用记录原始响应">
+                <span className="text-orange-400"><MyIcon icon="rizhi" size={18} /></span>
+              </Tooltip>
+            )}
             {item.version && (
               <Tag color="blue">{item.version}</Tag>
             )}
-            {item.isEnabled ? (
-              <Tag color="green">已启用</Tag>
-            ) : (
-              <Tag color="red">未启用</Tag>
-            )}
-            <Tooltip title="切换启用状态">
-              <div onClick={handleChangeStatus}>
-                <MyIcon icon="exchange" size={24} />
-              </div>
-            </Tooltip>
+            <Switch
+              checked={item.isEnabled}
+              checkedChildren="已启用"
+              unCheckedChildren="未启用"
+              onChange={handleChangeStatus}
+            />
           </div>
         </div>
       </div>
@@ -201,6 +211,10 @@ export const Scrapers = () => {
   // 填充默认黑名单加载状态
   const [loadingDefaultBlacklist, setLoadingDefaultBlacklist] = useState(false)
   const [loadingCommonBlacklist, setLoadingCommonBlacklist] = useState(false)
+  const [aiRegexModalOpen, setAiRegexModalOpen] = useState(false)
+  const [aiRegexDesc, setAiRegexDesc] = useState('')
+  const [aiRegexLoading, setAiRegexLoading] = useState(false)
+  const [aiRegexResult, setAiRegexResult] = useState('')
 
   // 资源仓库相关
   const [resourceRepoUrl, setResourceRepoUrl] = useState('')
@@ -229,6 +243,8 @@ export const Scrapers = () => {
 
   // 分支选择相关
   const [selectedBranch, setSelectedBranch] = useState('main')
+  const [repoRefs, setRepoRefs] = useState({ branches: [], tags: [], minServerVersion: null })
+  const [refsLoading, setRefsLoading] = useState(false)
 
   // 下载进度相关
   const [downloadProgress, setDownloadProgress] = useState({
@@ -352,10 +368,26 @@ export const Scrapers = () => {
       const res = await getResourceRepo()
       setResourceRepoUrl(res.data?.repoUrl || '')
 
-      // 同时加载版本信息
-      await loadVersionInfo()
+      // 同时加载版本信息和分支/标签列表
+      await Promise.all([loadVersionInfo(), loadRepoRefs()])
     } catch (error) {
       console.error('加载资源仓库配置失败:', error)
+    }
+  }
+
+  const loadRepoRefs = async () => {
+    try {
+      setRefsLoading(true)
+      const res = await getRepoRefs()
+      setRepoRefs({
+        branches: res.data?.branches || [],
+        tags: res.data?.tags || [],
+        minServerVersion: res.data?.minServerVersion || null,
+      })
+    } catch (error) {
+      console.error('加载仓库分支/标签失败:', error)
+    } finally {
+      setRefsLoading(false)
     }
   }
 
@@ -370,7 +402,8 @@ export const Scrapers = () => {
         hasUpdate: res.data?.hasUpdate || false,
         localChangelog: res.data?.localChangelog || null,
         remoteChangelog: res.data?.remoteChangelog || null,
-        officialChangelog: res.data?.officialChangelog || null
+        officialChangelog: res.data?.officialChangelog || null,
+        minFetchableVersion: res.data?.minFetchableVersion || null,
       })
       return res.data
     } catch (error) {
@@ -461,7 +494,6 @@ export const Scrapers = () => {
       },
       onopen: async response => {
         if (response.ok) {
-          console.log('SSE 进度流已连接')
         } else {
           throw new Error(`连接失败: ${response.status}`)
         }
@@ -471,7 +503,6 @@ export const Scrapers = () => {
           const data = JSON.parse(event.data)
 
           if (data.type === 'progress') {
-            console.log('收到 progress 消息:', data.status, 'need_restart:', data.need_restart)
             // 更新进度
             // 当 total = 0 时（无需下载），显示 100%；否则按实际进度计算
             // 当 current = total 且 total > 0 时，也显示 100%（下载完成，可能在热加载中）
@@ -562,7 +593,6 @@ export const Scrapers = () => {
           }
 
           if (data.type === 'done') {
-            console.log('收到 done 消息:', data)
             taskCompleted = true
 
             // 检查是否需要重启
@@ -606,13 +636,11 @@ export const Scrapers = () => {
                     if (!response.ok) {
                       // 服务返回错误，认为已停止
                       serviceWentDown = true
-                      console.log('服务已停止（返回错误）')
                       break
                     }
                   } catch (e) {
                     // 服务不可用，认为已停止
                     serviceWentDown = true
-                    console.log('服务已停止（连接失败）')
                     break
                   }
 
@@ -621,7 +649,7 @@ export const Scrapers = () => {
 
                 // 如果服务一直没停止，可能重启很快，继续等待恢复
                 if (!serviceWentDown) {
-                  console.log('服务似乎没有停止，可能重启非常快，继续检测...')
+                  // 服务似乎没有停止，可能重启非常快，继续检测
                 }
 
                 // 第二阶段：等待服务恢复
@@ -665,7 +693,6 @@ export const Scrapers = () => {
                     }
                   } catch (e) {
                     // 服务还未恢复，继续等待
-                    console.log(`等待服务恢复... (${waitSeconds}秒)`)
                   }
 
                   // 等待 checkInterval 毫秒，同时更新秒数
@@ -755,12 +782,10 @@ export const Scrapers = () => {
         console.error('SSE 进度流错误:', error)
         // 如果任务已完成，忽略连接断开错误
         if (taskCompleted) {
-          console.log('任务已完成，忽略连接断开错误')
           throw new Error('任务已完成，停止重试')
         }
         if (error.name !== 'AbortError') {
           // SSE 断开时，尝试查询缓存的任务状态（可能是容器重启导致的断开）
-          console.log('SSE 断开，尝试查询缓存的任务状态...')
 
           // 使用 fetch 直接查询，避免 axios 拦截器的影响
           const token = Cookies.get('danmu_token')
@@ -780,8 +805,6 @@ export const Scrapers = () => {
 
                   if (data.need_restart) {
                     // 容器正在重启，不在这里刷新，让 checkServiceReady() 处理
-                    // 只更新提示信息，不触发刷新
-                    console.log('SSE 断开后查询到任务完成且需要重启，等待 checkServiceReady() 处理')
                     setDownloadProgress(prev => ({
                       ...prev,
                       progress: 100,
@@ -1215,6 +1238,8 @@ export const Scrapers = () => {
       [`${item.providerName}EpisodeBlacklistRegex`]:
         res.data?.[`${item.providerName}EpisodeBlacklistRegex`] || '',
       useProxy: res.data?.useProxy ?? false,
+      [`scraper_${item.providerName}_search_timeout`]:
+        parseInt(res.data?.[`scraper_${item.providerName}_search_timeout`]) || 15,
       ...dynamicInitialValues,
     })
 
@@ -1263,6 +1288,7 @@ export const Scrapers = () => {
       setConfirmLoading(false)
       setOpen(false)
       form.resetFields()
+      getInfo() // 刷新列表以更新代理/日志图标状态
     }
   }
 
@@ -1357,6 +1383,38 @@ export const Scrapers = () => {
     }
   }
 
+  const handleAiGenerate = async () => {
+    if (!aiRegexDesc.trim()) {
+      messageApi.warning('请输入描述')
+      return
+    }
+    setAiRegexLoading(true)
+    setAiRegexResult('')
+    try {
+      const existing = form.getFieldValue(`${setname}EpisodeBlacklistRegex`) || ''
+      const res = await generateRegex(aiRegexDesc.trim(), existing, 'episode_blacklist')
+      if (res.data?.regex) {
+        setAiRegexResult(res.data.regex)
+      } else {
+        messageApi.error('AI 未能生成有效的正则表达式')
+      }
+    } catch (e) {
+      messageApi.error(e?.response?.data?.detail || 'AI 正则生成失败')
+    } finally {
+      setAiRegexLoading(false)
+    }
+  }
+
+  const handleApplyAiRegex = () => {
+    if (!aiRegexResult) return
+    const fieldKey = `${setname}EpisodeBlacklistRegex`
+    form.setFieldValue(fieldKey, aiRegexResult)
+    setAiRegexModalOpen(false)
+    setAiRegexDesc('')
+    setAiRegexResult('')
+    messageApi.success('已应用 AI 生成的规则')
+  }
+
   const handleBiliLogout = () => {
     modalApi.confirm({
       title: '清除缓存',
@@ -1388,7 +1446,7 @@ export const Scrapers = () => {
           <div className="w-full flex items-center justify-between">
             <div className="flex items-center gap-2">
               <MyIcon icon="drag" size={24} />
-              <div>{activeItem.providerName}</div>
+              <div>{activeItem.displayName || activeItem.providerName}</div>
             </div>
             <div className="flex items-center justify-around gap-4">
               <MyIcon icon="setting" size={24} />
@@ -1636,7 +1694,7 @@ export const Scrapers = () => {
   return (
     <div className="my-6">
       {/* 资源仓库配置卡片 */}
-      <Card title="资源仓库" className="mb-4">
+      <Card title="资源仓库" className="mb-6">
         <div className="space-y-4">
           <div>
             <div className="mb-2 text-sm text-gray-600">
@@ -1648,14 +1706,55 @@ export const Scrapers = () => {
                 value={resourceRepoUrl}
                 onChange={(e) => setResourceRepoUrl(e.target.value)}
               />
-              {/* 分支选择器 */}
+              {/* 分支/版本选择器 */}
               <Select
                 value={selectedBranch}
                 onChange={setSelectedBranch}
-                style={{ width: isMobile ? '100%' : 140 }}
+                loading={refsLoading}
+                style={{ width: isMobile ? '100%' : 180 }}
+                placeholder="选择分支或版本"
+                onDropdownVisibleChange={(open) => {
+                  if (open && repoRefs.branches.length === 0 && repoRefs.tags.length === 0) {
+                    loadRepoRefs()
+                  }
+                }}
               >
-                <Select.Option value="main">main</Select.Option>
-                <Select.Option value="test">test (仅X86)</Select.Option>
+                {repoRefs.branches.length > 0 || repoRefs.tags.length > 0 ? (
+                  <>
+                    {repoRefs.branches.length > 0 && (
+                      <Select.OptGroup label="分支">
+                        {repoRefs.branches.map(b => (
+                          <Select.Option key={`branch-${b}`} value={b}>{b}</Select.Option>
+                        ))}
+                      </Select.OptGroup>
+                    )}
+                    {repoRefs.tags.length > 0 && (
+                      <Select.OptGroup label="版本标签">
+                        {repoRefs.tags.map(t => {
+                          // 比较 tag 版本与远程 package.json 中的 min_fetchable_version
+                          // 低于该最低可拉取版本的标记为不可用并禁用
+                          const parseVer = (v) => (v || '').replace(/^v/i, '').split('.').map(Number)
+                          const tagVer = parseVer(t)
+                          const minVer = parseVer(versionInfo.minFetchableVersion)
+                          const isDisabled = minVer.length >= 3 && tagVer.length >= 3 &&
+                            (tagVer[0] < minVer[0] ||
+                              (tagVer[0] === minVer[0] && tagVer[1] < minVer[1]) ||
+                              (tagVer[0] === minVer[0] && tagVer[1] === minVer[1] && tagVer[2] < minVer[2]))
+                          return (
+                            <Select.Option key={`tag-${t}`} value={t} disabled={isDisabled}>
+                              {t}{isDisabled ? ' (不兼容当前服务器)' : ''}
+                            </Select.Option>
+                          )
+                        })}
+                      </Select.OptGroup>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Select.Option value="main">main</Select.Option>
+                    <Select.Option value="test">test</Select.Option>
+                  </>
+                )}
               </Select>
               {isMobile ? (
                 <>
@@ -2343,6 +2442,29 @@ export const Scrapers = () => {
             </Form.Item>
           )}
 
+          <Form.Item
+            label="搜索超时"
+            tooltip="该源的搜索请求超时时间。最低5秒，最大100秒，留空则不限。"
+            className="mb-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <Form.Item name={`scraper_${setname}_search_timeout`} noStyle>
+                  <Slider
+                    min={5}
+                    max={100}
+                    marks={{ 5: '5s', 15: '15s', 30: '30s', 60: '60s', 100: '100s' }}
+                  />
+                </Form.Item>
+              </div>
+              <div style={{ marginTop: 4 }}>
+                <Form.Item name={`scraper_${setname}_search_timeout`} noStyle>
+                  <InputNumber min={5} max={100} controls={false} style={{ width: 80 }} addonAfter="秒" />
+                </Form.Item>
+              </div>
+            </div>
+          </Form.Item>
+
           {/* dandanplay specific */}
           {setname === 'dandanplay' && (
             <>
@@ -2483,6 +2605,16 @@ export const Scrapers = () => {
                   >
                     填充源默认规则
                   </Button>
+                  <Tooltip title="AI 生成正则">
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<RobotOutlined />}
+                      onClick={() => setAiRegexModalOpen(true)}
+                    >
+                      AI 生成
+                    </Button>
+                  </Tooltip>
                 </Space>
               </div>
             }
@@ -2674,12 +2806,62 @@ export const Scrapers = () => {
                 }}
               >
                 {changelogModal.content
-                  ? changelogModal.content.replace(/\r\n/g, '\n').replace(/\n(?!\n)/g, '\n\n')
+                  ? changelogModal.content.replace(/\r\n/g, '\n')
                   : ''}
               </ReactMarkdown>
             </div>
           ) : (
             <Typography.Text type="secondary">暂无版本日志</Typography.Text>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title={<><RobotOutlined /> AI 正则生成助手</>}
+        open={aiRegexModalOpen}
+        onCancel={() => { setAiRegexModalOpen(false); setAiRegexResult('') }}
+        footer={null}
+        destroyOnClose
+        zIndex={1010}
+      >
+        <div className="space-y-4">
+          <div>
+            <div className="text-sm text-gray-600 mb-2">
+              用自然语言描述你想过滤的分集标题，AI 会帮你生成对应的正则表达式。
+            </div>
+            <Input.TextArea
+              value={aiRegexDesc}
+              onChange={e => setAiRegexDesc(e.target.value)}
+              placeholder="例如：过滤掉包含 预告、花絮、特典、PV 的分集"
+              rows={3}
+              onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); handleAiGenerate() } }}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="primary"
+              icon={<RobotOutlined />}
+              loading={aiRegexLoading}
+              onClick={handleAiGenerate}
+            >
+              生成
+            </Button>
+          </div>
+          {aiRegexResult && (
+            <div>
+              <div className="text-sm text-gray-600 mb-1">生成结果：</div>
+              <div className="bg-gray-50 border rounded p-3 font-mono text-sm break-all">
+                {aiRegexResult}
+              </div>
+              <div className="flex justify-end mt-3">
+                <Space>
+                  <Button onClick={() => setAiRegexResult('')}>清除</Button>
+                  <Button type="primary" onClick={handleApplyAiRegex}>
+                    应用规则
+                  </Button>
+                </Space>
+              </div>
+            </div>
           )}
         </div>
       </Modal>

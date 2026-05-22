@@ -492,6 +492,11 @@ async def update_config_item(
 
     await crud.update_config_value(session, config_key, value_str)
     config_manager.invalidate(config_key)
+
+    # JWT 有效期变更时，清空白名单会话缓存以实现热加载
+    if config_key == "jwtExpireMinutes":
+        security.clear_whitelist_session_cache()
+
     logger.info(f"用户 '{current_user.username}' 更新了配置项 '{config_key}'。")
 
 
@@ -1190,6 +1195,32 @@ async def get_ai_models(
     }
 
 
+@router.post("/config/ai/generate-regex", summary="AI 生成正则表达式")
+async def generate_regex(
+    payload: Dict[str, Any],
+    current_user: models.User = Depends(security.get_current_user),
+    ai_matcher_manager=Depends(get_ai_matcher_manager)
+):
+    """
+    使用 AI 根据自然语言描述生成正则表达式。
+    支持增量模式：传入已有正则时，AI 只生成新增部分。
+
+    Body:
+        description: 自然语言描述（必填）
+        existingRegex: 当前已有的正则（可选）
+    """
+    description = payload.get("description", "").strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description 不能为空")
+
+    existing_regex = payload.get("existingRegex", "")
+    context = payload.get("context", "")
+
+    result = await ai_matcher_manager.generate_regex(description, existing_regex, context)
+    if result is None:
+        raise HTTPException(status_code=500, detail="AI 正则生成失败，请检查 AI 配置是否正确")
+
+    return {"regex": result}
 
 
 

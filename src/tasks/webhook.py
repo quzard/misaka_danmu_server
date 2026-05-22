@@ -115,6 +115,11 @@ async def webhook_search_and_dispatch_task(
     title_recognition_manager: TitleRecognitionManager,
     # 媒体库整季导入时, 可选: 指定已在媒体库中选中的分集索引列表
     selectedEpisodes: Optional[List[int]] = None,
+    # 媒体服务三级 ID（用于 webhook 删除联动）
+    mediaServerType: Optional[str] = None,
+    mediaServerSeriesId: Optional[str] = None,
+    mediaServerSeasonId: Optional[str] = None,
+    mediaServerEpisodeId: Optional[str] = None,
 ):
     """
     Webhook 触发的后台任务：搜索所有源，找到最佳匹配，并为该匹配分发一个新的、具体的导入任务。
@@ -191,6 +196,8 @@ async def webhook_search_and_dispatch_task(
                     task_manager=task_manager,
                     title_recognition_manager=title_recognition_manager,
                     selectedEpisodes=selectedEpisodes,
+                    mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                    mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
                 )
                 try:
                     await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -305,12 +312,18 @@ async def webhook_search_and_dispatch_task(
             episode_info=episode_info,
             alias_similarity_threshold=70,
         )
-        # 收集单源搜索耗时信息
+        # 收集单源搜索耗时信息（分组显示）
         from src.utils.search_timer import SubStepTiming
-        source_timing_sub_steps = [
-            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
-            for name, dur, cnt in manager.last_search_timing
-        ]
+        source_timing_sub_steps = []
+        for name, dur, cnt in manager.last_search_timing:
+            if name.startswith("补充:"):
+                source_timing_sub_steps.append(
+                    SubStepTiming(name=name[3:], duration_ms=dur, result_count=cnt, group="补充源")
+                )
+            else:
+                source_timing_sub_steps.append(
+                    SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
+                )
         timer.step_end(details=f"{len(all_search_results)}个结果", sub_steps=source_timing_sub_steps)
 
         if not all_search_results:
@@ -603,6 +616,8 @@ async def webhook_search_and_dispatch_task(
                 task_manager=task_manager,
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
+                mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
             try:
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -725,6 +740,8 @@ async def webhook_search_and_dispatch_task(
                 task_manager=task_manager,
                 title_recognition_manager=title_recognition_manager,
                 selectedEpisodes=selectedEpisodes,
+                mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+                mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
             try:
                 await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
@@ -818,6 +835,8 @@ async def webhook_search_and_dispatch_task(
             task_manager=task_manager,
             title_recognition_manager=title_recognition_manager,
             selectedEpisodes=selectedEpisodes,
+            mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
+            mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
         )
         try:
             await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)

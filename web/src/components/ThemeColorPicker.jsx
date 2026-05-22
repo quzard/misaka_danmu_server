@@ -110,10 +110,10 @@ const ThemeColorPicker = ({ open, onClose }) => {
         </div>
 
         {/* 当前效果预览 */}
-        <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: 'var(--color-hover)' }}>
+        <div className="mt-4 p-3 rounded-lg" style={{ backgroundColor: themeColor + '18' }}>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full" style={{ backgroundColor: themeColor }} />
-            <span className="text-sm" style={{ color: 'var(--color-text)' }}>
+            <span className="text-sm" style={{ color: themeColor, fontWeight: 500 }}>
               当前主题色：{themeColor}
             </span>
           </div>

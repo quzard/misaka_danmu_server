@@ -647,8 +647,8 @@ export const ScheduleTask = () => {
                         const currentCron = form.getFieldValue('cronExpression')
                         if (currentCron && !advancedMode) {
                           return (
-                            <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
-                              <div className="text-sm text-gray-600">
+                            <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
+                              <div className="text-sm text-gray-600 dark:text-gray-300">
                                 <span className="font-medium">执行时间：</span>
                                 {getCronDescription(currentCron)}
                               </div>

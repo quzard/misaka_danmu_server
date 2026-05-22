@@ -1,5 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
-import { getRateLimitStatus } from '../../../apis/index.js'
+import { useRateLimitSSE } from '../../../hooks/useRateLimitSSE'
 import { MyIcon } from '@/components/MyIcon'
 import {
   Card,
@@ -22,28 +21,7 @@ const periodLabelMap = {
 }
 
 export const RateLimitPanel = () => {
-  const [status, setStatus] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const timer = useRef()
-
-  const fetchStatus = async () => {
-    try {
-      const res = await getRateLimitStatus()
-      setStatus(res.data)
-      if (loading) setLoading(false)
-    } catch (error) {
-      console.error('获取流控状态失败:', error)
-      if (loading) setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchStatus()
-    timer.current = setInterval(fetchStatus, 5000) // Refresh every 5 seconds
-    return () => {
-      clearInterval(timer.current)
-    }
-  }, [])
+  const { data: status, loading } = useRateLimitSSE()
 
   return (
     <div className="my-6">
@@ -99,7 +77,7 @@ export const RateLimitPanel = () => {
             </Card>
 
             {/* 中间卡片区 - 左右分栏 */}
-            <Row gutter={16} className="!mb-6">
+            <Row gutter={[16, 16]} className="!mb-6">
               {/* 左侧卡片 - 弹幕下载流控 */}
               <Col xs={24} lg={12}>
                 <Card type="inner" title={<span><MyIcon icon="celve-cebiandaohang-liukongcelve" size={16} style={{ marginRight: 6 }} />弹幕下载流控</span>} className={status.verificationFailed ? 'opacity-50' : ''} style={{ height: '100%' }}>
@@ -179,6 +157,7 @@ export const RateLimitPanel = () => {
                     dataIndex: 'providerName',
                     key: 'providerName',
                     width: 100,
+                    render: (_, record) => record.displayName || record.providerName,
                   },
                   {
                     title: '总计/配额',

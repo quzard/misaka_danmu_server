@@ -10,6 +10,7 @@ Docker 工具模块
 
 import os
 import sys
+import signal
 import socket
 import logging
 import time
@@ -308,11 +309,52 @@ def get_docker_status() -> Dict[str, Any]:
     return status
 
 
+def _check_restart_policy(container) -> bool:
+    """
+    检查容器是否配置了自动重启策略（参考 MoviePilot）
+
+    Args:
+        container: Docker container 对象
+
+    Returns:
+        bool: 是否有有效的重启策略
+    """
+    try:
+        restart_policy = container.attrs.get('HostConfig', {}).get('RestartPolicy', {})
+        policy_name = restart_policy.get('Name', 'no')
+        auto_restart_policies = ['always', 'unless-stopped', 'on-failure']
+        has_restart_policy = policy_name in auto_restart_policies
+        logger.info(f"容器重启策略: {policy_name}, 支持自动重启: {has_restart_policy}")
+        return has_restart_policy
+    except Exception as e:
+        logger.warning(f"检查重启策略失败: {e}")
+        return False
+
+
+def _start_graceful_shutdown_monitor(container) -> None:
+    """
+    启动优雅退出超时监控（参考 MoviePilot）
+    如果 60 秒内 SIGTERM 没有让进程退出，则降级到 Docker API restart
+    """
+    def monitor_thread():
+        time.sleep(60)
+        logger.warning("SIGTERM 优雅退出超时 60 秒，降级到 Docker API restart...")
+        try:
+            container.restart(timeout=10)
+        except Exception as e:
+            logger.error(f"Docker API restart 兜底也失败: {e}")
+
+    thread = threading.Thread(target=monitor_thread, daemon=True)
+    thread.start()
+
+
 async def restart_container(fallback_container_name: str = "misaka_danmu_server") -> Dict[str, Any]:
     """
-    重启当前容器
+    重启当前容器（参考 MoviePilot 的三段式重启策略）
 
-    优先自动检测当前容器 ID，如果检测失败则使用兜底容器名称
+    1. 有 restart policy → 用 os.kill(SIGTERM) 优雅退出，让 Docker 自动重启
+    2. 无 restart policy → 用 container.restart() Docker API 重启
+    3. 超时兜底 → 60秒后降级到 container.restart()
 
     Args:
         fallback_container_name: 兜底容器名称（自动检测失败时使用）
@@ -347,31 +389,34 @@ async def restart_container(fallback_container_name: str = "misaka_danmu_server"
         logger.info(f"正在重启容器: {container_name} (ID: {container_id})")
 
         # 刷新日志，确保上面的日志被写入
-        import sys
         for handler in logging.getLogger().handlers:
             handler.flush()
         sys.stdout.flush()
         sys.stderr.flush()
 
-        # 使用线程异步执行重启，避免阻塞当前进程
-        # 这样可以让日志有时间刷新，然后容器才会被重启
-        import threading
-        def do_restart():
-            try:
-                container.restart(timeout=10)
-            except Exception as e:
-                logger.error(f"重启容器时发生错误: {e}")
+        # 检查容器是否配置了自动重启策略
+        has_restart_policy = _check_restart_policy(container)
 
-        restart_thread = threading.Thread(target=do_restart, daemon=True)
-        restart_thread.start()
-
-        # 不等待线程完成，直接返回
-        # 容器重启会杀死当前进程，所以我们不需要等待
+        if has_restart_policy:
+            # 方案1: 有重启策略，使用 SIGTERM 优雅退出（参考 MoviePilot）
+            # os.kill(SIGTERM) 是进程自杀，Docker 认为是"容器内部退出" → restart policy 生效
+            # 这比 container.stop() 和 container.restart() 更安全，避免群晖等平台的兼容问题
+            logger.info("检测到容器配置了自动重启策略，使用 SIGTERM 优雅重启方式...")
+            _start_graceful_shutdown_monitor(container)
+            os.kill(os.getpid(), signal.SIGTERM)
+        else:
+            # 方案2: 无重启策略，使用 Docker API 直接重启
+            logger.info("容器未配置自动重启策略，使用 Docker API restart...")
+            restart_thread = threading.Thread(
+                target=lambda: container.restart(timeout=10), daemon=True
+            )
+            restart_thread.start()
 
         return {
             "success": True,
             "message": f"已向容器 '{container_name}' 发送重启指令",
-            "container_id": container_id
+            "container_id": container_id,
+            "method": "sigterm" if has_restart_policy else "docker_api"
         }
     except NotFound:
         return {
@@ -701,8 +746,9 @@ def recreate_container_with_image(
     """
     通过辅助容器重建当前容器（使用新镜像，保留原有配置）。
 
-    由于无法从容器内部停止自身，会启动一个一次性的 docker:cli 辅助容器，
-    由它来执行 stop → rm → create → start 的完整流程。
+    自动检测容器是否由 Docker Compose 创建：
+    - 如果是 Compose 容器 → 使用 docker compose up -d 重建，保留 Compose 关联
+    - 如果是普通容器 → 使用 docker stop/rm/create/start 重建
 
     Args:
         container_id: 当前运行容器的 ID（通过 get_current_container_id 获取）
@@ -729,100 +775,245 @@ def recreate_container_with_image(
 
         logger.info(f"准备重建容器: name={name}, id={container_id[:12]}, new_image={new_image}")
 
-        # 构建 docker create 命令参数
-        create_args = []
+        import shlex  # noqa: F811
 
-        # --restart
-        restart = host_config.get('RestartPolicy', {})
-        if restart.get('Name') and restart['Name'] != 'no':
-            policy = restart['Name']
-            if restart.get('MaximumRetryCount', 0) > 0:
-                policy += f":{restart['MaximumRetryCount']}"
-            create_args.extend(['--restart', policy])
+        # 检测是否为 Docker Compose 创建的容器
+        labels = config.get('Labels', {})
+        compose_service = labels.get('com.docker.compose.service')
+        compose_working_dir = labels.get('com.docker.compose.project.working_dir')
 
-        # -p (port bindings)
-        ports = host_config.get('PortBindings') or {}
-        for container_port, bindings in ports.items():
-            for binding in (bindings or []):
-                hp = binding.get('HostPort', '')
-                hip = binding.get('HostIp', '')
-                if hip:
-                    create_args.extend(['-p', f"{hip}:{hp}:{container_port}"])
-                elif hp:
-                    create_args.extend(['-p', f"{hp}:{container_port}"])
-
-        # -v (volume binds)
-        binds = host_config.get('Binds') or []
-        for bind in binds:
-            create_args.extend(['-v', bind])
-
-        # -e (environment variables)
-        env_list = config.get('Env') or []
-        for env in env_list:
-            create_args.extend(['-e', env])
-
-        # --network
-        network_mode = host_config.get('NetworkMode', '')
-        if network_mode and network_mode not in ('default', 'bridge'):
-            create_args.extend(['--network', network_mode])
-
-        # --hostname (仅当不是容器 ID 时)
-        hostname = config.get('Hostname', '')
-        if hostname and not hostname.startswith(container_id[:12]):
-            create_args.extend(['--hostname', hostname])
-
-        # --privileged
-        if host_config.get('Privileged'):
-            create_args.append('--privileged')
-
-        # --cap-add
-        for cap in (host_config.get('CapAdd') or []):
-            create_args.extend(['--cap-add', cap])
-
-        # 构建 shell 脚本（由辅助容器执行）
-        # 使用 printf 而非 echo 避免环境变量中特殊字符问题
-        import shlex
-        quoted_args = ' '.join(shlex.quote(a) for a in create_args)
-        script = (
-            f'set -e; '
-            f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
-            f'echo "=== 停止容器 {name} ==="; '
-            f'docker stop {shlex.quote(name)} --time 10; '
-            f'echo "=== 删除旧容器 ==="; '
-            f'docker rm {shlex.quote(name)}; '
-            f'echo "=== 创建新容器 (镜像: {new_image}) ==="; '
-            f'docker create --name {shlex.quote(name)} {quoted_args} {shlex.quote(new_image)}; '
-            f'echo "=== 启动新容器 ==="; '
-            f'docker start {shlex.quote(name)}; '
-            f'echo "=== 重建完成 ==="'
-        )
-
-        logger.info(f"重建脚本: docker create --name {name} {quoted_args} {new_image}")
-
-        # 确保辅助镜像存在
-        try:
-            client.images.get(helper_image)
-        except NotFound:
-            yield {"status": f"正在拉取辅助工具: {helper_image}...", "progress": 85}
-            client.images.pull(helper_image)
-
-        yield {"status": f"正在启动重建任务（容器: {name}）...", "progress": 90}
-
-        # 启动辅助容器执行重建
-        client.containers.run(
-            image=helper_image,
-            command=["sh", "-c", script],
-            remove=True,
-            detach=True,
-            volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}},
-        )
-
-        yield {"status": "重建任务已启动，容器将在后台被替换", "progress": 95}
-        yield {"status": "新容器启动后页面将自动刷新", "event": "DONE", "progress": 100}
+        if compose_service and compose_working_dir:
+            # ── Docker Compose 模式 ──
+            yield from _recreate_via_compose(
+                client, name, container_id, new_image, helper_image,
+                config, compose_service, compose_working_dir, labels
+            )
+        else:
+            # ── 传统 docker run 模式 ──
+            yield from _recreate_via_docker_run(
+                client, name, container_id, new_image, helper_image,
+                config, host_config, attrs
+            )
 
     except NotFound:
         yield {"status": f"找不到容器: {container_id}", "event": "ERROR"}
     except Exception as e:
         logger.error(f"重建容器失败: {e}", exc_info=True)
         yield {"status": f"重建失败: {str(e)}", "event": "ERROR"}
+
+
+def _recreate_via_compose(
+    client, name: str, container_id: str, new_image: str,
+    helper_image: str, config: dict,
+    compose_service: str, compose_working_dir: str, labels: dict
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    通过 Docker Compose 重建容器，保留 Compose 项目关联。
+
+    流程：
+    1. 如果拉取的新镜像与 Compose 定义的镜像不同，先 docker tag 对齐
+    2. cd 到 Compose 工作目录
+    3. docker compose up -d --force-recreate <service>
+    """
+    import shlex
+
+    compose_project = labels.get('com.docker.compose.project', '')
+    # 获取 compose 配置文件路径（可能有多个，逗号分隔）
+    compose_config_files = labels.get('com.docker.compose.project.config_files', '')
+
+    logger.info(
+        f"检测到 Docker Compose 容器: service={compose_service}, "
+        f"project={compose_project}, working_dir={compose_working_dir}"
+    )
+
+    yield {"status": f"检测到 Compose 容器（服务: {compose_service}），使用 Compose 方式重建...", "progress": 83}
+
+    # 获取容器原始镜像名（Compose 定义的镜像）
+    container_image = config.get('Image', '')
+
+    # 构建 compose 命令的 -f 参数
+    compose_file_args = ''
+    if compose_config_files:
+        for cf in compose_config_files.split(','):
+            cf = cf.strip()
+            if cf:
+                compose_file_args += f' -f {shlex.quote(cf)}'
+
+    # 构建 shell 脚本
+    tag_cmd = ''
+    if new_image != container_image and container_image:
+        # 拉取的镜像与 Compose 中定义的不一致，先 tag 对齐
+        tag_cmd = (
+            f'echo "=== 标记镜像: {new_image} -> {container_image} ==="; '
+            f'docker tag {shlex.quote(new_image)} {shlex.quote(container_image)}; '
+        )
+        logger.info(f"镜像名不一致，将 tag: {new_image} -> {container_image}")
+
+    script = (
+        f'set -e; '
+        f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
+        f'echo "=== Docker Compose 模式: 更新服务 {compose_service} ==="; '
+        f'{tag_cmd}'
+        f'cd {shlex.quote(compose_working_dir)}; '
+        f'docker compose{compose_file_args} up -d --force-recreate {shlex.quote(compose_service)}; '
+        f'echo "=== Compose 重建完成 ==="'
+    )
+
+    logger.info(f"Compose 重建脚本: cd {compose_working_dir} && docker compose up -d --force-recreate {compose_service}")
+
+    # 确保辅助镜像存在
+    try:
+        client.images.get(helper_image)
+    except NotFound:
+        yield {"status": f"正在拉取辅助工具: {helper_image}...", "progress": 85}
+        client.images.pull(helper_image)
+
+    yield {"status": f"正在启动 Compose 重建任务（服务: {compose_service}）...", "progress": 90}
+
+    # 辅助容器需要挂载：Docker socket + Compose 工作目录
+    volumes = {
+        DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'},
+        compose_working_dir: {'bind': compose_working_dir, 'mode': 'ro'},
+    }
+
+    # 启动辅助容器执行重建
+    client.containers.run(
+        image=helper_image,
+        command=["sh", "-c", script],
+        remove=True,
+        detach=True,
+        volumes=volumes,
+    )
+
+    yield {"status": "Compose 重建任务已启动，容器将在后台被替换", "progress": 95}
+    yield {"status": "新容器启动后页面将自动刷新", "event": "DONE", "progress": 100}
+
+
+def _recreate_via_docker_run(
+    client, name: str, container_id: str, new_image: str,
+    helper_image: str, config: dict, host_config: dict, attrs: dict
+) -> Generator[Dict[str, Any], None, None]:
+    """
+    通过 docker stop/rm/create/start 重建容器（传统 docker run 模式）。
+    保留原容器的网络配置，包括自定义网络。
+    """
+    import shlex
+
+    # 构建 docker create 命令参数
+    create_args = []
+
+    # --restart
+    restart = host_config.get('RestartPolicy', {})
+    if restart.get('Name') and restart['Name'] != 'no':
+        policy = restart['Name']
+        if restart.get('MaximumRetryCount', 0) > 0:
+            policy += f":{restart['MaximumRetryCount']}"
+        create_args.extend(['--restart', policy])
+
+    # -p (port bindings)
+    ports = host_config.get('PortBindings') or {}
+    for container_port, bindings in ports.items():
+        for binding in (bindings or []):
+            hp = binding.get('HostPort', '')
+            hip = binding.get('HostIp', '')
+            if hip:
+                create_args.extend(['-p', f"{hip}:{hp}:{container_port}"])
+            elif hp:
+                create_args.extend(['-p', f"{hp}:{container_port}"])
+
+    # -v (volume binds)
+    binds = host_config.get('Binds') or []
+    for bind in binds:
+        create_args.extend(['-v', bind])
+
+    # -e (environment variables)
+    env_list = config.get('Env') or []
+    for env in env_list:
+        create_args.extend(['-e', env])
+
+    # --network: 始终保留原容器的网络配置
+    # 从 NetworkSettings.Networks 获取实际连接的网络列表
+    network_settings = attrs.get('NetworkSettings', {})
+    connected_networks = list((network_settings.get('Networks') or {}).keys())
+    network_mode = host_config.get('NetworkMode', '')
+
+    # 主网络：create 时通过 --network 指定（第一个网络）
+    primary_network = None
+    extra_networks = []
+
+    if network_mode == 'host':
+        # host 网络模式直接指定
+        create_args.extend(['--network', 'host'])
+    elif connected_networks:
+        # 有实际连接的网络，保留所有
+        primary_network = connected_networks[0]
+        extra_networks = connected_networks[1:]
+        create_args.extend(['--network', primary_network])
+        logger.info(f"保留网络配置: primary={primary_network}, extra={extra_networks}")
+    elif network_mode:
+        # 兜底：使用 NetworkMode
+        create_args.extend(['--network', network_mode])
+
+    # --hostname (仅当不是容器 ID 时)
+    hostname = config.get('Hostname', '')
+    if hostname and not hostname.startswith(container_id[:12]):
+        create_args.extend(['--hostname', hostname])
+
+    # --privileged
+    if host_config.get('Privileged'):
+        create_args.append('--privileged')
+
+    # --cap-add
+    for cap in (host_config.get('CapAdd') or []):
+        create_args.extend(['--cap-add', cap])
+
+    # 构建 shell 脚本（由辅助容器执行）
+    quoted_args = ' '.join(shlex.quote(a) for a in create_args)
+
+    # 额外网络连接命令（容器启动后追加）
+    extra_net_cmds = ''
+    for net in extra_networks:
+        extra_net_cmds += (
+            f'echo "=== 连接额外网络: {net} ==="; '
+            f'docker network connect {shlex.quote(net)} {shlex.quote(name)}; '
+        )
+
+    script = (
+        f'set -e; '
+        f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
+        f'echo "=== 停止容器 {name} ==="; '
+        f'docker stop {shlex.quote(name)} --time 10; '
+        f'echo "=== 删除旧容器 ==="; '
+        f'docker rm {shlex.quote(name)}; '
+        f'echo "=== 创建新容器 (镜像: {new_image}) ==="; '
+        f'docker create --name {shlex.quote(name)} {quoted_args} {shlex.quote(new_image)}; '
+        f'{extra_net_cmds}'
+        f'echo "=== 启动新容器 ==="; '
+        f'docker start {shlex.quote(name)}; '
+        f'echo "=== 重建完成 ==="'
+    )
+
+    logger.info(f"重建脚本: docker create --name {name} {quoted_args} {new_image}"
+                f"{f', 额外网络: {extra_networks}' if extra_networks else ''}")
+
+    # 确保辅助镜像存在
+    try:
+        client.images.get(helper_image)
+    except NotFound:
+        yield {"status": f"正在拉取辅助工具: {helper_image}...", "progress": 85}
+        client.images.pull(helper_image)
+
+    yield {"status": f"正在启动重建任务（容器: {name}）...", "progress": 90}
+
+    # 启动辅助容器执行重建
+    client.containers.run(
+        image=helper_image,
+        command=["sh", "-c", script],
+        remove=True,
+        detach=True,
+        volumes={DOCKER_SOCKET_PATH: {'bind': DOCKER_SOCKET_PATH, 'mode': 'rw'}},
+    )
+
+    yield {"status": "重建任务已启动，容器将在后台被替换", "progress": 95}
+    yield {"status": "新容器启动后页面将自动刷新", "event": "DONE", "progress": 100}
 

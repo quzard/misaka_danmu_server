@@ -92,6 +92,18 @@ async def _scraper_auto_update_handler(app: FastAPI) -> None:
         logger.debug("远程 package.json 中没有版本号")
         return
 
+    # 前置检查：远程弹幕源包是否要求更高的服务器版本
+    remote_min_server = package_data.get("min_server_version")
+    if remote_min_server:
+        from src._version import APP_VERSION
+        from src.services.scraper_manager import _version_satisfies
+        if not _version_satisfies(APP_VERSION, remote_min_server):
+            logger.warning(
+                f"远程弹幕源包要求服务器版本 >= {remote_min_server}，"
+                f"当前版本 {APP_VERSION}，跳过自动更新"
+            )
+            return
+
     # 比较版本
     if local_version == remote_version:
         logger.debug(f"弹幕源已是最新版本 ({local_version})")

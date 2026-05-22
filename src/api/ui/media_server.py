@@ -84,6 +84,9 @@ class MediaItemResponse(BaseModel):
     serverId: int
     mediaId: str
     libraryId: Optional[str]
+    seriesId: Optional[str]
+    seasonId: Optional[str]
+    episodeId: Optional[str]
     title: str
     mediaType: str
     season: Optional[int]

@@ -479,6 +479,46 @@ def parse_filename(filename: str) -> Optional[ParseResult]:
     team_match = re.match(r'^\[([^\]]+)\]', name)
     team = team_match.group(1) if team_match else None
 
+    # 新增：处理 ★ 分隔的文件名格式
+    # ★ 充当 [] 的分隔作用：字幕组★标题★集数★分辨率★编码★语言
+    if not team and '★' in name:
+        star_segments = [s.strip() for s in name.split('★') if s.strip()]
+        if len(star_segments) >= 3:
+            # 检查首段是否为字幕组
+            if GROUP_KEYWORDS.search(star_segments[0]):
+                team = star_segments[0]
+                star_segments = star_segments[1:]
+                logger.debug(f"从 ★ 分隔符提取字幕组: '{team}'")
+
+            # 智能分段：识别标题段、集数段，丢弃技术规格段
+            title_parts = []
+            episode_from_star = None
+            for seg in star_segments:
+                # 纯数字段 → 可能是集数（取第一个遇到的）
+                if re.match(r'^\d{1,4}$', seg) and episode_from_star is None:
+                    episode_from_star = int(seg)
+                # 技术规格段（分辨率、编码、格式、语言等）→ 跳过
+                elif PIX_RE.search(seg) or VIDEO_RE.search(seg) or AUDIO_RE.search(seg) \
+                        or SOURCE_RE.search(seg) or DYNAMIC_RANGE_RE.search(seg) \
+                        or PLATFORM_RE.search(seg) or EFFECT_RE.search(seg):
+                    continue
+                # 视频容器/格式（复用 VIDEO_EXTENSIONS 常量）→ 跳过
+                elif seg.lower() in VIDEO_EXTENSIONS:
+                    continue
+                # 语言/字幕标记（复用 NOISE_WORDS 中的语言模式）→ 跳过
+                elif re.match(r'(?i)^[简繁中日英双雙多]+[体文语語]', seg):
+                    continue
+                else:
+                    title_parts.append(seg)
+
+            if title_parts:
+                # 用标题段重组 name（用空格连接）
+                name = ' '.join(title_parts)
+                # 如果有从 ★ 段提取的集数，附加到 name 末尾以便后续阶段3匹配
+                if episode_from_star is not None:
+                    name = f"{name} {episode_from_star}"
+                logger.debug(f"★ 分段重组: name='{name}', episode_from_star={episode_from_star}")
+
     # 尝试提取尾部发布组 (如 -PTerWEB)
     if not team:
         team = _extract_tail_group(name)
@@ -574,10 +614,20 @@ def parse_filename(filename: str) -> Optional[ParseResult]:
             title = m.group('title')
             title = _clean_year_from_title(title)
             title = re.sub(r'\s+', ' ', title).strip(' -')
+            # 尝试从标题中提取季度信息（如 "金牌得主 第二季 Medalist 2" → season=2）
+            season_from_title = extract_season_from_title(title)
+            if season_from_title is not None:
+                # 移除标题中的季度后缀以清理标题
+                for sp in SEASON_SUFFIX_PATTERNS:
+                    cleaned_title = re.sub(sp, '', title, flags=re.IGNORECASE).strip()
+                    if cleaned_title and cleaned_title != title:
+                        title = cleaned_title
+                        break
+                title = re.sub(r'[\s\-_：:]+$', '', title).strip()
             full_title = title
             title, en_name = _split_multilang_title(title)
             if title:
-                return ParseResult(title=title, episode=ep,
+                return ParseResult(title=title, season=season_from_title, episode=ep,
                                    original_title=full_title if en_name else None,
                                    en_name=en_name, **meta)
     title = _clean_year_from_title(cleaned)

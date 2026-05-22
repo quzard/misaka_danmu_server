@@ -331,6 +331,9 @@ class PlexMediaServer(BaseMediaServer):
             imdb_id=imdb_id,
             poster_url=poster_url,
             library_id=library_id,
+            series_id=str(data.get('grandparentRatingKey')) if data.get('grandparentRatingKey') is not None else None,
+            season_id=str(data.get('parentRatingKey')) if data.get('parentRatingKey') is not None else None,
+            episode_id=str(data.get('ratingKey')) if data.get('ratingKey') is not None else None,
         )
     
     def _get_image_url(self, thumb_path: Optional[str]) -> Optional[str]:

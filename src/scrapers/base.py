@@ -130,6 +130,8 @@ class BaseScraper(ABC):
         self.transport_manager = transport_manager
         self.logger = logging.getLogger(self.__class__.__name__)
         # 用于跟踪当前客户端实例所使用的代理配置
+        # 搜索超时（秒），由 scraper_manager 从 config 注入，默认15秒
+        self._search_timeout: float = 15.0
         self._current_proxy_config: Optional[str] = None
         # 缓存 scraper_manager 引用,用于访问预加载的 scraper 设置
         self._scraper_manager_ref: Optional[Any] = None
@@ -239,13 +241,17 @@ class BaseScraper(ABC):
     async def _create_client(self, **kwargs) -> httpx.AsyncClient: # type: ignore
         """
         创建 httpx.AsyncClient，并根据配置应用代理。
-        子类可以传递额外的 httpx.AsyncClient 参数。
+        超时统一由 _search_timeout 控制（由 scraper_manager 从 config 注入），
+        忽略子类传入的 timeout 参数。
         """
         proxy_to_use = await self._get_proxy_for_provider()
         await self._log_proxy_usage(proxy_to_use)
         self._current_proxy_config = proxy_to_use
 
-        client_kwargs = {"proxy": proxy_to_use, "timeout": 20.0, "follow_redirects": True, **kwargs}
+        # 忽略子类传的 timeout，统一用配置的 _search_timeout
+        kwargs.pop("timeout", None)
+
+        client_kwargs = {"proxy": proxy_to_use, "timeout": self._search_timeout, "follow_redirects": True, **kwargs}
         return httpx.AsyncClient(**client_kwargs)
 
     async def _get_from_cache(self, key: str) -> Optional[Any]:
@@ -302,6 +308,10 @@ class BaseScraper(ABC):
 
     # 每个子类都必须覆盖这个类属性
     provider_name: str
+
+    # (可选) 子类可覆盖此属性，设置在UI上显示的友好名称。
+    # 如果未设置，前端将 fallback 到 provider_name。
+    display_name: Optional[str] = None
 
     # (可选) 子类可以覆盖此字典来声明其可配置的字段。
     # 格式: { "config_key": ("UI显示的标签", "字段类型", "UI上的提示信息") }
@@ -431,23 +441,32 @@ class BaseScraper(ABC):
         """
         return str(provider_episode_id)
 
-    async def _filter_junk_episodes(self, episodes: List["models.ProviderEpisodeInfo"]) -> List["models.ProviderEpisodeInfo"]:
+    async def _filter_junk_episodes(
+        self,
+        episodes: List["models.ProviderEpisodeInfo"],
+        return_filtered: bool = False,
+    ):
         """
         过滤掉垃圾分集（预告、花絮等）
 
         注意：此方法现在从 config 表读取过滤规则，不再使用硬编码的正则表达式。
         如果 config 表中没有配置过滤规则，则不进行过滤。
+
+        Args:
+            episodes: 待过滤的分集列表
+            return_filtered: 是否同时返回被过滤的分集信息
+                - False（默认）: 返回 List[ProviderEpisodeInfo]（向后兼容）
+                - True: 返回 (保留的分集列表, 被过滤的分集列表[(episode, 匹配规则)])
         """
         if not episodes:
-            return episodes
+            return (episodes, []) if return_filtered else episodes
 
         # 从 config 表获取过滤规则，不使用硬编码兜底
         blacklist_pattern = await self.get_episode_blacklist_pattern()
 
         # 如果没有配置过滤规则，直接返回所有分集
         if not blacklist_pattern:
-            self.logger.info(f"{self.provider_name}: 分集过滤结果 (无过滤规则): 共 {len(episodes)} 集")
-            return episodes
+            return (episodes, []) if return_filtered else episodes
 
         filtered_episodes = []
         filtered_out_episodes = []
@@ -456,30 +475,49 @@ class BaseScraper(ABC):
             # 使用从 config 表获取的正则表达式进行过滤
             match = blacklist_pattern.search(episode.title)
             if match:
-                junk_type = match.group(0)
+                # 优先取第2个捕获组（通常是关键词如"幕后""预告"），否则取整个匹配
+                junk_type = match.group(2) if match.lastindex and match.lastindex >= 2 else match.group(0)
                 filtered_out_episodes.append((episode, junk_type))
             else:
                 filtered_episodes.append(episode)
 
-        # 打印分集过滤摘要
-        summary_parts = [f"{self.provider_name}: 分集过滤结果:"]
-
-        # 打印过滤掉的分集（这些比较重要，逐条列出）
-        if filtered_out_episodes:
-            summary_parts.append(f"  已过滤 {len(filtered_out_episodes)} 集:")
-            for episode, junk_type in filtered_out_episodes:
-                summary_parts.append(f"    ✗ {episode.title} ({junk_type})")
-
-        # 保留的分集只显示数量
-        if filtered_episodes:
-            summary_parts.append(f"  保留 {len(filtered_episodes)} 集")
-
-        if not filtered_episodes and not filtered_out_episodes:
-            summary_parts.append(f"  无分集数据")
-
-        self.logger.info("\n".join(summary_parts))
-
+        if return_filtered:
+            return filtered_episodes, filtered_out_episodes
         return filtered_episodes
+
+    def _log_episodes_result(
+        self,
+        kept_episodes: List["models.ProviderEpisodeInfo"],
+        filtered_out: List[Tuple["models.ProviderEpisodeInfo", str]],
+        elapsed_ms: int,
+        target_episode_index: Optional[int] = None,
+    ) -> None:
+        """
+        统一的分集获取结果日志，同时显示保留和被过滤的分集。
+
+        Args:
+            kept_episodes: 保留的分集列表
+            filtered_out: 被过滤的分集列表 [(episode, 匹配规则)]
+            elapsed_ms: 耗时（毫秒）
+            target_episode_index: 如果指定了目标集数，只显示该集
+        """
+        episodes_to_log = (
+            [ep for ep in kept_episodes if ep.episodeIndex == target_episode_index]
+            if target_episode_index is not None
+            else kept_episodes
+        )
+
+        log_lines = ["-", f"┌─── {self.provider_name} ({len(episodes_to_log)}个结果, {elapsed_ms}ms) ───"]
+        for ep in episodes_to_log:
+            log_lines.append(f"  - {ep.title}")
+
+        if filtered_out:
+            log_lines.append(f"  已过滤 {len(filtered_out)} 集:")
+            for ep, rule in filtered_out:
+                log_lines.append(f"    ✗ {ep.title} （黑名单正则匹配：{rule}）")
+
+        log_lines.append(f"└─── {self.provider_name} ───")
+        self.logger.info("\n".join(log_lines))
 
     @abstractmethod
     async def close(self):

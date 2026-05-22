@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from src.db import crud, ConfigManager
+from src.db.orm_models import MediaItem, MediaServer
 from src.services import TaskManager, TaskSuccess, ScraperManager, MetadataSourceManager, TitleRecognitionManager, get_media_server_manager
 from src.rate_limiter import RateLimiter
 
@@ -84,6 +85,9 @@ async def scan_media_server_library(
                     server_id=server_id,
                     media_id=item.media_id,
                     library_id=library_id,
+                    series_id=getattr(item, 'series_id', None),
+                    season_id=getattr(item, 'season_id', None),
+                    episode_id=getattr(item, 'episode_id', None),
                     title=item.title,
                     media_type=item.media_type,
                     season=item.season,
@@ -121,7 +125,6 @@ async def import_media_items(
     title_recognition_manager=None
 ):
     """导入媒体项(按季度导入电视剧,电影直接导入)"""
-    from src.db.orm_models import MediaItem
 
     webhook_search_and_dispatch_task = _get_webhook_search_and_dispatch_task()
 
@@ -154,6 +157,13 @@ async def import_media_items(
 
     if not items:
         raise ValueError("未找到要导入的媒体项")
+
+    # 获取媒体服务器类型（用于写入 mediaServerType，支持删除联动）
+    media_server_type = None
+    if items:
+        server_stmt = select(MediaServer.providerName).where(MediaServer.id == items[0].serverId).limit(1)
+        server_result = await session.execute(server_stmt)
+        media_server_type = server_result.scalar_one_or_none()
 
     # 按类型分组
     movies = []
@@ -188,7 +198,7 @@ async def import_media_items(
             # 注意: lambda 使用默认参数 m=movie 来捕获当前循环变量的值,
             # 避免闭包捕获引用导致所有任务都使用最后一个 movie 的数据
             task_id, _ = await task_manager.submit_task(
-                lambda session, progress_callback, m=movie: webhook_search_and_dispatch_task(
+                lambda session, progress_callback, m=movie, mst=media_server_type: webhook_search_and_dispatch_task(
                     animeTitle=m.title,
                     mediaType="movie",
                     season=1,
@@ -209,7 +219,12 @@ async def import_media_items(
                     config_manager=config_manager,
                     ai_matcher_manager=ai_matcher_manager,
                     rate_limiter=rate_limiter,
-                    title_recognition_manager=title_recognition_manager
+                    title_recognition_manager=title_recognition_manager,
+                    # 媒体服务三级 ID（删除联动用）
+                    mediaServerType=mst,
+                    mediaServerSeriesId=str(m.seriesId or m.mediaId) if (m.seriesId or m.mediaId) is not None else None,
+                    mediaServerSeasonId=str(m.seasonId) if m.seasonId is not None else None,
+                    mediaServerEpisodeId=str(m.episodeId or m.mediaId) if (m.episodeId or m.mediaId) is not None else None,
                 ),
                 title=f"自动导入 (库内): {movie.title}",
                 queue_type="download"
@@ -248,7 +263,7 @@ async def import_media_items(
             logger.info(f"电视节目 {title} {season_str} 选中的分集: {selected_episodes}")
 
             task_id, _ = await task_manager.submit_task(
-                lambda session, progress_callback, item=representative_item, selected_eps=selected_episodes: webhook_search_and_dispatch_task(
+                lambda session, progress_callback, item=representative_item, selected_eps=selected_episodes, mst=media_server_type: webhook_search_and_dispatch_task(
                     animeTitle=item.title,
                     mediaType="tv_series",
                     season=item.season,
@@ -271,6 +286,10 @@ async def import_media_items(
                     rate_limiter=rate_limiter,
                     title_recognition_manager=title_recognition_manager,
                     selectedEpisodes=selected_eps,
+                    mediaServerType=mst,
+                    mediaServerSeriesId=str(item.seriesId or item.mediaId) if (item.seriesId or item.mediaId) is not None else None,
+                    mediaServerSeasonId=str(item.seasonId) if item.seasonId is not None else None,
+                    mediaServerEpisodeId=str(item.episodeId or item.mediaId) if (item.episodeId or item.mediaId) is not None else None,
                 ),
                 title=f"自动导入 (库内): {title} S{season:02d} (共 {len(season_items)} 集)",
                 queue_type="download"

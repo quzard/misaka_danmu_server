@@ -194,6 +194,10 @@ class TelegramChannel(BaseNotificationChannel):
             telebot.apihelper.proxy = None
             telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
 
+        # 设置 HTTP 超时，防止代理不可达时 send_message 无限阻塞
+        telebot.apihelper.CONNECT_TIMEOUT = 10
+        telebot.apihelper.READ_TIMEOUT = 15
+
         self._bot = telebot.TeleBot(bot_token, threaded=False)
         self._register_handlers()
 
@@ -581,17 +585,38 @@ class TelegramChannel(BaseNotificationChannel):
                                 self.logger.warning(f"edit_message_caption 失败: {cap_err}")
                     else:
                         self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
-                        # edit 失败时降级为发新消息
-                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                        # edit 失败时降级为发新消息；若为 Markdown 解析失败则去掉 parse_mode
+                        is_parse_err = "can't parse entities" in err_str
+                        fallback_mode = None if is_parse_err else "Markdown"
+                        fallback_text = f"{title}\n{text}" if (is_parse_err and title) else caption
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, parse_mode=fallback_mode, reply_markup=markup)
                         if msg_id_out is not None and sent:
                             msg_id_out.append(sent.message_id)
             elif image:
                 # 有封面图：发带图片的消息，正文作为 caption
-                sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                try:
+                    sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                except Exception as photo_err:
+                    photo_err_str = str(photo_err).lower()
+                    if "can't parse entities" in photo_err_str:
+                        self.logger.warning(f"send_photo Markdown 解析失败，降级为纯文本: {photo_err}")
+                        fallback_caption = f"{title}\n{text}" if title else text
+                        sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=fallback_caption, reply_markup=markup)
+                    else:
+                        raise
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
-                sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                try:
+                    sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                except Exception as send_err:
+                    send_err_str = str(send_err).lower()
+                    if "can't parse entities" in send_err_str:
+                        self.logger.warning(f"send_message Markdown 解析失败，降级为纯文本: {send_err}")
+                        fallback_text = f"{title}\n{text}" if title else text
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, reply_markup=markup)
+                    else:
+                        raise
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:
@@ -633,9 +658,11 @@ class TelegramChannel(BaseNotificationChannel):
             elif self.proxy_url:
                 telebot.apihelper.proxy = {"https": self.proxy_url}
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
-            else:
+            else: 
                 telebot.apihelper.proxy = None
                 telebot.apihelper.API_URL = "https://api.telegram.org/bot{0}/{1}"
+            telebot.apihelper.CONNECT_TIMEOUT = 10
+            telebot.apihelper.READ_TIMEOUT = 15
             bot = telebot.TeleBot(bot_token, threaded=False)
             info = await asyncio.to_thread(bot.get_me)
             # 发送测试消息到配置的 chat_id

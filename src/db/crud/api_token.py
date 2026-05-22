@@ -69,15 +69,19 @@ async def update_api_token(
     token_id: int,
     name: str,
     daily_call_limit: int,
-    validity_period: str
+    validity_period: str,
+    new_token_str: str = None,
 ) -> bool:
-    """更新API Token的名称、调用上限和有效期。"""
+    """更新API Token的名称、调用上限、有效期，以及可选的Token字符串。"""
     token = await session.get(orm_models.ApiToken, token_id)
     if not token:
         return False
 
     token.name = name
     token.dailyCallLimit = daily_call_limit
+
+    if new_token_str:
+        token.token = new_token_str
 
     if validity_period != 'custom':
         if validity_period == 'permanent':

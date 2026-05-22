@@ -65,7 +65,7 @@ async def get_last_episode_for_source(session: AsyncSession, sourceId: int) -> O
 async def get_episode_for_refresh(session: AsyncSession, episodeId: int) -> Optional[Dict[str, Any]]:
     """获取用于刷新的分集信息。"""
     stmt = (
-        select(Episode.id, Episode.title, AnimeSource.providerName)
+        select(Episode.id, Episode.title, AnimeSource.providerName, AnimeSource.mediaId, Episode.providerEpisodeId)
         .join(AnimeSource, Episode.sourceId == AnimeSource.id)
         .where(Episode.id == episodeId)
     )
@@ -372,6 +372,7 @@ async def get_episode_provider_info(session: AsyncSession, episode_id: int) -> O
         select(
             AnimeSource.providerName,
             AnimeSource.animeId,
+            AnimeSource.mediaId,
             Episode.providerEpisodeId,
             Episode.danmakuFilePath,
             Episode.episodeIndex
@@ -401,6 +402,15 @@ async def delete_episode(session: AsyncSession, episode_id: int) -> bool:
         await session.commit()
         return True
     return False
+
+
+
+async def update_episode_media_server_id(session: AsyncSession, episode_id: int, media_server_episode_id: str):
+    """更新分集的媒体服务 Episode ID（用于 webhook 删除联动）。"""
+    episode = await session.get(Episode, episode_id)
+    if episode:
+        episode.mediaServerEpisodeId = media_server_episode_id
+        await session.flush()
 
 
 async def update_episode_info(session: AsyncSession, episode_id: int, update_data: models.EpisodeInfoUpdate) -> bool:

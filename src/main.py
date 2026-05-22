@@ -1,4 +1,6 @@
 import time
+import warnings
+warnings.filterwarnings("ignore", message="urllib3.*doesn't match a supported version")
 import uvicorn
 import asyncio
 import secrets
@@ -9,7 +11,6 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, status
-from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, JSONResponse, Response # noqa: F401
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,16 +32,18 @@ from src.services import (
 from src.utils import InternalPollingManager, init_proxy_middleware
 from src.api import api_router, control_router
 from src.api.dandan import dandan_router
+from src.api.middleware import log_not_found_requests, capture_api_response
+from src.api.mcp import setup_mcp
 from src.ai import AIMatcherManager
 from src.ai.ai_prompts import DEFAULT_AI_MATCH_PROMPT, DEFAULT_AI_RECOGNITION_PROMPT, DEFAULT_AI_ALIAS_VALIDATION_PROMPT, DEFAULT_AI_ALIAS_EXPANSION_PROMPT, DEFAULT_AI_SEASON_MAPPING_PROMPT
 from src.rate_limiter import RateLimiter
 from src.rate_limiter_disabled import RateLimiter as DisabledRateLimiter
 from src._version import APP_VERSION
 from src import security
-    
-print(f"当前环境: {settings.environment}")
+from src.frontend import mount_frontend, register_pwa_routes
 
 logger = logging.getLogger(__name__)
+logger.info(f"当前环境: {settings.environment}")
 
 def _is_docker_environment():
     """检测是否在Docker容器中运行"""
@@ -96,10 +99,7 @@ async def lifespan(app: FastAPI):
     """
     应用生命周期管理器。
     - `yield` 之前的部分在应用启动时执行。
-            try:
-                await app.state.metadata_manager.close_all()
-            except Exception as e:
-                logger.exception(f"关闭 MetadataManager 时发生错误: {e}")
+    - `yield` 之后的部分在应用关闭时执行。
     """
     # --- Startup Logic ---
     setup_logging()
@@ -315,30 +315,7 @@ async def lifespan(app: FastAPI):
 
     # --- 前端服务 ---
     # 在所有API路由注册完毕后，再挂载前端服务，以确保API路由优先匹配。
-
-    # 无论开发还是生产环境，都需要挂载用户缓存的图片
-    # 这样开发环境下前端通过代理也能访问到这些资源
-    app.mount("/data/images", StaticFiles(directory="config/image"), name="cached_images")
-
-    # 在生产环境中，我们需要挂载 Vite 构建后的静态资源目录
-    # 并且需要一个"捕获所有"的路由来始终提供 index.html，以支持前端路由。
-    if settings.environment == "development":
-        # 开发环境：所有非API请求都重定向到Vite开发服务器
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_react_app_dev(request: Request, full_path: str):
-            base_url = f"http://{settings.client.host}:{settings.client.port}"
-            return RedirectResponse(url=f"{base_url}/{full_path}" if full_path else base_url)
-    else:
-        # 生产环境：显式挂载静态资源目录
-        app.mount("/assets", StaticFiles(directory="web/dist/assets"), name="assets")
-        # 修正：挂载前端的静态图片 (如 logo)，使其指向正确的 'web/dist/images' 目录
-        app.mount("/images", StaticFiles(directory="web/dist/images"), name="images")
-        # dist挂载
-        app.mount("/dist", StaticFiles(directory="web/dist"), name="dist")
-        # 然后，为所有其他路径提供 index.html 以支持前端路由
-        @app.get("/{full_path:path}", include_in_schema=False)
-        async def serve_spa(request: Request, full_path: str):
-            return FileResponse("web/dist/index.html")
+    mount_frontend(app, settings)
 
     yield
 
@@ -392,11 +369,15 @@ app = FastAPI(
     redoc_url=None         # 禁用ReDoc
 )
 
-# --- favicon.ico 路由 ---
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    """提供网站图标"""
-    return FileResponse("web/dist/images/favicon.ico", media_type="image/x-icon")
+# --- 健康检查端点（供 Docker HEALTHCHECK / 群辉 Container Manager 使用）---
+@app.get("/api/health", include_in_schema=False)
+async def health_check():
+    """轻量级健康检查，不需要认证，不查数据库"""
+    return {"status": "ok"}
+
+
+# --- 前端 PWA 路由（favicon / manifest / registerSW / sw / workbox）---
+register_pwa_routes(app)
 
 # --- 新增：自定义本地化的 Swagger UI 文档路由 ---
 # 为外部控制API生成独立的 OpenAPI 文档，只包含 API Key 安全方案
@@ -416,11 +397,13 @@ def _control_api_openapi():
     schema = get_openapi(
         title="Misaka Danmaku External Control API",
         version="1.0.0",
-        description="用于外部自动化和集成的API。所有端点都需要通过 `?api_key=` 进行鉴权。",
+        description="用于外部自动化和集成的API。支持两种鉴权方式：\n"
+                    "1. **查询参数**：`?api_key=<你的密钥>`\n"
+                    "2. **请求头**：`X-API-KEY: <你的密钥>`（推荐，也用于 MCP 连接）",
         routes=control_routes,
     )
 
-    # 替换安全方案：只保留 API Key，移除 OAuth2
+    # 替换安全方案：同时支持查询参数和请求头
     schema["components"] = schema.get("components", {})
     schema["components"]["securitySchemes"] = {
         "APIKeyQuery": {
@@ -428,14 +411,20 @@ def _control_api_openapi():
             "in": "query",
             "name": "api_key",
             "description": "通过 URL 查询参数传递 API Key"
+        },
+        "APIKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-KEY",
+            "description": "通过请求头传递 API Key（推荐，也用于 MCP 连接）"
         }
     }
 
-    # 给所有路径添加 API Key 安全要求
+    # 给所有路径添加 API Key 安全要求（两种方式任选其一）
     for path_item in schema.get("paths", {}).values():
         for operation in path_item.values():
             if isinstance(operation, dict):
-                operation["security"] = [{"APIKeyQuery": []}]
+                operation["security"] = [{"APIKeyQuery": []}, {"APIKeyHeader": []}]
 
     app._control_openapi_schema = schema
     return schema
@@ -449,19 +438,16 @@ async def control_api_openapi_json():
 
 @app.get("/api/control/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
-    """提供一个使用本地静态资源的 Swagger UI 页面。"""
-    return get_swagger_ui_html(
+    """提供一个使用本地静态资源、部分汉化的 Swagger UI 页面。"""
+    from src.utils.swagger_cn import get_swagger_ui_html_cn
+    return get_swagger_ui_html_cn(
         openapi_url="/api/control/openapi.json",
-        title="Misaka Danmaku External Control API - Docs",
-        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
-        swagger_css_url="/static/swagger-ui/swagger-ui.css",
-        swagger_favicon_url="/static/swagger-ui/favicon-32x32.png"
+        title="Misaka Danmaku 外部控制 API 文档",
     )
 
-# 新增：配置CORS，允许前端开发服务器访问API
+# CORS 配置 — 全放开，兼容反代、PWA、Service Worker 等各种场景
 app.add_middleware(
     CORSMiddleware,
-    # 允许所有来源。对于生产环境，建议替换为您的前端域名列表。
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
@@ -491,124 +477,13 @@ async def httpx_timeout_error_handler(request: Request, exc: httpx.TimeoutExcept
 
 
 @app.middleware("http")
-async def log_not_found_requests(request: Request, call_next):
-    """
-    中间件：捕获所有请求。
-    - 如果是未找到的API路径 (404)，则返回 403 Forbidden，避免路径枚举。
-    - 对其他 404 错误，记录详细信息以供调试。
-    """
-    response = await call_next(request)
-    if response.status_code == 404:
-        # 如果是 API 路径未找到，返回 403，同时记录原始响应内容
-        if request.url.path.startswith("/api/"):
-            original_body_text = None
-            try:
-                body_bytes = getattr(response, "body", b"")
-                if isinstance(body_bytes, (bytes, bytearray)) and body_bytes:
-                    try:
-                        original_json = json.loads(body_bytes)
-                        original_body_text = json.dumps(original_json, ensure_ascii=False)
-                    except Exception:
-                        original_body_text = body_bytes.decode("utf-8", "ignore")
-            except Exception as e:
-                logger.debug(f"读取原始404响应body失败: {e}")
-
-            if original_body_text:
-                logger.warning("API路径未找到原始响应内容: %s", original_body_text)
-
-            logger.warning(
-                f"API路径未找到 (返回403): {request.method} {request.url.path} from {request.client.host}"
-            )
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "Forbidden"}
-            )
-
-        # 对于非 API 路径的 404 (例如，如果静态文件服务被错误配置)，记录详细信息
-        scope = request.scope
-        serializable_scope = {
-            "type": scope.get("type"),
-            "http_version": scope.get("http_version"),
-            "server": scope.get("server"),
-            "client": scope.get("client"),
-            "scheme": scope.get("scheme"),
-            "method": scope.get("method"),
-            "root_path": scope.get("root_path"),
-            "path": scope.get("path"),
-            "raw_path": scope.get("raw_path", b"").decode("utf-8", "ignore"),
-            "query_string": scope.get("query_string", b"").decode("utf-8", "ignore"),
-            "headers": {h[0].decode("utf-8", "ignore"): h[1].decode("utf-8", "ignore") for h in scope.get("headers", [])},
-        }
-        log_details = {
-            "message": "HTTP 404 Not Found - 未找到匹配的路由或文件",
-            "url": str(request.url),
-            "raw_request_scope": serializable_scope
-        }
-        logging.getLogger(__name__).warning("未处理的请求详情 (原始请求范围):\n%s", json.dumps(log_details, indent=2, ensure_ascii=False))
-    return response
+async def _log_not_found(request: Request, call_next):
+    return await log_not_found_requests(request, call_next)
 
 
 @app.middleware("http")
-async def capture_control_api_response(request: Request, call_next):
-    """
-    中间件：为外部控制API捕获响应头和响应体，更新到访问日志中。
-    仅对 /api/control/ 路径生效。
-    """
-    if not request.url.path.startswith("/api/control/"):
-        return await call_next(request)
-
-    response = await call_next(request)
-
-    # 检查是否有日志ID需要更新
-    log_id = getattr(request.state, 'external_log_id', None)
-    if log_id is None:
-        return response
-
-    try:
-        # 读取响应体（需要消费流并重建响应）
-        from starlette.responses import Response as StarletteResponse
-        response_body_bytes = b""
-        async for chunk in response.body_iterator:
-            response_body_bytes += chunk
-
-        response_headers_str = json.dumps(dict(response.headers), ensure_ascii=False, indent=2)
-        response_body_str = response_body_bytes.decode(errors='ignore') if response_body_bytes else None
-
-        # 截断过长的响应体（避免数据库存储过大）
-        max_body_len = 10000
-        if response_body_str and len(response_body_str) > max_body_len:
-            response_body_str = response_body_str[:max_body_len] + f"\n... (已截断，总长度: {len(response_body_bytes)} 字节)"
-
-        # 使用独立的数据库会话更新日志
-        session_factory = request.app.state.db_session_factory
-        async with session_factory() as session:
-            await crud.update_external_api_log_response(
-                session,
-                log_id=log_id,
-                status_code=response.status_code,
-                response_headers=response_headers_str,
-                response_body=response_body_str,
-            )
-
-        # 重建响应
-        return StarletteResponse(
-            content=response_body_bytes,
-            status_code=response.status_code,
-            headers=dict(response.headers),
-            media_type=response.media_type,
-        )
-    except Exception as e:
-        logger.debug(f"捕获控制API响应信息失败: {e}")
-        # 如果出错，尝试返回原始响应体
-        try:
-            return StarletteResponse(
-                content=response_body_bytes,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
-        except Exception:
-            return response
+async def _capture_api_response(request: Request, call_next):
+    return await capture_api_response(request, call_next)
 
 
 async def cleanup_task(app: FastAPI):
@@ -636,6 +511,10 @@ app.include_router(dandan_router, prefix="/api/v1", tags=["DanDanPlay Compatible
 
 # 包含所有非 dandanplay 的 API 路由
 app.include_router(api_router, prefix="/api")
+
+# --- MCP Server 初始化 ---
+# 必须在所有路由注册完毕后调用，这样 fastapi-mcp 才能扫描到所有外部控制 API
+setup_mcp(app)
 
 # --- 新增：挂载 Swagger UI 的静态文件目录 ---
 def _is_docker_environment():
@@ -667,9 +546,36 @@ app.mount("/static/swagger-ui", StaticFiles(directory=STATIC_DIR), name="swagger
 # 添加一个运行入口，以便直接从配置启动
 # 这样就可以通过 `python -m src.main` 来运行，并自动使用 config.yml 中的端口和主机
 if __name__ == "__main__":
-    uvicorn.run(
-        "src.main:app",
-        host=settings.server.host,
-        port=settings.server.port,
-        reload=settings.environment == "development"  # 开发环境启用自动重载
-    )
+    import socket
+
+    port = settings.server.port
+    ipv6_enabled = getattr(settings.server, 'ipv6', True)
+    is_reload = settings.environment == "development"
+
+    if ipv6_enabled:
+        # 双栈模式：监听 [::] 并 patch socket 使其同时接受 IPv4
+        # 通过设置 IPV6_V6ONLY=0，让 [::] 同时监听 IPv4 和 IPv6
+        _original_bind = socket.socket.bind
+
+        def _dual_stack_bind(self, address):
+            if self.family == socket.AF_INET6:
+                try:
+                    self.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                except (AttributeError, OSError):
+                    pass
+            return _original_bind(self, address)
+
+        socket.socket.bind = _dual_stack_bind
+        uvicorn.run(
+            "src.main:app",
+            host="::",
+            port=port,
+            reload=is_reload,
+        )
+    else:
+        uvicorn.run(
+            "src.main:app",
+            host=settings.server.host,
+            port=port,
+            reload=is_reload,
+        )

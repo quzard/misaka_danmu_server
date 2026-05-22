@@ -8,19 +8,18 @@ import Cookies from 'js-cookie'
 import ReleaseHistoryModal from './ReleaseHistoryModal'
 import { MyIcon } from './MyIcon'
 import ReactMarkdown from 'react-markdown'
+import { useAtomValue } from 'jotai'
+import { isMobileAtom } from '../../store'
 
 const { Text, Title } = Typography
 
 /**
- * 预处理 GitHub Release 的 changelog 文本，使 ReactMarkdown 能正确渲染换行。
- * GitHub Release body 使用 \r\n 单换行，Markdown 中单换行不会产生实际换行效果，
- * 需要转换为双换行（段落分隔）才能正确显示。
+ * 预处理 GitHub Release 的 changelog 文本，使 ReactMarkdown 能正确渲染。
+ * 仅统一换行符为 \n，不做额外的换行替换，以保留 Markdown 列表等结构的正确解析。
  */
 const preprocessChangelog = (text) => {
   if (!text) return text
-  return text
-    .replace(/\r\n/g, '\n')       // 统一换行符
-    .replace(/\n(?!\n)/g, '\n\n') // 单换行 → 双换行（保留已有的双换行）
+  return text.replace(/\r\n/g, '\n')
 }
 
 // Markdown 渲染样式
@@ -46,6 +45,7 @@ const markdownComponents = {
 }
 
 export const VersionModal = ({ open, onClose, currentVersion }) => {
+  const isMobile = useAtomValue(isMobileAtom)
   const [loading, setLoading] = useState(false)
   const [updateInfo, setUpdateInfo] = useState(null)
   const [dockerStatus, setDockerStatus] = useState(null)
@@ -281,7 +281,7 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
     if (!updateInfo?.changelog) return null
 
     return (
-      <div className="max-h-[300px] overflow-y-auto rounded-lg p-4 mt-4" style={{ backgroundColor: 'var(--color-hover)' }}>
+      <div className={isMobile ? 'flex-1 min-h-0 overflow-y-auto rounded-lg p-4 mt-2' : 'max-h-[300px] overflow-y-auto rounded-lg p-4 mt-4'} style={{ backgroundColor: 'var(--color-hover)' }}>
         <Title level={5}>更新日志</Title>
         <div className="text-sm">
           <ReactMarkdown components={markdownComponents}>
@@ -298,10 +298,11 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
       open={open}
       onCancel={onClose}
       footer={null}
-      width={600}
+      width={isMobile ? '95%' : 600}
+      styles={{ body: { maxHeight: isMobile ? 'calc(100vh - 120px)' : 'none', overflow: isMobile ? 'hidden' : 'visible', display: 'flex', flexDirection: 'column' } }}
     >
       <Spin spinning={loading}>
-        <div className="space-y-4">
+        <div className={isMobile ? 'flex flex-col' : 'space-y-4'} style={isMobile ? { maxHeight: 'calc(100vh - 160px)' } : {}}>
           {/* 当前版本 */}
           <div className="flex items-center justify-between">
             <Text>当前版本</Text>
@@ -468,51 +469,103 @@ export const VersionModal = ({ open, onClose, currentVersion }) => {
           )}
 
           {/* 操作按钮 */}
-          <Divider />
-          <div className="flex justify-between items-center">
-            <Button
-              onClick={() => setReleaseHistoryOpen(true)}
-              icon={<HistoryOutlined />}
-            >
-              更新日志
-            </Button>
-            {/* 更新源切换 */}
-            {dockerStatus?.canUpdate && (
-              <Switch
-                checked={useGithubSource}
-                checkedChildren={<><GithubOutlined /> GitHub</>}
-                unCheckedChildren={<><MyIcon icon="Docker2" size={14} className="mr-0.5 align-middle" /> Docker</>}
-                onChange={v => {
-                  setUseGithubSource(v)
-                  localStorage.setItem('updateSource', v ? 'github' : 'docker')
-                }}
-              />
-            )}
-            <div className="flex gap-2">
-              <Button onClick={() => loadData()} icon={<SyncOutlined />}>
-                刷新
-              </Button>
+          <Divider className="!my-2" />
+          {isMobile ? (
+            <div className="flex flex-col gap-2">
+              {/* 第一行：更新日志 + 刷新 + Release */}
+              <div className="flex gap-2 items-center">
+                <Button
+                  onClick={() => setReleaseHistoryOpen(true)}
+                  icon={<HistoryOutlined />}
+                  size="small"
+                >
+                  更新日志
+                </Button>
+                <Button onClick={() => loadData()} icon={<SyncOutlined />} size="small">
+                  刷新
+                </Button>
+                {updateInfo?.releaseUrl && (
+                  <Button
+                    href={updateInfo.releaseUrl}
+                    target="_blank"
+                    size="small"
+                  >
+                    Release
+                  </Button>
+                )}
+              </div>
+              {/* 第二行：左边切换开关 + 右边检查并更新 */}
               {dockerStatus?.canUpdate && (
-                <Button
-                  type="primary"
-                  icon={<RocketOutlined />}
-                  onClick={handleUpdate}
-                  loading={updating}
-                  disabled={updateComplete}
-                >
-                  {updateInfo?.hasUpdate ? '更新并重启' : '检查并更新'}
-                </Button>
-              )}
-              {updateInfo?.releaseUrl && (
-                <Button
-                  href={updateInfo.releaseUrl}
-                  target="_blank"
-                >
-                  查看 Release
-                </Button>
+                <div className="flex items-center justify-between">
+                  <Switch
+                    checked={useGithubSource}
+                    checkedChildren={<><GithubOutlined /> GitHub</>}
+                    unCheckedChildren={<><MyIcon icon="Docker2" size={14} className="mr-0.5 align-middle" /> Docker</>}
+                    onChange={v => {
+                      setUseGithubSource(v)
+                      localStorage.setItem('updateSource', v ? 'github' : 'docker')
+                    }}
+                  />
+                  <Button
+                    type="primary"
+                    icon={<RocketOutlined />}
+                    onClick={handleUpdate}
+                    loading={updating}
+                    disabled={updateComplete}
+                    size="small"
+                  >
+                    {updateInfo?.hasUpdate ? '更新并重启' : '检查并更新'}
+                  </Button>
+                </div>
               )}
             </div>
-          </div>
+          ) : (
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => setReleaseHistoryOpen(true)}
+                  icon={<HistoryOutlined />}
+                >
+                  更新日志
+                </Button>
+                {dockerStatus?.canUpdate && (
+                  <Switch
+                    checked={useGithubSource}
+                    checkedChildren={<><GithubOutlined /> GitHub</>}
+                    unCheckedChildren={<><MyIcon icon="Docker2" size={14} className="mr-0.5 align-middle" /> Docker</>}
+                    onChange={v => {
+                      setUseGithubSource(v)
+                      localStorage.setItem('updateSource', v ? 'github' : 'docker')
+                    }}
+                  />
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => loadData()} icon={<SyncOutlined />}>
+                  刷新
+                </Button>
+                {dockerStatus?.canUpdate && (
+                  <Button
+                    type="primary"
+                    icon={<RocketOutlined />}
+                    onClick={handleUpdate}
+                    loading={updating}
+                    disabled={updateComplete}
+                  >
+                    {updateInfo?.hasUpdate ? '更新并重启' : '检查并更新'}
+                  </Button>
+                )}
+                {updateInfo?.releaseUrl && (
+                  <Button
+                    href={updateInfo.releaseUrl}
+                    target="_blank"
+                  >
+                    Release
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </Spin>
 

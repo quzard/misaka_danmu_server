@@ -17,6 +17,8 @@ from .user import (
     create_user,
     update_user_password,
     update_user_login_info,
+    enable_user_otp,
+    disable_user_otp,
     create_oauth_state,
     consume_oauth_state,
     get_bangumi_auth,
@@ -163,6 +165,7 @@ from .episode import (
     get_episode_provider_info,
     delete_episode,
     update_episode_info,
+    update_episode_media_server_id,
     update_episode_fetch_time,
     update_episode_danmaku_info,
     clear_episode_comments,
@@ -247,6 +250,8 @@ from .api_token import (
 # TokenLog模块
 from .token_log import (
     create_token_access_log,
+    create_token_access_log_awaited,
+    update_token_access_log_response,
     get_token_access_logs,
     get_ua_rules,
     add_ua_rule,
@@ -314,6 +319,9 @@ from .utility import (
     update_scheduled_task_run_times,
 )
 
+# PassKey模块
+from . import passkey
+
 __all__ = [
     # Config
     'get_config_value',
@@ -325,6 +333,8 @@ __all__ = [
     'create_user',
     'update_user_password',
     'update_user_login_info',
+    'enable_user_otp',
+    'disable_user_otp',
     'create_oauth_state',
     'consume_oauth_state',
     'get_bangumi_auth',
@@ -441,6 +451,7 @@ __all__ = [
     'get_episode_provider_info',
     'delete_episode',
     'update_episode_info',
+    'update_episode_media_server_id',
     'update_episode_fetch_time',
     'update_episode_danmaku_info',
     'clear_episode_comments',

@@ -15,6 +15,7 @@ from passlib.context import CryptContext
 from src.db import crud, models, get_db_session
 from src.core import settings, get_now
 from src.db.crud import session as session_crud
+from src.api.middleware import normalize_ip as _normalize_ip
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
                 logger.warning(f"无效的受信任代理IP或CIDR: '{proxy_entry.strip()}'，已忽略。")
 
     client_ip_str = request.client.host if request.client else "127.0.0.1"
+    client_ip_str = _normalize_ip(client_ip_str)
     is_trusted = False
     if trusted_networks:
         try:
@@ -61,9 +63,9 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
     if is_trusted:
         x_forwarded_for = request.headers.get("x-forwarded-for")
         if x_forwarded_for:
-            client_ip_str = x_forwarded_for.split(',')[0].strip()
+            client_ip_str = _normalize_ip(x_forwarded_for.split(',')[0].strip())
         else:
-            client_ip_str = request.headers.get("x-real-ip", client_ip_str)
+            client_ip_str = _normalize_ip(request.headers.get("x-real-ip", client_ip_str))
 
     return client_ip_str
 
@@ -71,6 +73,16 @@ async def get_real_client_ip(request: Request, config_manager) -> str:
 # IP 白名单会话缓存
 # key: (client_ip, ua_hash), value: (user, timestamp, ttl_seconds, jti)
 _whitelist_session_cache: Dict[Tuple[str, str], Tuple[models.User, float, int, str]] = {}
+_WHITELIST_CACHE_MAX_SIZE = 1000  # 最大缓存条目数，防止内存无限增长
+
+
+def clear_whitelist_session_cache():
+    """清空白名单会话缓存，用于 JWT 有效期等配置热加载时调用。"""
+    global _whitelist_session_cache
+    if _whitelist_session_cache:
+        logger.info(f"JWT 配置变更，清空白名单会话缓存（{len(_whitelist_session_cache)} 条）")
+        _whitelist_session_cache.clear()
+
 
 
 def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
@@ -86,7 +98,8 @@ def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
                 pass
 
     client_ip_str = request.client.host if request.client else "127.0.0.1"
-    original_client_ip = client_ip_str  # 保存原始 IP 用于调试
+    client_ip_str = _normalize_ip(client_ip_str)  # ::ffff:x.x.x.x → x.x.x.x
+    original_client_ip = client_ip_str
 
     if trusted_networks:
         try:
@@ -96,10 +109,10 @@ def _get_real_client_ip_sync(request: Request, trusted_proxies_str: str) -> str:
                 x_forwarded_for = request.headers.get("x-forwarded-for")
                 x_real_ip = request.headers.get("x-real-ip")
                 if x_forwarded_for:
-                    client_ip_str = x_forwarded_for.split(',')[0].strip()
+                    client_ip_str = _normalize_ip(x_forwarded_for.split(',')[0].strip())
                     logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, X-Forwarded-For={x_forwarded_for}, 解析后IP={client_ip_str}")
                 elif x_real_ip:
-                    client_ip_str = x_real_ip
+                    client_ip_str = _normalize_ip(x_real_ip)
                     logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, X-Real-IP={x_real_ip}, 解析后IP={client_ip_str}")
                 else:
                     logger.debug(f"[IP解析] 原始IP={original_client_ip}, 受信任=True, 但无X-Forwarded-For或X-Real-IP头")
@@ -285,7 +298,11 @@ async def check_ip_whitelist(request: Request, session: AsyncSession) -> Optiona
                 # 即使数据库记录失败，仍然允许访问（但不缓存）
                 return user
 
-            # 缓存结果并打印一次日志
+            # 缓存结果并打印一次日志（限制缓存大小防止内存增长）
+            if len(_whitelist_session_cache) >= _WHITELIST_CACHE_MAX_SIZE:
+                # 清除最旧的缓存条目
+                oldest_key = min(_whitelist_session_cache, key=lambda k: _whitelist_session_cache[k][1])
+                del _whitelist_session_cache[oldest_key]
             _whitelist_session_cache[cache_key] = (user, current_time, ttl_seconds, jti)
             logger.info(f"IP {client_ip_str} 在白名单中，已建立免登录会话（有效期 {expire_minutes if expire_minutes != -1 else '永久'} 分钟）")
             return user

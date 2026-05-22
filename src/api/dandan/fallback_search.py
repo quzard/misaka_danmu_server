@@ -250,28 +250,65 @@ async def execute_fallback_search_task(
         timer.step_end()
         await progress_callback(10, "开始搜索...")
 
-        timer.step_start("弹幕源搜索")
-        # 使用统一的搜索函数
-        sorted_results = await unified_search(
-            search_term=search_title,
-            session=session,
-            scraper_manager=scraper_manager,
-            metadata_manager=metadata_manager,
-            use_alias_expansion=True,
-            use_alias_filtering=True,
-            use_title_filtering=True,
-            use_source_priority_sorting=True,
-            progress_callback=progress_callback,
-            episode_info=episode_info,
-            alias_similarity_threshold=70,
-        )
-        # 收集单源搜索耗时信息
-        from src.utils.search_timer import SubStepTiming
-        source_timing_sub_steps = [
-            SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
-            for name, dur, cnt in scraper_manager.last_search_timing
-        ]
-        timer.step_end(details=f"{len(sorted_results)}个结果", sub_steps=source_timing_sub_steps)
+        # 检查是否有同标题的搜索结果缓存（不含集数，10分钟内复用）
+        from src.db.crud.cache import get_cache as get_raw_cache
+        fallback_result_cache_key = f"fallback_result_{search_title}"
+        cached_fallback_result = await get_raw_cache(session, fallback_result_cache_key)
+        if cached_fallback_result and isinstance(cached_fallback_result, dict):
+            cached_time = cached_fallback_result.get("timestamp", 0)
+            if time.time() - cached_time < 600:  # 10分钟
+                cached_results = cached_fallback_result.get("results", [])
+                if cached_results:
+                    logger.info(f"后备搜索: 复用同标题缓存 '{search_title}'，{len(cached_results)} 个结果")
+                    timer.step_start("弹幕源搜索")
+                    sorted_results = [
+                        models.ProviderSearchInfo(**r) if isinstance(r, dict) else r
+                        for r in cached_results
+                    ]
+                    timer.step_end(details=f"{len(sorted_results)}个结果 (缓存)")
+                    # 跳过搜索，直接进入后续处理
+                else:
+                    cached_fallback_result = None  # 缓存为空，继续搜索
+
+        if not cached_fallback_result or not isinstance(cached_fallback_result, dict) or time.time() - cached_fallback_result.get("timestamp", 0) >= 600:
+            timer.step_start("弹幕源搜索")
+            # 使用统一的搜索函数
+            sorted_results = await unified_search(
+                search_term=search_title,
+                session=session,
+                scraper_manager=scraper_manager,
+                metadata_manager=metadata_manager,
+                use_alias_expansion=True,
+                use_alias_filtering=True,
+                use_title_filtering=True,
+                use_source_priority_sorting=True,
+                progress_callback=progress_callback,
+                episode_info=episode_info,
+                alias_similarity_threshold=70,
+            )
+            # 收集单源搜索耗时信息（分组显示，与主页搜索一致）
+            from src.utils.search_timer import SubStepTiming
+            source_timing_sub_steps = []
+
+            # 弹幕源 + 补充源分组
+            for name, dur, cnt in scraper_manager.last_search_timing:
+                if name.startswith("补充:"):
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name[3:], duration_ms=dur, result_count=cnt, group="补充源")
+                    )
+                else:
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
+                    )
+
+            # 辅助源分组（别名获取）
+            if hasattr(metadata_manager, 'last_aux_search_timing') and metadata_manager.last_aux_search_timing:
+                for name, dur, cnt in metadata_manager.last_aux_search_timing:
+                    source_timing_sub_steps.append(
+                        SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="辅助源(别名)")
+                    )
+
+            timer.step_end(details=f"{len(sorted_results)}个结果", sub_steps=source_timing_sub_steps)
 
         # 5. 根据标题关键词修正媒体类型
         def is_movie_by_title(title: str) -> bool:
@@ -469,6 +506,10 @@ async def search_implementation(
     )
 
     grouped_animes: Dict[int, DandanAnimeInfo] = {}
+    # 收集每个 anime 涉及的 provider 集合，用于多源时在分集标题加前缀
+    anime_providers: Dict[int, set] = {}
+    # 暂存原始分集数据（含 providerName），分组后统一处理
+    anime_raw_episodes: Dict[int, list] = {}
 
     for res in flat_results:
         anime_id = res['animeId']
@@ -486,10 +527,26 @@ async def search_implementation(
                 isFavorited=res.get('isFavorited', False),
                 episodes=[]
             )
+            anime_providers[anime_id] = set()
+            anime_raw_episodes[anime_id] = []
 
-        grouped_animes[anime_id].episodes.append(
-            DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=res['episodeTitle'], isLibrary=True, episodeIndex=res.get('episodeIndex'))
-        )
+        provider = res.get('providerName', '')
+        if provider:
+            anime_providers[anime_id].add(provider)
+        anime_raw_episodes[anime_id].append(res)
+
+    # 多源时在分集标题前加 【provider】 前缀
+    for anime_id, raw_eps in anime_raw_episodes.items():
+        is_multi_source = len(anime_providers.get(anime_id, set())) > 1
+        for res in raw_eps:
+            title = res['episodeTitle']
+            if is_multi_source:
+                provider = res.get('providerName', '')
+                if provider and not title.startswith("【"):
+                    title = f"【{provider}】{title}"
+            grouped_animes[anime_id].episodes.append(
+                DandanEpisodeInfo(episodeId=res['episodeId'], episodeTitle=title, isLibrary=True, episodeIndex=res.get('episodeIndex'))
+            )
 
     # ─── 并行搜索：从源站补充库内缺失的分集 ───
     parallel_search_enabled = False

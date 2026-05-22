@@ -192,13 +192,14 @@ class EmbyMediaServer(BaseMediaServer):
                 if item.get('Type') == 'Episode':
                     episodes.append(self._parse_episode(
                         item,
-                        library_id,
-                        series_name,
-                        series_year,
-                        series_tmdb_id,
-                        series_tvdb_id,
-                        series_imdb_id,
-                        series_poster
+                        season_id=season_id,
+                        library_id=library_id,
+                        series_name=series_name,
+                        series_year=series_year,
+                        series_tmdb_id=series_tmdb_id,
+                        series_tvdb_id=series_tvdb_id,
+                        series_imdb_id=series_imdb_id,
+                        series_poster=series_poster
                     ))
 
             return sorted(episodes, key=lambda x: x.episode or 0)
@@ -241,6 +242,7 @@ class EmbyMediaServer(BaseMediaServer):
     def _parse_episode(
         self,
         data: Dict[str, Any],
+        season_id: Optional[str] = None,
         library_id: Optional[str] = None,
         series_name: Optional[str] = None,
         series_year: Optional[int] = None,
@@ -264,6 +266,9 @@ class EmbyMediaServer(BaseMediaServer):
             imdb_id=series_imdb_id or data.get('ProviderIds', {}).get('Imdb'),
             poster_url=series_poster or self._get_image_url(data.get('SeriesId'), 'Primary'),
             library_id=library_id,
+            series_id=str(data.get('SeriesId')) if data.get('SeriesId') is not None else None,
+            season_id=str(season_id or data.get('SeasonId') or data.get('ParentId')) if (season_id or data.get('SeasonId') or data.get('ParentId')) is not None else None,
+            episode_id=str(data.get('Id')) if data.get('Id') is not None else None,
         )
     
     def _get_image_url(self, item_id: str, image_type: str = 'Primary') -> Optional[str]:

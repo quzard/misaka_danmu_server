@@ -34,6 +34,7 @@ const AutoMatchSetting = () => {
   const [selectedProvider, setSelectedProvider] = useState(null) // 当前选中的提供商配置
   const [dynamicModels, setDynamicModels] = useState({}) // 动态获取的模型列表，按提供商ID存储
   const [refreshingModels, setRefreshingModels] = useState(false) // 是否正在刷新模型列表
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false) // 刷新后强制打开模型下拉框
   const [selectedPromptType, setSelectedPromptType] = useState('aiRecognitionPrompt') // 当前选中的提示词类型
   const [selectedMatchPromptType, setSelectedMatchPromptType] = useState('aiPrompt') // AI自动匹配的提示词类型
   const isMobile = useAtomValue(isMobileAtom)
@@ -59,6 +60,7 @@ const AutoMatchSetting = () => {
         nameConversionEnabledRes,
         nameConversionPromptRes,
         logRawResponseRes,
+        thinkingEnabledRes,
         homeSearchSeasonMappingRes,
         fallbackSearchSeasonMappingRes,
         webhookSeasonMappingRes,
@@ -86,6 +88,7 @@ const AutoMatchSetting = () => {
         getConfig('aiNameConversionEnabled'),
         getConfig('aiNameConversionPrompt'),
         getConfig('aiLogRawResponse'),
+        getConfig('aiThinkingEnabled'),
         getConfig('homeSearchEnableTmdbSeasonMapping'),
         getConfig('fallbackSearchEnableTmdbSeasonMapping'),
         getConfig('webhookEnableTmdbSeasonMapping'),
@@ -105,6 +108,7 @@ const AutoMatchSetting = () => {
       const aliasExpansion = aliasExpansionEnabledRes.data.value === 'true'
       const nameConversion = nameConversionEnabledRes.data.value === 'true'
       const logRawResponse = logRawResponseRes.data.value === 'true'
+      const thinkingEnabled = thinkingEnabledRes.data.value === 'true'
       const episodeGroup = episodeGroupEnabledRes.data.value === 'true'
       setMatchMode(enabled ? 'ai' : 'traditional')
       setFallbackEnabled(fallback)
@@ -133,6 +137,7 @@ const AutoMatchSetting = () => {
         aiNameConversionEnabled: nameConversion,
         aiNameConversionPrompt: nameConversionPromptRes.data.value || '',
         aiLogRawResponse: logRawResponse,
+        aiThinkingEnabled: thinkingEnabled,
         homeSearchEnableTmdbSeasonMapping: homeSearchSeasonMappingRes.data.value === 'true',
         fallbackSearchEnableTmdbSeasonMapping: fallbackSearchSeasonMappingRes.data.value === 'true',
         webhookEnableTmdbSeasonMapping: webhookSeasonMappingRes.data.value === 'true',
@@ -260,7 +265,8 @@ const AutoMatchSetting = () => {
         setConfig('aiApiKey', values.aiApiKey || ''),
         setConfig('aiBaseUrl', values.aiBaseUrl || ''),
         setConfig('aiModel', values.aiModel || ''),
-        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false')
+        setConfig('aiLogRawResponse', values.aiLogRawResponse ? 'true' : 'false'),
+        setConfig('aiThinkingEnabled', values.aiThinkingEnabled ? 'true' : 'false')
       ])
 
       message.success('AI连接配置保存成功')
@@ -360,6 +366,9 @@ const AutoMatchSetting = () => {
           ...prev,
           [currentProvider]: response.data.models
         }))
+
+        // 刷新成功后强制打开下拉框，让用户从列表中选择
+        setModelDropdownOpen(true)
 
         const newCount = response.data.newCount || 0
         if (newCount > 0) {
@@ -577,9 +586,14 @@ const AutoMatchSetting = () => {
                           style={{ flex: 1 }}
                           options={getAvailableModels(getFieldValue('aiProvider'))}
                           placeholder={getModelPlaceholder(getFieldValue('aiProvider'))}
-                          filterOption={(inputValue, option) =>
-                            option.value.toLowerCase().includes(inputValue.toLowerCase())
+                          open={modelDropdownOpen || undefined}
+                          filterOption={modelDropdownOpen
+                            ? false
+                            : (inputValue, option) =>
+                                option.value.toLowerCase().includes(inputValue.toLowerCase())
                           }
+                          onSelect={() => setModelDropdownOpen(false)}
+                          onBlur={() => setModelDropdownOpen(false)}
                         />
                       </Form.Item>
                       <Tooltip title="从AI提供商API获取最新模型列表">
@@ -720,6 +734,30 @@ const AutoMatchSetting = () => {
                     <QuestionCircleOutlined style={{ color: '#999' }} />
                   </Tooltip>
                 </div>
+
+                <Form.Item noStyle shouldUpdate={(prev, cur) => prev.aiProvider !== cur.aiProvider}>
+                  {({ getFieldValue }) => getFieldValue('aiProvider') === 'deepseek' && (
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: isMobile ? '0' : '0 16px',
+                      width: isMobile ? '100%' : 'auto',
+                      justifyContent: isMobile ? 'center' : 'flex-start'
+                    }}>
+                      <span style={{ fontSize: '14px', whiteSpace: 'nowrap' }}>思考模式</span>
+                      <Form.Item name="aiThinkingEnabled" valuePropName="checked" noStyle>
+                        <CustomSwitch
+                          checkedChildren="开启"
+                          unCheckedChildren="关闭"
+                        />
+                      </Form.Item>
+                      <Tooltip title="启用后，DeepSeek 模型在输出最终答案前会先进行思维链推理，可提升准确性但会增加耗时和 token 消耗。思考内容会记录到 ai_responses.log 中。">
+                        <QuestionCircleOutlined style={{ color: '#999' }} />
+                      </Tooltip>
+                    </div>
+                  )}
+                </Form.Item>
 
                 <Button
                   type="primary"

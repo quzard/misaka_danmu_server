@@ -226,7 +226,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'api_tokens': {'name': 500, 'token': 500},
         'token_access_logs': {'ip_address': 500, 'status': 500, 'path': 512},
         'ua_rules': {'ua_string': 500},
-        'bangumi_auth': {'nickname': 500, 'avatar_url': 512},
+        'bangumi_auth': {'nickname': 500, 'avatar_url': 512, 'redirect_uri': 512},
         'oauth_states': {'state_key': 500},
         'anime_aliases': {'name_en': 500, 'name_jp': 500, 'name_romaji': 500, 'alias_cn_1': 500, 'alias_cn_2': 500, 'alias_cn_3': 500},
         'tmdb_episode_mapping': {'tmdb_episode_group_id': 500},
@@ -237,7 +237,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'external_api_logs': {'ip_address': 500, 'endpoint': 500},
         'rate_limit_state': {'provider_name': 500, 'checksum': 500},
         'media_servers': {'name': 500, 'provider_name': 500, 'url': 512, 'api_token': 512},
-        'media_items': {'media_id': 500, 'library_id': 500, 'title': 500, 'tmdb_id': 500, 'tvdb_id': 500, 'imdb_id': 500, 'poster_url': 1024},
+        'media_items': {'media_id': 500,'library_id': 500,'series_id': 500,'season_id': 500,'episode_id': 500,'title': 500,'tmdb_id': 500,'tvdb_id': 500,'imdb_id': 500,'poster_url': 1024,},
         'local_danmaku_items': {'file_path': 1024, 'title': 512, 'tmdb_id': 500, 'tvdb_id': 500, 'imdb_id': 500, 'poster_url': 1024, 'nfo_path': 1024},
     }
 

@@ -140,56 +140,54 @@ async def find_tmdb_by_external_ids(
         TMDB ID（如果找到）
     """
     try:
-        # 目前简化实现：通过搜索来查找
-        # TODO: 实现真正的TMDB find API调用
+        # 使用 TMDB /find API 直接通过外部 ID 查找
+        tmdb_source = metadata_manager.sources.get('tmdb')
+        if tmdb_source:
+            # 映射外部 ID 类型到 TMDB find API 的 external_source 参数
+            find_mappings = [
+                ('imdb_id', 'imdb_id'),
+                ('tvdb_id', 'tvdb_id'),
+            ]
+            for key, external_source in find_mappings:
+                if key not in external_ids:
+                    continue
+                ext_id = external_ids[key]
+                logger.info(f"尝试通过 TMDB find API 查找: {external_source}={ext_id}")
+                try:
+                    async with await tmdb_source._create_client() as client:
+                        response = await client.get(f"/find/{ext_id}", params={"external_source": external_source})
+                        response.raise_for_status()
+                        data = response.json()
+                        # TMDB find API 返回 tv_results 和 movie_results
+                        for result_key in ('tv_results', 'movie_results'):
+                            results = data.get(result_key, [])
+                            if results:
+                                tmdb_id = str(results[0]['id'])
+                                logger.info(f"通过 TMDB find API ({external_source}={ext_id}) 找到 TMDB ID: {tmdb_id}")
+                                return tmdb_id
+                except Exception as e:
+                    logger.warning(f"TMDB find API 查找失败 ({external_source}={ext_id}): {e}")
 
-        # 如果有IMDB ID，尝试通过IMDB搜索然后查看结果中的TMDB ID
-        if 'imdb_id' in external_ids:
-            imdb_id = external_ids['imdb_id']
-            logger.info(f"尝试通过IMDB ID {imdb_id} 查找TMDB...")
-
-            # 通过IMDB搜索
-            imdb_results = await metadata_manager.search('imdb', imdb_id, user)
-            for result in imdb_results:
-                if hasattr(result, 'tmdbId') and result.tmdbId:
-                    logger.info(f"通过IMDB找到TMDB ID: {result.tmdbId}")
-                    return result.tmdbId
-
-        # 如果有TVDB ID，类似处理
-        if 'tvdb_id' in external_ids:
-            tvdb_id = external_ids['tvdb_id']
-            logger.info(f"尝试通过TVDB ID {tvdb_id} 查找TMDB...")
-
-            # 通过TVDB搜索
-            tvdb_results = await metadata_manager.search('tvdb', tvdb_id, user)
-            for result in tvdb_results:
-                if hasattr(result, 'tmdbId') and result.tmdbId:
-                    logger.info(f"通过TVDB找到TMDB ID: {result.tmdbId}")
-                    return result.tmdbId
-
-        # 如果有Douban ID，类似处理
-        if 'douban_id' in external_ids:
-            douban_id = external_ids['douban_id']
-            logger.info(f"尝试通过Douban ID {douban_id} 查找TMDB...")
-
-            # 通过Douban搜索
-            douban_results = await metadata_manager.search('douban', douban_id, user)
-            for result in douban_results:
-                if hasattr(result, 'tmdbId') and result.tmdbId:
-                    logger.info(f"通过Douban找到TMDB ID: {result.tmdbId}")
-                    return result.tmdbId
-
-        # 如果有Bangumi ID，类似处理
-        if 'bangumi_id' in external_ids:
-            bangumi_id = external_ids['bangumi_id']
-            logger.info(f"尝试通过Bangumi ID {bangumi_id} 查找TMDB...")
-
-            # 通过Bangumi搜索
-            bangumi_results = await metadata_manager.search('bangumi', bangumi_id, user)
-            for result in bangumi_results:
-                if hasattr(result, 'tmdbId') and result.tmdbId:
-                    logger.info(f"通过Bangumi找到TMDB ID: {result.tmdbId}")
-                    return result.tmdbId
+        # 回退：通过各元数据源的 search 方法间接查找
+        source_id_mappings = [
+            ('imdb_id', 'imdb'),
+            ('tvdb_id', 'tvdb'),
+            ('douban_id', 'douban'),
+            ('bangumi_id', 'bangumi'),
+        ]
+        for key, source_name in source_id_mappings:
+            if key not in external_ids:
+                continue
+            ext_id = external_ids[key]
+            logger.info(f"尝试通过 {source_name} 搜索查找 TMDB ID: {ext_id}")
+            try:
+                results = await metadata_manager.search(source_name, ext_id, user)
+                for result in results:
+                    if hasattr(result, 'tmdbId') and result.tmdbId:
+                        logger.info(f"通过 {source_name} 找到 TMDB ID: {result.tmdbId}")
+                        return result.tmdbId
+            except Exception as e:
+                logger.warning(f"通过 {source_name} 查找 TMDB 失败: {e}")
 
         return None
 

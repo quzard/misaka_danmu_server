@@ -16,6 +16,7 @@ import {
   getBangumiAuth,
   getBangumiAuthUrl,
   logoutBangumiAuth,
+  refreshBangumiAuth,
   getTmdbConfig,
   getTvdbConfig,
   getDoubanConfig,
@@ -172,6 +173,25 @@ export function BangumiConfig({ form }) {
         }
       },
     })
+  }
+
+  const [refreshing, setRefreshing] = useState(false)
+
+  const handleRefreshToken = async () => {
+    try {
+      setRefreshing(true)
+      const res = await refreshBangumiAuth()
+      if (res.data?.success) {
+        messageApi.success('授权已续期')
+        loadConfig()
+      } else {
+        messageApi.error(res.data?.message || '续期失败，请重新授权')
+      }
+    } catch (error) {
+      messageApi.error(`续期失败: ${error?.response?.data?.detail || error.message}`)
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   return (
@@ -382,7 +402,7 @@ export function BangumiConfig({ form }) {
                   const showRenewButton = daysLeft <= 7
                   return (
                     showRenewButton && (
-                      <Button size="small" type="primary" onClick={handleOAuthLogin}>
+                      <Button size="small" type="primary" loading={refreshing} onClick={handleRefreshToken}>
                         延长授权
                       </Button>
                     )
@@ -427,7 +447,6 @@ export function TMDBConfig({ form }) {
     try {
       const response = await getTmdbConfig()
       const config = response.data || response
-      console.log('TMDB 配置:', config)
       form.setFieldsValue({
         tmdbApiKey: config.tmdbApiKey || '',
         tmdbApiBaseUrl: config.tmdbApiBaseUrl || 'https://api.themoviedb.org',

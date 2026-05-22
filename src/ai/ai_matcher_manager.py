@@ -62,6 +62,7 @@ class AIMatcherManager:
             "ai_recognition_prompt": await self.config_manager.get("aiRecognitionPrompt", ""),
             "ai_alias_validation_prompt": await self.config_manager.get("aiAliasValidationPrompt", ""),
             "ai_log_raw_response": (await self.config_manager.get("aiLogRawResponse", "false")).lower() == "true",
+            "ai_thinking_enabled": (await self.config_manager.get("aiThinkingEnabled", "false")).lower() == "true",
             "ai_cache_enabled": (await self.config_manager.get("aiCacheEnabled", "true")).lower() == "true",
             "ai_cache_ttl": int(await self.config_manager.get("aiCacheTtl", "3600"))
         }
@@ -249,4 +250,29 @@ class AIMatcherManager:
             return selected_index
         except Exception as e:
             self.logger.error(f"剧集组选择失败: {e}", exc_info=True)
+            return None
+
+
+    async def generate_regex(self, description: str, existing_regex: str = "", context: str = "") -> Optional[str]:
+        """
+        使用 AI 根据自然语言描述生成或合并正则表达式。
+
+        Args:
+            description: 用户的自然语言描述
+            existing_regex: 当前已有的正则表达式
+            context: 使用场景，如 "episode_blacklist" / "danmaku_blacklist" / "webhook_filter"
+
+        Returns:
+            完整的正则表达式，或 None 表示失败
+        """
+        try:
+            matcher = await self.get_matcher()
+            if not matcher:
+                self.logger.warning("AI 正则生成: AI 匹配器未启用或初始化失败")
+                return None
+
+            result = await matcher.generate_regex(description, existing_regex, context)
+            return result
+        except Exception as e:
+            self.logger.error(f"AI 正则生成失败: {e}", exc_info=True)
             return None

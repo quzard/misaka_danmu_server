@@ -343,6 +343,56 @@ async def get_match_for_item(
                 if cached_response:
                     return cached_response
 
+        # 方案D: 整季缓存复用 - 同标题同季的不同集，复用之前的匹配结果
+        season_cache_key = f"match_season_{parsed_info['title']}_{parsed_info.get('season', 1)}"
+        season_cache = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, season_cache_key)
+        if season_cache and not parsed_info.get("is_movie"):
+            cached_time = season_cache.get("timestamp", 0)
+            if time.time() - cached_time < 3600:  # 1小时内
+                logger.info(f"整季缓存命中: {season_cache_key}，复用匹配结果（跳过搜索）")
+                episode_number = parsed_info.get("episode") or 1
+
+                # 从缓存中恢复匹配信息
+                cached_provider = season_cache["provider"]
+                cached_mediaId = season_cache["mediaId"]
+                cached_real_anime_id = season_cache["real_anime_id"]
+                cached_title = season_cache["final_title"]
+                cached_season = season_cache["final_season"]
+                cached_source_order = season_cache.get("source_order", 1)
+
+                # 直接生成 episodeId（generate_episode_id 已在模块顶部导入）
+                real_episode_id = generate_episode_id(cached_real_anime_id, cached_source_order, episode_number)
+                virtual_anime_id = season_cache.get("virtual_anime_id", 900000)
+
+                # 存储本集的 episodeId 映射（供 comment 接口使用）
+                episode_mapping_key = f"fallback_episode_{real_episode_id}"
+                episode_mapping_data = {
+                    "virtual_anime_id": virtual_anime_id,
+                    "real_anime_id": cached_real_anime_id,
+                    "provider": cached_provider,
+                    "mediaId": cached_mediaId,
+                    "episode_number": episode_number,
+                    "final_title": cached_title,
+                    "final_season": cached_season,
+                    "media_type": season_cache.get("media_type", "tv_series"),
+                    "imageUrl": season_cache.get("imageUrl"),
+                    "year": season_cache.get("year"),
+                    "timestamp": time.time()
+                }
+                await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, episode_mapping_key, episode_mapping_data, FALLBACK_SEARCH_CACHE_TTL)
+
+                match_result = DandanMatchInfo(
+                    episodeId=real_episode_id,
+                    animeId=virtual_anime_id,
+                    animeTitle=cached_title,
+                    episodeTitle=f"第{episode_number}集",
+                    type="tvseries",
+                    typeDescription="缓存匹配",
+                    imageUrl=season_cache.get("imageUrl")
+                )
+                logger.info(f"整季缓存匹配: {cached_title} S{cached_season:02d}E{episode_number:02d} → episodeId={real_episode_id}")
+                return DandanMatchResponse(isMatched=True, matches=[match_result])
+
         logger.info(f"匹配失败，已启用后备机制，正在为 '{item.fileName}' 创建自动搜索任务。")
 
         # 将匹配后备逻辑包装成协程工厂
@@ -371,12 +421,19 @@ async def get_match_for_item(
                 # 电影不设置episode_number,保持为None
                 episode_number = None if is_movie else (parsed_info.get("episode") or 1)
 
-                # 【性能优化】预获取所有配置值（避免后续重复获取）
-                match_fallback_tmdb_enabled = await config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false")
-                ai_match_enabled = (await config_manager.get("aiMatchEnabled", "false")).lower() == "true"
-                ai_fallback_enabled = (await config_manager.get("aiFallbackEnabled", "true")).lower() == "true"
-                fallback_enabled = (await config_manager.get("externalApiFallbackEnabled", "false")).lower() == "true"
-                ai_episode_group_enabled = (await config_manager.get("aiEpisodeGroupEnabled", "false")).lower() == "true"
+                # 【性能优化】并行预获取所有配置值
+                _cfg_tasks = await asyncio.gather(
+                    config_manager.get("matchFallbackEnableTmdbSeasonMapping", "false"),
+                    config_manager.get("aiMatchEnabled", "false"),
+                    config_manager.get("aiFallbackEnabled", "true"),
+                    config_manager.get("externalApiFallbackEnabled", "false"),
+                    config_manager.get("aiEpisodeGroupEnabled", "false"),
+                )
+                match_fallback_tmdb_enabled = _cfg_tasks[0]
+                ai_match_enabled = _cfg_tasks[1].lower() == "true"
+                ai_fallback_enabled = _cfg_tasks[2].lower() == "true"
+                fallback_enabled = _cfg_tasks[3].lower() == "true"
+                ai_episode_group_enabled = _cfg_tasks[4].lower() == "true"
 
                 if match_fallback_tmdb_enabled.lower() != "true":
                     logger.info("○ 匹配后备 统一AI映射: 功能未启用")
@@ -389,62 +446,41 @@ async def get_match_for_item(
 
                 match_timer.step_end()
 
-                # 预获取TMDB信息 + 弹幕源搜索（半并行优化）
-                # 先做TMDB搜索获取别名和tmdb_id，然后同时启动：弹幕源搜索 + 剧集组处理
+                # 全并行优化：TMDB搜索 + 弹幕源搜索 同时启动
+                # 注意：辅助源别名不需要单独调用，因为：
+                #   - TMDB 别名已从 _do_tmdb_prefetch 获取
+                #   - 360 补充已在 unified_search → search_all → supplement_empty_search_results 中处理
                 pre_fetched_aliases = set()
-                pre_fetched_equiv = None  # 预取的等价上下文
-                _prefetch_tmdb_id = None  # TMDB搜索得到的ID，用于后续并行处理
+                pre_fetched_equiv = None
+                _prefetch_tmdb_id = None
 
-                if ai_episode_group_enabled and not is_movie:
+                match_timer.step_start("并行搜索(弹幕源+TMDB)")
+
+                # 定义 TMDB 搜索协程（获取别名+ID）
+                async def _do_tmdb_prefetch():
+                    if not (ai_episode_group_enabled and not is_movie):
+                        return None, set()
                     tmdb_source = metadata_manager.sources.get("tmdb")
-                    if tmdb_source:
-                        try:
-                            match_timer.step_start("TMDB搜索(获取别名+ID)")
-                            virtual_user = models.User(id=0, username="match_prefetch")
-                            tmdb_search_results = await tmdb_source.search(base_title, virtual_user, mediaType='tv')
-                            if tmdb_search_results:
-                                _prefetch_tmdb_id = tmdb_search_results[0].id
-                                logger.info(f"TMDB预获取: 搜索命中 '{tmdb_search_results[0].title}' (ID: {_prefetch_tmdb_id})")
-
-                                # 收集TMDB别名
-                                for sr in tmdb_search_results[:3]:
-                                    pre_fetched_aliases.add(sr.title)
-                                    if sr.aliasesCn:
-                                        pre_fetched_aliases.update(sr.aliasesCn)
-                                    if sr.aliasesJp:
-                                        pre_fetched_aliases.update(sr.aliasesJp)
-                                    if sr.nameEn:
-                                        pre_fetched_aliases.add(sr.nameEn)
-                                    if sr.nameJp:
-                                        pre_fetched_aliases.add(sr.nameJp)
-
-                                # 写入别名缓存
-                                if pre_fetched_aliases:
-                                    from src.core.cache import get_cache_backend
-                                    alias_cache_key = f"search_aliases_{base_title}"
-                                    alias_data = json.dumps(list(pre_fetched_aliases))
-                                    _backend = get_cache_backend()
-                                    if _backend is not None:
-                                        try:
-                                            await _backend.set(alias_cache_key, alias_data, ttl=3600, region="search")
-                                        except Exception:
-                                            await crud.set_cache(session_inner, alias_cache_key, alias_data, ttl_seconds=3600)
-                                    else:
-                                        await crud.set_cache(session_inner, alias_cache_key, alias_data, ttl_seconds=3600)
-                                    logger.info(f"TMDB预获取: 已缓存 {len(pre_fetched_aliases)} 个别名")
-                            else:
-                                logger.info(f"TMDB预获取: 搜索 '{base_title}' 无结果")
-                            match_timer.step_end()
-                        except Exception as prefetch_err:
-                            logger.warning(f"TMDB预获取搜索失败(不影响后续流程): {prefetch_err}")
-                            try:
-                                match_timer.step_end()
-                            except Exception:
-                                pass
-
-                # 半并行：弹幕源搜索 与 剧集组处理 同时进行
-                match_timer.step_start("弹幕源搜索+剧集组处理(并行)")
-                logger.info(f"步骤1：全网搜索 '{base_title}'" + (f" + 剧集组处理(并行)" if _prefetch_tmdb_id else ""))
+                    if not tmdb_source:
+                        return None, set()
+                    try:
+                        virtual_user = models.User(id=0, username="match_prefetch")
+                        tmdb_search_results = await tmdb_source.search(base_title, virtual_user, mediaType='tv')
+                        aliases = set()
+                        tmdb_id = None
+                        if tmdb_search_results:
+                            tmdb_id = tmdb_search_results[0].id
+                            logger.info(f"TMDB预获取: 搜索命中 '{tmdb_search_results[0].title}' (ID: {tmdb_id})")
+                            for sr in tmdb_search_results[:3]:
+                                aliases.add(sr.title)
+                                if sr.aliasesCn: aliases.update(sr.aliasesCn)
+                                if sr.aliasesJp: aliases.update(sr.aliasesJp)
+                                if sr.nameEn: aliases.add(sr.nameEn)
+                                if sr.nameJp: aliases.add(sr.nameJp)
+                        return tmdb_id, aliases
+                    except Exception as e:
+                        logger.warning(f"TMDB预获取搜索失败: {e}")
+                        return None, set()
 
                 # 定义弹幕源搜索协程
                 async def _do_unified_search():
@@ -459,74 +495,82 @@ async def get_match_for_item(
                         use_source_priority_sorting=False,
                         strict_filtering=True,
                         alias_similarity_threshold=70,
-                        custom_aliases=pre_fetched_aliases if pre_fetched_aliases else None,
                         progress_callback=progress_callback
                     )
 
-                # 定义剧集组处理协程（与弹幕源搜索并行执行）
-                async def _do_episode_group_processing():
-                    """获取剧集组 → AI选择 → 下载映射 → 查等价"""
-                    if not _prefetch_tmdb_id:
-                        return None
+                # 并行启动：先 TMDB，再弹幕源
+                tmdb_task = asyncio.create_task(_do_tmdb_prefetch())
+                await asyncio.sleep(0)
+                search_task = asyncio.create_task(_do_unified_search())
+
+                # 等待完成
+                (tmdb_id_result, tmdb_aliases), search_result = await asyncio.gather(
+                    tmdb_task, search_task
+                )
+
+                _prefetch_tmdb_id = tmdb_id_result
+                pre_fetched_aliases = tmdb_aliases
+                all_results = search_result if isinstance(search_result, list) else []
+
+                # 剧集组处理（需要 TMDB ID）
+                if _prefetch_tmdb_id:
+                    # 剧集组处理（需要 TMDB ID，串行但在搜索完成后执行）
                     try:
                         _vu = models.User(id=0, username="match_group")
                         _tmdb_src = metadata_manager.sources.get("tmdb")
-                        if not _tmdb_src:
-                            return None
-
-                        all_groups = await _tmdb_src.get_all_episode_groups(int(_prefetch_tmdb_id), _vu)
-                        if not all_groups:
-                            logger.info(f"剧集组(并行): TMDB ID {_prefetch_tmdb_id} 没有剧集组")
-                            return None
-
-                        logger.info(f"剧集组(并行): 找到 {len(all_groups)} 个剧集组")
-                        selected_idx = await ai_matcher_manager.select_best_episode_group(
-                            title=base_title, season=season, episode=episode_number,
-                            episode_groups=all_groups
-                        )
-                        if selected_idx is None:
-                            return None
-
-                        group_id = all_groups[selected_idx]["id"]
-                        logger.info(f"剧集组(并行): 选中 '{all_groups[selected_idx].get('name')}' (ID: {group_id})")
-                        await metadata_manager.update_tmdb_mappings(int(_prefetch_tmdb_id), group_id, _vu)
-                        equiv = await crud.get_episode_equivalence(
-                            session_inner, group_id, season, episode_number
-                        )
-                        if equiv:
-                            logger.info(f"剧集组(并行): 等价映射获取成功")
-                        else:
-                            logger.info(f"剧集组(并行): 映射已保存但当前集数未在映射中找到")
-                        return equiv
+                        if _tmdb_src:
+                            all_groups = await _tmdb_src.get_all_episode_groups(int(_prefetch_tmdb_id), _vu)
+                            if all_groups:
+                                logger.info(f"剧集组: 找到 {len(all_groups)} 个剧集组")
+                                selected_idx = await ai_matcher_manager.select_best_episode_group(
+                                    title=base_title, season=season, episode=episode_number,
+                                    episode_groups=all_groups
+                                )
+                                if selected_idx is not None:
+                                    group_id = all_groups[selected_idx]["id"]
+                                    logger.info(f"剧集组: 选中 '{all_groups[selected_idx].get('name')}' (ID: {group_id})")
+                                    await metadata_manager.update_tmdb_mappings(int(_prefetch_tmdb_id), group_id, _vu)
+                                    equiv = await crud.get_episode_equivalence(
+                                        session_inner, group_id, season, episode_number
+                                    )
+                                    if equiv:
+                                        pre_fetched_equiv = equiv
+                                        logger.info(f"剧集组: 等价映射获取成功")
                     except Exception as eg_err:
-                        logger.warning(f"剧集组(并行)处理失败: {eg_err}")
-                        return None
+                        logger.warning(f"剧集组处理失败: {eg_err}")
 
-                # 执行并行任务
-                if _prefetch_tmdb_id:
-                    # 并行执行：弹幕源搜索 + 剧集组处理
-                    search_result, group_result = await asyncio.gather(
-                        _do_unified_search(),
-                        _do_episode_group_processing(),
-                        return_exceptions=True
-                    )
-                    all_results = search_result if not isinstance(search_result, Exception) else []
-                    if isinstance(search_result, Exception):
-                        logger.warning(f"弹幕源搜索异常: {search_result}")
-                    if isinstance(group_result, Exception):
-                        logger.warning(f"剧集组处理异常: {group_result}")
-                    elif group_result:
-                        pre_fetched_equiv = group_result
-                else:
-                    # 没有TMDB ID时，只做弹幕源搜索
-                    all_results = await _do_unified_search()
+                    # 写入别名缓存
+                    if pre_fetched_aliases:
+                        from src.core.cache import get_cache_backend
+                        alias_cache_key = f"search_aliases_{base_title}"
+                        alias_data = json.dumps(list(pre_fetched_aliases))
+                        _backend = get_cache_backend()
+                        try:
+                            if _backend is not None:
+                                await _backend.set(alias_cache_key, alias_data, ttl=3600, region="search")
+                            else:
+                                await crud.set_cache(session_inner, alias_cache_key, alias_data, ttl_seconds=3600)
+                        except Exception:
+                            pass
 
-                # 收集单源搜索耗时信息
+                # 收集单源搜索耗时信息（分组显示）
                 from src.utils.search_timer import SubStepTiming
-                source_timing_sub_steps = [
-                    SubStepTiming(name=name, duration_ms=dur, result_count=cnt)
-                    for name, dur, cnt in scraper_manager.last_search_timing
-                ]
+                source_timing_sub_steps = []
+                for name, dur, cnt in scraper_manager.last_search_timing:
+                    if name.startswith("补充:"):
+                        source_timing_sub_steps.append(
+                            SubStepTiming(name=name[3:], duration_ms=dur, result_count=cnt, group="补充源")
+                        )
+                    else:
+                        source_timing_sub_steps.append(
+                            SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
+                        )
+                # 辅助源别名计时
+                if hasattr(metadata_manager, 'last_aux_search_timing') and metadata_manager.last_aux_search_timing:
+                    for name, dur, cnt in metadata_manager.last_aux_search_timing:
+                        source_timing_sub_steps.append(
+                            SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="辅助源(别名)")
+                        )
 
                 if not all_results:
                     logger.warning(f"匹配后备失败：没有找到任何搜索结果")
@@ -587,6 +631,10 @@ async def get_match_for_item(
 
                 # 步骤2：智能排序 (类型匹配优先)
                 match_timer.step_start("智能排序与匹配")
+                from src.utils.search_timer import SubStepTiming
+                import time as _perf_time
+                _match_sub_steps = []
+                _sub_start = _perf_time.perf_counter()
 
                 # 确定目标类型
                 target_type = "movie" if is_movie else "tv_series"
@@ -639,6 +687,9 @@ async def get_match_for_item(
                     type_match = "✓" if result.type == target_type else "✗"
                     lines.append(f"  {idx}. [{type_match}] {result.provider} - {result.title} (ID: {result.mediaId}, 类型: {result.type}, 年份: {result.year or 'N/A'}, 分数: {score:.0f})")
                 logger.info("\n".join(lines))
+
+                _match_sub_steps.append(SubStepTiming(name="排序打分", duration_ms=(_perf_time.perf_counter() - _sub_start) * 1000))
+                _sub_start = _perf_time.perf_counter()
 
                 # 步骤3：自动选择最佳源
                 logger.info(f"步骤3：自动选择最佳源")
@@ -736,6 +787,9 @@ async def get_match_for_item(
 
                 # 使用预获取的配置值
                 # fallback_enabled 已在初始化阶段获取
+
+                _match_sub_steps.append(SubStepTiming(name="AI匹配" if ai_match_enabled else "传统匹配", duration_ms=(_perf_time.perf_counter() - _sub_start) * 1000))
+                _sub_start = _perf_time.perf_counter()
 
                 best_match = None
 
@@ -841,6 +895,8 @@ async def get_match_for_item(
 
                 # 用于保存从来源端获取的剧集标题
                 matched_episode_title = None
+                # 分集列表缓存（顺延验证时填充，后续复用避免重复请求）
+                episodes_cache = {}
 
                 # ===== 反向偏移：将文件名/用户传入的偏移后集号还原为源站原始集号 =====
                 # episode_number 来自文件名解析，等同于用户期望的集号（偏移后的值）
@@ -858,71 +914,101 @@ async def get_match_for_item(
                         logger.warning(f"  - 反向偏移失败，使用原始集号: {e}")
 
                 if best_match is None and fallback_enabled:
-                    # 顺延机制启用：依次验证候选源 (按分数从高到低)
-                    logger.info(f"  - 顺延机制启用，依次验证候选源")
-                    for attempt, candidate in enumerate(sorted_results, 1):
-                        logger.info(f"    {attempt}. 正在验证: {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}, 类型: {candidate.type})")
+                    # 顺延机制启用：并行预取前N个高分候选源的分集列表，然后内存验证
+                    logger.info(f"  - 顺延机制启用，并行预取分集列表")
+                    MAX_PREFETCH = 5  # 并行预取前5个候选源
+                    prefetch_candidates = sorted_results[:MAX_PREFETCH]
+
+                    # 并行获取分集列表
+                    async def _fetch_episodes(candidate):
                         try:
-                            scraper = scraper_manager.get_scraper(candidate.provider)
-                            if not scraper:
-                                logger.warning(f"    {attempt}. {candidate.provider} - 无法获取scraper，跳过")
-                                continue
-
-                            # 获取分集列表进行验证
-                            episodes = await scraper_manager.get_episodes_routed(candidate.provider, candidate.mediaId, db_media_type=candidate.type)
-                            if not episodes:
-                                logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
-                                continue
-
-                            # 如果用户搜索的是电影，只匹配电影类型的候选源
-                            if is_movie:
-                                if candidate.type != "movie":
-                                    logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
-                                    continue
-                                logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
-                            else:
-                                # 非电影场景，也需要验证候选源类型匹配
-                                if candidate.type != target_type:
-                                    logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配({candidate.type}≠{target_type})，跳过")
-                                    continue
-                            # 如果指定了集数，检查是否有目标集数
-                            # 使用反向偏移后的 source_episode_number 去匹配源站分集
-                            if not is_movie and source_episode_number is not None:
-                                target_episode = None
-                                for ep in episodes:
-                                    if ep.episodeIndex == source_episode_number:
-                                        target_episode = ep
-                                        break
-
-                                if not target_episode:
-                                    logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {source_episode_number} 集"
-                                                   f"{f' (原始集号: {episode_number})' if source_episode_number != episode_number else ''}，跳过")
-                                    continue
-
-                                # 保存来源端的剧集标题
-                                matched_episode_title = target_episode.title
-                                logger.info(f"    {attempt}. {candidate.provider} - 验证通过，剧集标题: '{matched_episode_title}'")
-                            else:
-                                logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
-                            best_match = candidate
-                            break
+                            eps = await scraper_manager.get_episodes_routed(
+                                candidate.provider, candidate.mediaId, db_media_type=candidate.type
+                            )
+                            return candidate, eps
                         except Exception as e:
-                            logger.warning(f"    {attempt}. {candidate.provider} - 验证失败: {e}")
+                            logger.debug(f"预取分集失败: {candidate.provider} - {e}")
+                            return candidate, None
+
+                    prefetch_results = await asyncio.gather(
+                        *[_fetch_episodes(c) for c in prefetch_candidates]
+                    )
+
+                    # 构建缓存：provider:mediaId -> episodes
+                    episodes_cache = {}
+                    for candidate, eps in prefetch_results:
+                        episodes_cache[f"{candidate.provider}:{candidate.mediaId}"] = eps
+
+                    # 在内存中验证（包括预取的和剩余的）
+                    for attempt, candidate in enumerate(sorted_results, 1):
+                        cache_key = f"{candidate.provider}:{candidate.mediaId}"
+                        logger.info(f"    {attempt}. 正在验证: {candidate.provider} - {candidate.title} (ID: {candidate.mediaId}, 类型: {candidate.type})")
+
+                        # 优先从缓存取，没有则实时获取（超出预取范围的候选源）
+                        if cache_key in episodes_cache:
+                            episodes = episodes_cache[cache_key]
+                        else:
+                            try:
+                                episodes = await scraper_manager.get_episodes_routed(
+                                    candidate.provider, candidate.mediaId, db_media_type=candidate.type
+                                )
+                                episodes_cache[cache_key] = episodes
+                            except Exception as e:
+                                logger.warning(f"    {attempt}. {candidate.provider} - 获取分集失败: {e}")
+                                continue
+
+                        if not episodes:
+                            logger.warning(f"    {attempt}. {candidate.provider} - 没有分集列表，跳过")
                             continue
+
+                        # 类型验证
+                        if is_movie:
+                            if candidate.type != "movie":
+                                logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配 (搜索电影，但候选源是{candidate.type})，跳过")
+                                continue
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过 (电影)")
+                        else:
+                            if candidate.type != target_type:
+                                logger.warning(f"    {attempt}. {candidate.provider} - 类型不匹配({candidate.type}≠{target_type})，跳过")
+                                continue
+
+                        # 集数验证
+                        if not is_movie and source_episode_number is not None:
+                            target_episode = None
+                            for ep in episodes:
+                                if ep.episodeIndex == source_episode_number:
+                                    target_episode = ep
+                                    break
+
+                            if not target_episode:
+                                logger.warning(f"    {attempt}. {candidate.provider} - 没有第 {source_episode_number} 集"
+                                               f"{f' (原始集号: {episode_number})' if source_episode_number != episode_number else ''}，跳过")
+                                continue
+
+                            matched_episode_title = target_episode.title
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过，剧集标题: '{matched_episode_title}'")
+                        else:
+                            logger.info(f"    {attempt}. {candidate.provider} - 验证通过")
+                        best_match = candidate
+                        break
 
                 if not best_match:
                     logger.warning(f"匹配后备失败：所有候选源都无法提供有效分集")
-                    match_timer.step_end(details="无有效分集")
-                    match_timer.finish()  # 打印计时报告
+                    _match_sub_steps.append(SubStepTiming(name="顺延验证", duration_ms=(_perf_time.perf_counter() - _sub_start) * 1000))
+                    match_timer.step_end(details="无有效分集", sub_steps=_match_sub_steps)
+                    match_timer.finish()
                     response = DandanMatchResponse(isMatched=False, matches=[])
                     match_fallback_result["response"] = response
                     return
 
                 # 如果还没有获取剧集标题（非顺延机制匹配成功的情况），主动获取
-                # 使用反向偏移后的 source_episode_number 匹配源站分集
+                # 复用预取缓存，避免重复HTTP请求
                 if matched_episode_title is None and not is_movie and source_episode_number is not None:
                     try:
-                        episodes = await scraper_manager.get_episodes_routed(best_match.provider, best_match.mediaId, db_media_type=best_match.type)
+                        cache_key = f"{best_match.provider}:{best_match.mediaId}"
+                        episodes = episodes_cache.get(cache_key) if episodes_cache else None
+                        if episodes is None:
+                            episodes = await scraper_manager.get_episodes_routed(best_match.provider, best_match.mediaId, db_media_type=best_match.type)
                         if episodes:
                             for ep in episodes:
                                 if ep.episodeIndex == source_episode_number:
@@ -1044,67 +1130,8 @@ async def get_match_for_item(
 
                 logger.info(f"匹配后备完成: virtual_anime_id={virtual_anime_id}, real_anime_id={real_anime_id}, episodeId={real_episode_id}")
 
-                # 方案A: 写入数据库 - 创建anime和episode记录
-                try:
-                    logger.info("开始将后备匹配结果写入数据库...")
-
-                    # 检查anime是否已存在
-                    stmt = select(orm_models.Anime).where(orm_models.Anime.id == real_anime_id)
-                    result = await session_inner.execute(stmt)
-                    existing_anime = result.scalar_one_or_none()
-
-                    if not existing_anime:
-                        # 创建anime条目
-                        logger.info(f"创建anime条目: id={real_anime_id}, title='{final_title}'")
-                        new_anime = orm_models.Anime(
-                            id=real_anime_id,
-                            title=final_title,
-                            type=best_match.type,
-                            season=final_season,
-                            imageUrl=best_match.imageUrl,
-                            year=best_match.year,
-                            createdAt=get_now()
-                        )
-                        session_inner.add(new_anime)
-                        await session_inner.flush()
-                        # 同步PostgreSQL序列
-                        await sync_postgres_sequence(session_inner)
-                    else:
-                        logger.info(f"anime条目已存在: id={real_anime_id}, title='{existing_anime.title}'")
-
-                    # 创建或获取source关联
-                    source_id = await crud.link_source_to_anime(session_inner, real_anime_id, best_match.provider, best_match.mediaId)
-                    logger.info(f"source_id={source_id}, provider={best_match.provider}, mediaId={best_match.mediaId}")
-
-                    # 创建episode记录
-                    # 优先使用从来源端获取的剧集标题，否则使用通用格式
-                    if is_movie:
-                        episode_title = final_title
-                    elif matched_episode_title:
-                        episode_title = matched_episode_title
-                        logger.info(f"  - 使用来源端剧集标题: '{episode_title}'")
-                    else:
-                        episode_title = f"第{final_episode_number}集"
-                        logger.info(f"  - 使用通用剧集标题: '{episode_title}'")
-                    episode_db_id = await crud.create_episode_if_not_exists(
-                        session_inner,
-                        real_anime_id,
-                        source_id,
-                        final_episode_number,
-                        episode_title,
-                        None,  # url
-                        f"fallback_{best_match.provider}_{best_match.mediaId}_{final_episode_number}"  # provider_episode_id
-                    )
-                    logger.info(f"episode记录已创建/获取: episode_db_id={episode_db_id}")
-
-                    # 提交数据库更改
-                    await session_inner.commit()
-                    logger.info("后备匹配结果已成功写入数据库")
-
-                except Exception as db_error:
-                    logger.error(f"写入数据库失败: {db_error}", exc_info=True)
-                    await session_inner.rollback()
-                    # 即使数据库写入失败,也继续返回结果(依赖缓存)
+                # 不在 match 时写入数据库，由 comment 接口在下载弹幕成功后才创建记录
+                # 缓存映射已在上方存储（fallback_anime_ / fallback_episode_），comment 接口会读取
 
                 # 返回真实的匹配结果
                 match_result = DandanMatchInfo(
@@ -1119,7 +1146,7 @@ async def get_match_for_item(
                 response = DandanMatchResponse(isMatched=True, matches=[match_result])
                 logger.info(f"发送匹配响应 (匹配后备): episodeId={real_episode_id}, animeId={virtual_anime_id}")
 
-                # 存储到防重复缓存
+                # 存储到防重复缓存（按集）
                 recent_fallback_key = f"recent_fallback_{parsed_info['title']}_{parsed_info.get('season')}_{parsed_info.get('episode')}"
                 recent_fallback_data = {
                     "response": response,
@@ -1127,7 +1154,27 @@ async def get_match_for_item(
                 }
                 await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, recent_fallback_key, recent_fallback_data, 300)  # 5分钟TTL
 
-                match_timer.step_end(details="匹配成功")
+                # 存储整季缓存（TV系列专用，1小时TTL）
+                if not is_movie:
+                    season_cache_key = f"match_season_{parsed_info['title']}_{parsed_info.get('season', 1)}"
+                    season_cache_data = {
+                        "provider": best_match.provider,
+                        "mediaId": best_match.mediaId,
+                        "real_anime_id": real_anime_id,
+                        "virtual_anime_id": virtual_anime_id,
+                        "final_title": final_title,
+                        "final_season": final_season,
+                        "source_order": source_order,
+                        "media_type": best_match.type,
+                        "imageUrl": best_match.imageUrl,
+                        "year": best_match.year,
+                        "timestamp": time.time()
+                    }
+                    await set_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, season_cache_key, season_cache_data, 3600)
+                    logger.info(f"整季缓存已存储: {season_cache_key}")
+
+                _match_sub_steps.append(SubStepTiming(name="验证+获取分集", duration_ms=(_perf_time.perf_counter() - _sub_start) * 1000))
+                match_timer.step_end(details="匹配成功", sub_steps=_match_sub_steps)
                 match_timer.finish()  # 打印计时报告
                 match_fallback_result["response"] = response
                 # 保存匹配详情供后续使用

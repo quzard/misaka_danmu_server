@@ -27,10 +27,18 @@ instance.interceptors.request.use(
 instance.interceptors.response.use(
   res => res,
   error => {
-    console.log('resError', error.response?.data, error.response?.config.url)
+    const requestUrl = error.config?.url || ''
+    const isAuthFlowRequest = [
+      '/api/ui/auth/token',
+      '/api/ui/auth/auto-login',
+      '/api/ui/auth/mfa/verify',
+      '/api/ui/auth/mfa/passkey/login/options',
+      '/api/ui/auth/mfa/passkey/login/verify',
+    ].some(url => requestUrl.includes(url))
 
     // 401 未授权：自动清理 token 并跳转登录页
-    if (error.response?.status === 401) {
+    // 登录流程接口交给登录页自己处理，避免旧 token/自动跳转干扰正常登录。
+    if (error.response?.status === 401 && !isAuthFlowRequest) {
       Cookies.remove('danmu_token', { path: '/' })
       // 避免在登录页重复跳转
       if (!window.location.pathname.includes('/login')) {

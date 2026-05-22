@@ -10,11 +10,13 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from passlib.context import CryptContext
 
-# 现在可以安全地从 src 导入
+# 现在可以安全地从 src 导入（避免导入 src.security 整体，防止循环导入）
 from src.db import crud, _get_db_url
-from src import security
-from src.core import settings, get_app_timezone, get_timezone_offset_str
+
+# 独立的密码哈希上下文，和 security.py 保持一致但不触发其导入链
+_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 async def reset_password(username: str):
     """
@@ -44,7 +46,7 @@ async def reset_password(username: str):
         new_password = ''.join(secrets.choice(alphabet) for _ in range(16))
         
         # 4. 对新密码进行哈希处理
-        hashed_password = security.get_password_hash(new_password)
+        hashed_password = _pwd_context.hash(new_password)
 
         # 5. 更新数据库中的用户密码
         await crud.update_user_password(session, username, hashed_password)

@@ -49,7 +49,7 @@ async def search_metadata_source(
     ### 工作流程
     1.  提供 `provider` 来指定要查询的源。
     2.  提供 `keyword` 或 `id` 中的一个来进行搜索。
-    3.  对于某些源（如TMDB），可能需要提供 `mediaType` 来区分电视剧和电影。
+    3.  `mediaType` 为可选参数。TMDB 不传时默认搜索全部类型(multi)，其他源可忽略。
 
     ### 返回
     返回一个包含元数据详情的列表。如果通过ID查找且成功，列表中将只有一个元素。
@@ -61,11 +61,17 @@ async def search_metadata_source(
 
     # --- 将通用媒体类型映射到特定于提供商的类型 ---
     provider_media_type: str | None = None
-    if mediaType:
-        if provider == 'tmdb':
+    if provider == 'tmdb':
+        if mediaType:
             provider_media_type = 'tv' if mediaType == AutoImportMediaType.TV_SERIES else 'movie'
-        elif provider == 'tvdb':
+        else:
+            # TMDB 必须指定 mediaType，未指定时默认使用 multi（同时搜索电视剧和电影）
+            provider_media_type = 'multi'
+    elif provider == 'tvdb':
+        if mediaType:
             provider_media_type = 'series' if mediaType == AutoImportMediaType.TV_SERIES else 'movies'
+    elif mediaType:
+        provider_media_type = mediaType.value
     # --- 映射结束 ---
 
     # 创建一个虚拟用户，因为元数据管理器的核心方法需要它
@@ -107,7 +113,7 @@ async def search_library(
     return [models.LibraryAnimeInfo.model_validate(item) for item in paginated_results["list"]]
 
 
-@router.post("/library/anime", response_model=ControlAnimeDetailsResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
+@router.post("/library/anime", response_model=ControlActionResponse, status_code=status.HTTP_201_CREATED, summary="自定义创建影视条目")
 async def create_anime_entry(
     payload: ControlAnimeCreateRequest,
     session: AsyncSession = Depends(get_db_session),
@@ -120,7 +126,7 @@ async def create_anime_entry(
     1.  接收作品的标题、类型、季度等基本信息。
     2.  （可选）接收TMDB、Bangumi等元数据ID和其他别名。
     3.  在数据库中创建对应的 `anime`, `anime_metadata`, `anime_aliases` 记录。
-    4.  返回新创建的作品的完整信息。
+    4.  返回创建状态和新作品ID。
     """
     # Check for duplicates first
     season_for_check = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
@@ -134,16 +140,17 @@ async def create_anime_entry(
         )
 
     season_for_create = payload.season if payload.type == AutoImportMediaType.TV_SERIES else 1
-    new_anime_id = await crud.get_or_create_anime(
-        session,
+    anime_data = models.AnimeCreate(
         title=payload.title,
-        media_type=payload.type.value,
+        type=payload.type.value,
         season=season_for_create,
-        year=payload.year,
-        image_url=None,
-        local_image_path=None,
-        title_recognition_manager=title_recognition_manager
+        year=payload.year if payload.year else None,
     )
+    try:
+        new_anime = await crud.create_anime(session, anime_data)
+        new_anime_id = new_anime.id
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
     await crud.update_metadata_if_empty(
         session, new_anime_id,
@@ -154,11 +161,7 @@ async def create_anime_entry(
     await crud.update_anime_aliases(session, new_anime_id, payload)
     await session.commit()
 
-    new_details = await crud.get_anime_full_details(session, new_anime_id)
-    if not new_details:
-        raise HTTPException(status_code=500, detail="创建作品后无法获取其详细信息。")
-
-    return ControlAnimeDetailsResponse.model_validate(new_details)
+    return {"message": f"作品 '{payload.title}' 创建成功。", "animeId": new_anime_id}
 
 
 
@@ -180,7 +183,7 @@ async def get_anime_sources(animeId: int, session: AsyncSession = Depends(get_db
     return await crud.get_anime_sources(session, animeId)
 
 
-@router.post("/library/anime/{animeId}/sources", response_model=models.SourceInfo, status_code=status.HTTP_201_CREATED, summary="为作品添加数据源")
+@router.post("/library/anime/{animeId}/sources", response_model=ControlActionResponse, status_code=status.HTTP_201_CREATED, summary="为作品添加数据源")
 async def add_source(
     animeId: int,
     payload: models.SourceCreate,
@@ -208,11 +211,7 @@ async def add_source(
     try:
         source_id = await crud.link_source_to_anime(session, animeId, payload.providerName, payload.mediaId)
         await session.commit()
-        all_sources = await crud.get_anime_sources(session, animeId)
-        newly_created_source = next((s for s in all_sources if s['sourceId'] == source_id), None)
-        if not newly_created_source:
-            raise HTTPException(status_code=500, detail="创建数据源后无法立即获取其信息。")
-        return models.SourceInfo.model_validate(newly_created_source)
+        return {"message": f"数据源 '{payload.providerName}:{payload.mediaId}' 添加成功。", "sourceId": source_id}
     except exc.IntegrityError:
         await session.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该数据源已存在于此作品下，无法重复添加。")
@@ -314,7 +313,7 @@ async def refresh_episode(
 
     task_id, _ = await task_manager.submit_task(
         lambda s, cb: tasks.refresh_episode_task(episodeId, s, manager, rate_limiter, cb, config_manager),
-        f"外部API刷新分集: {info['title']}",
+        f"外部API刷新分集: {info['title']} [{info.get('providerName', '?')}] (mediaId={info.get('mediaId', '?')})",
         unique_key=unique_key,
         task_type="refresh_episode",
         task_parameters={"episodeId": episodeId}
