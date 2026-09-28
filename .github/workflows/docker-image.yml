@@ -60,7 +60,7 @@ jobs:
         run: |
           # 默认值
           SO_TAG="latest"      # 默认使用 latest 标签的 .so 文件
-          BUILD_ARM="false"     # 默认构建 ARM64
+          BUILD_ARM="false"    # 只构建 AMD64（x86）镜像
           EXTRA_TAGS=""        # 默认无额外标签
 
           # 根据触发事件设置参数
@@ -275,6 +275,13 @@ jobs:
 
             docker buildx imagetools create -t ${GHCR_IMAGE}:${TAG} \
               ${GHCR_IMAGE}:${TAG}-amd64
+
+            # 额外标签（如 latest）
+            for EXTRA_TAG in $EXTRA_TAGS; do
+              echo "📦 创建 ${EXTRA_TAG} 标签..."
+              docker buildx imagetools create -t ${DOCKERHUB_IMAGE}:${EXTRA_TAG} ${DOCKERHUB_IMAGE}:${TAG}-amd64
+              docker buildx imagetools create -t ${GHCR_IMAGE}:${EXTRA_TAG} ${GHCR_IMAGE}:${TAG}-amd64
+            done
           fi
 
           echo "✅ Manifest 创建完成！"
