@@ -3,12 +3,15 @@ import { TokenManage } from './components/TokenManage'
 import { OutputManage } from './components/OutputManage'
 import { MatchFallbackSetting } from './components/MatchFallbackSetting'
 import DanmakuStorage from '../setting/components/DanmakuStorage'
+import { DataCheckPanel } from './components/DataCheckPanel'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MobileTabs } from '@/components/MobileTabs'
 import { useAtomValue } from 'jotai'
 import { isMobileAtom } from '../../../store/index.js'
+import { useTranslation } from 'react-i18next'
 
 export const Bullet = () => {
+  const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const key = searchParams.get('key') || 'token'
   const navigate = useNavigate()
@@ -16,24 +19,29 @@ export const Bullet = () => {
 
   const tabItems = [
     {
-      label: 'Token管理',
+      label: t('bullet.tabToken'),
       key: 'token',
       children: <TokenManage />,
     },
     {
-      label: '弹幕输出配置',
+      label: t('bullet.tabOutput'),
       key: 'output',
       children: <OutputManage />,
     },
     {
-      label: '弹幕存储配置',
+      label: t('bullet.tabStorage'),
       key: 'storage',
       children: <DanmakuStorage />,
     },
     {
-      label: '设置',
+      label: t('bullet.tabFallback'),
       key: 'fallback',
       children: <MatchFallbackSetting />,
+    },
+    {
+      label: t('bullet.tabDataCheck'),
+      key: 'data-check',
+      children: <DataCheckPanel />,
     },
   ]
 

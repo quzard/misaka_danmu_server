@@ -1,29 +1,16 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Form, Input, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip, Collapse, Popover } from 'antd';
-import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, DeleteOutlined, SearchOutlined, ReloadOutlined, RocketOutlined } from '@ant-design/icons';
-import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables, getDanmakuLikesFetchEnabled, setDanmakuLikesFetchEnabled } from '@/apis';
+import { Form, Input, InputNumber, Switch, Button, Space, message, Card, Divider, Typography, Select, Row, Col, Tabs, Table, Modal, Tag, Checkbox, Tooltip, Collapse, Popover } from 'antd';
+import { FolderOpenOutlined, CheckCircleOutlined, FileOutlined, SwapOutlined, EditOutlined, SyncOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
+import { getConfig, setConfig, getAnimeLibrary, previewMigrateDanmaku, batchMigrateDanmaku, previewRenameDanmaku, batchRenameDanmaku, previewDanmakuTemplate, applyDanmakuTemplate, getTemplateVariables, getDanmakuLikesFetchEnabled, setDanmakuLikesFetchEnabled, getDanmakuSourceTagEnabled, setDanmakuSourceTagEnabled, getDanmakuSourceTagAlias, setDanmakuSourceTagAlias } from '@/apis';
 import DirectoryBrowser from '../../media-fetch/components/DirectoryBrowser';
+import { useTranslation } from 'react-i18next';
 
 const { Text } = Typography;
 const { Option } = Select;
 const { TabPane } = Tabs;
 
-// 模板定义
-const TEMPLATES = {
-  movie: [
-    { label: '按标题分组', value: '${title}/${episodeId}', desc: '${title}/${episodeId}' },
-    { label: '标题+年份', value: '${title} (${year})/${episodeId}', desc: '${title} (${year})/${episodeId}' },
-    { label: '扁平结构', value: '${episodeId}', desc: '${episodeId}' },
-  ],
-  tv: [
-    { label: '按番剧ID分组', value: '${animeId}/${episodeId}', desc: '${animeId}/${episodeId}' },
-    { label: '按标题+季度分组', value: '${title}/Season ${season}/${episodeId}', desc: '${title}/Season ${season}/${episodeId}' },
-    { label: 'Plex风格', value: '${title}/${title} - S${season:02d}E${episode:02d}', desc: '${title}/${title} - S${season:02d}E${episode:02d}' },
-    { label: '扁平结构', value: '${episodeId}', desc: '${episodeId}' },
-  ]
-};
-
 const DanmakuStorage = () => {
+  const { t } = useTranslation();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [customDanmakuPathEnabled, setCustomDanmakuPathEnabled] = useState(false);
@@ -38,10 +25,6 @@ const DanmakuStorage = () => {
   const [tvDanmakuFilenameTemplate, setTvDanmakuFilenameTemplate] = useState('${animeId}/${episodeId}');
   const [tvPreviewPath, setTvPreviewPath] = useState('');
 
-  // 模板选择器状态
-  const [selectedType, setSelectedType] = useState('movie');
-  const [selectedTemplate, setSelectedTemplate] = useState('${title}/${episodeId}');
-
   // 目录浏览器状态
   const [browserVisible, setBrowserVisible] = useState(false);
   const [browserTarget, setBrowserTarget] = useState(''); // 'movie' or 'tv'
@@ -52,6 +35,8 @@ const DanmakuStorage = () => {
 
   // 设置分页状态
   const [likesFetchEnabled, setLikesFetchEnabled] = useState(true);
+  const [sourceTagEnabled, setSourceTagEnabled] = useState(false);
+  const [sourceTagAlias, setSourceTagAlias] = useState('0');
 
   // 迁移与重命名状态
   const [libraryItems, setLibraryItems] = useState([]);
@@ -73,13 +58,14 @@ const DanmakuStorage = () => {
   const [migrateKeepStructure, setMigrateKeepStructure] = useState(true);
   const [migrateConflictAction, setMigrateConflictAction] = useState('skip');
   const [migratePreviewData, setMigratePreviewData] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  // why：预览请求仍需更新状态以保持异步流程完整，当前界面无需单独读取该状态。
+  const [, setPreviewLoading] = useState(false);
   // 重命名配置 - 多规则系统
   const [renameRules, setRenameRules] = useState([]);
   const [selectedRuleType, setSelectedRuleType] = useState('replace');
   const [ruleParams, setRuleParams] = useState({});
   const [renamePreviewData, setRenamePreviewData] = useState(null);
-  const [renamePreviewLoading, setRenamePreviewLoading] = useState(false);
+  const [, setRenamePreviewLoading] = useState(false);
   const [isRenamePreviewMode, setIsRenamePreviewMode] = useState(false);
   const [renameOriginalItems, setRenameOriginalItems] = useState([]); // 保存原始文件名列表
   // 模板转换配置
@@ -103,25 +89,25 @@ const DanmakuStorage = () => {
 
   // 预设模板选项
   const presetTemplates = [
-    { value: 'tv', label: '电视节目模板', template: '${title}/Season ${season}/${title} - S${season}E${episode}' },
-    { value: 'movie', label: '电影模板', template: '${title}/${title}' },
-    { value: 'id', label: 'ID模板', template: '${animeId}/${episodeId}' },
-    { value: 'plex', label: 'Plex风格', template: '${title}/${title} - S${season:02d}E${episode:02d}' },
-    { value: 'emby', label: 'Emby风格', template: '${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}' },
-    { value: 'titleBase', label: '标准化标题', template: '${titleBase}/Season ${season}/${titleBase} - S${season}E${episode}' },
-    { value: 'custom_movie', label: '自定义模板-电影', template: movieDanmakuFilenameTemplate || '${title}/${episodeId}' },
-    { value: 'custom_tv', label: '自定义模板-电视节目', template: tvDanmakuFilenameTemplate || '${animeId}/${episodeId}' },
+    { value: 'tv', label: t('danmakuStorage.tmplTvTemplate'), template: '${title}/Season ${season}/${title} - S${season}E${episode}' },
+    { value: 'movie', label: t('danmakuStorage.tmplMovieTemplate'), template: '${title}/${title}' },
+    { value: 'id', label: t('danmakuStorage.tmplIdTemplate'), template: '${animeId}/${episodeId}' },
+    { value: 'plex', label: t('danmakuStorage.tmplPlexStyle'), template: '${title}/${title} - S${season:02d}E${episode:02d}' },
+    { value: 'emby', label: t('danmakuStorage.tmplEmbyStyle'), template: '${title}/${title} S${season:02d}/${title} S${season:02d}E${episode:02d}' },
+    { value: 'titleBase', label: t('danmakuStorage.tmplTitleBase'), template: '${titleBase}/Season ${season}/${titleBase} - S${season}E${episode}' },
+    { value: 'custom_movie', label: t('danmakuStorage.tmplCustomMovie'), template: movieDanmakuFilenameTemplate || '${title}/${episodeId}' },
+    { value: 'custom_tv', label: t('danmakuStorage.tmplCustomTv'), template: tvDanmakuFilenameTemplate || '${animeId}/${episodeId}' },
   ];
 
   // 多规则重命名 - 规则类型配置
   const ruleTypeOptions = [
-    { value: 'replace', label: '替换' },
-    { value: 'regex', label: '正则' },
-    { value: 'insert', label: '插入' },
-    { value: 'delete', label: '删除' },
-    { value: 'serialize', label: '序列化' },
-    { value: 'case', label: '大小写' },
-    { value: 'strip', label: '清理' },
+    { value: 'replace', label: t('danmakuStorage.ruleReplace') },
+    { value: 'regex', label: t('danmakuStorage.ruleRegex') },
+    { value: 'insert', label: t('danmakuStorage.ruleInsert') },
+    { value: 'delete', label: t('danmakuStorage.ruleDelete') },
+    { value: 'serialize', label: t('danmakuStorage.ruleSerialize') },
+    { value: 'case', label: t('danmakuStorage.ruleCase') },
+    { value: 'strip', label: t('danmakuStorage.ruleStrip') },
   ];
 
   // 应用单条规则到文件名
@@ -135,59 +121,53 @@ const DanmakuStorage = () => {
             : filename.replace(new RegExp((rule.params.search || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), rule.params.replace || '');
         case 'regex':
           return filename.replace(new RegExp(rule.params.pattern || '', 'g'), rule.params.replace || '');
-        case 'insert':
+        case 'insert': {
           if (rule.params.position === 'start') return (rule.params.text || '') + filename;
           if (rule.params.position === 'end') return filename + (rule.params.text || '');
           const pos = parseInt(rule.params.index) || 0;
           return filename.slice(0, pos) + (rule.params.text || '') + filename.slice(pos);
-        case 'delete':
+        }
+        case 'delete': {
           const deleteMode = rule.params.mode || 'text';
-
           switch (deleteMode) {
             case 'text':
-              // 删除指定文本
               return rule.params.caseSensitive
                 ? filename.split(rule.params.text || '').join('')
                 : filename.replace(new RegExp((rule.params.text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '');
-
-            case 'first':
-              // 删除前N个字符
+            case 'first': {
               const firstCount = parseInt(rule.params.count) || 0;
               return filename.slice(firstCount);
-
-            case 'last':
-              // 删除后N个字符
+            }
+            case 'last': {
               const lastCount = parseInt(rule.params.count) || 0;
               return filename.slice(0, -lastCount || undefined);
-
-            case 'toText':
-              // 从开头删除到指定文本（包含该文本）
+            }
+            case 'toText': {
               const toText = rule.params.text || '';
               if (!toText) return filename;
               const toIndex = rule.params.caseSensitive
                 ? filename.indexOf(toText)
                 : filename.toLowerCase().indexOf(toText.toLowerCase());
               return toIndex >= 0 ? filename.slice(toIndex + toText.length) : filename;
-
-            case 'fromText':
-              // 从指定文本删除到结尾（包含该文本）
+            }
+            case 'fromText': {
               const fromText = rule.params.text || '';
               if (!fromText) return filename;
               const fromIndex = rule.params.caseSensitive
                 ? filename.indexOf(fromText)
                 : filename.toLowerCase().indexOf(fromText.toLowerCase());
               return fromIndex >= 0 ? filename.slice(0, fromIndex) : filename;
-
-            case 'range':
-              // 删除指定范围（从位置X删除Y个字符）
+            }
+            case 'range': {
               const from = parseInt(rule.params.from) || 0;
               const count = parseInt(rule.params.count) || 0;
               return filename.slice(0, from) + filename.slice(from + count);
-
+            }
             default:
               return filename;
           }
-        case 'serialize':
+        }
+        case 'serialize': {
           const start = parseInt(rule.params.start) || 1;
           const step = parseInt(rule.params.step) || 1;
           const digits = parseInt(rule.params.digits) || 2;
@@ -196,22 +176,24 @@ const DanmakuStorage = () => {
           if (rule.params.position === 'start') return serialized + filename;
           if (rule.params.position === 'end') return filename + serialized;
           return serialized;
+        }
         case 'case':
           if (rule.params.mode === 'upper') return filename.toUpperCase();
           if (rule.params.mode === 'lower') return filename.toLowerCase();
           if (rule.params.mode === 'title') return filename.charAt(0).toUpperCase() + filename.slice(1).toLowerCase();
           return filename;
-        case 'strip':
+        case 'strip': {
           let result = filename;
           if (rule.params.trimSpaces) result = result.trim();
           if (rule.params.trimDuplicateSpaces) result = result.replace(/\s+/g, ' ');
           if (rule.params.chars) result = result.split(rule.params.chars).join('');
           return result;
+        }
         default:
           return filename;
       }
     } catch (e) {
-      message.error(`规则 "${ruleTypeOptions.find(r => r.value === rule.type)?.label}" 执行错误: ${e.message}`);
+      message.error(t('danmakuStorage.ruleExecError', { label: ruleTypeOptions.find(r => r.value === rule.type)?.label, error: e.message }));
       return filename;
     }
   };
@@ -225,35 +207,35 @@ const DanmakuStorage = () => {
   const handleAddRenameRule = () => {
     // 验证必填参数
     if (selectedRuleType === 'replace' && !ruleParams.search) {
-      message.warning('请输入要查找的文本');
+      message.warning(t('danmakuStorage.ruleSearchRequired'));
       return;
     }
     if (selectedRuleType === 'regex' && !ruleParams.pattern) {
-      message.warning('请输入正则表达式');
+      message.warning(t('danmakuStorage.ruleRegexRequired'));
       return;
     }
     if (selectedRuleType === 'insert') {
       if (!ruleParams.text) {
-        message.warning('请输入要插入的文本');
+        message.warning(t('danmakuStorage.ruleInsertTextRequired'));
         return;
       }
       if (ruleParams.position === 'index' && ruleParams.index === undefined) {
-        message.warning('请输入插入位置');
+        message.warning(t('danmakuStorage.ruleInsertPosRequired'));
         return;
       }
     }
     if (selectedRuleType === 'delete') {
       const mode = ruleParams.mode || 'text';
       if ((mode === 'text' || mode === 'toText' || mode === 'fromText') && !ruleParams.text) {
-        message.warning('请输入文本');
+        message.warning(t('danmakuStorage.ruleDeleteTextRequired'));
         return;
       }
       if ((mode === 'first' || mode === 'last' || mode === 'range') && !ruleParams.count) {
-        message.warning('请输入字符数');
+        message.warning(t('danmakuStorage.ruleDeleteCountRequired'));
         return;
       }
       if (mode === 'range' && ruleParams.from === undefined) {
-        message.warning('请输入起始位置');
+        message.warning(t('danmakuStorage.ruleDeleteStartRequired'));
         return;
       }
     }
@@ -266,7 +248,7 @@ const DanmakuStorage = () => {
     };
     setRenameRules(prev => [...prev, newRule]);
     setRuleParams({});
-    message.success('规则已添加');
+    message.success(t('danmakuStorage.ruleAdded'));
   };
 
   // 删除规则
@@ -319,12 +301,6 @@ const DanmakuStorage = () => {
     updatePreview();
   }, [customDanmakuPathEnabled, movieDanmakuDirectoryPath, movieDanmakuFilenameTemplate, tvDanmakuDirectoryPath, tvDanmakuFilenameTemplate]);
 
-  // 当选择类型改变时，更新默认模板
-  useEffect(() => {
-    const defaultTemplate = selectedType === 'movie' ? '${title}/${episodeId}' : '${animeId}/${episodeId}';
-    setSelectedTemplate(defaultTemplate);
-  }, [selectedType]);
-
   // 监听自定义模板变化，自动预览（防抖）
   const templatePreviewTimerRef = useRef(null);
   useEffect(() => {
@@ -349,7 +325,7 @@ const DanmakuStorage = () => {
         });
         setTemplatePreviewData(response.data);
       } catch (error) {
-        message.error('预览失败: ' + (error.message || '未知错误'));
+        message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
       } finally {
         setTemplatePreviewLoading(false);
       }
@@ -386,7 +362,7 @@ const DanmakuStorage = () => {
         });
         setMigratePreviewData(response.data);
       } catch (error) {
-        message.error('预览失败: ' + (error.message || '未知错误'));
+        message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
       } finally {
         setPreviewLoading(false);
       }
@@ -447,8 +423,18 @@ const DanmakuStorage = () => {
       } catch (e) {
         console.warn('获取点赞开关失败', e);
       }
+
+      // 获取来源标签压缩配置
+      try {
+        const sourceTagRes = await getDanmakuSourceTagEnabled();
+        setSourceTagEnabled(sourceTagRes?.data?.value === 'true');
+        const sourceTagAliasRes = await getDanmakuSourceTagAlias();
+        setSourceTagAlias(sourceTagAliasRes?.data?.value || '0');
+      } catch (e) {
+        console.warn('获取来源标签配置失败', e);
+      }
     } catch (error) {
-      message.error('加载配置失败');
+      message.error(t('danmakuStorage.loadConfigFailed'));
       console.error(error);
     } finally {
       setLoading(false);
@@ -504,11 +490,11 @@ const DanmakuStorage = () => {
     moviePreview = moviePreview.replace(/\$\{(\w+)\}/g, (match, varName) => {
       return movieExampleContext[varName] || match;
     });
-    const movieDir = movieDanmakuDirectoryPath.replace(/[\/\\]+$/, '');
-    const movieFilename = moviePreview.replace(/^[\/\\]+/, '');
+    const movieDir = movieDanmakuDirectoryPath.replace(/[/\\]+$/, '');
+    const movieFilename = moviePreview.replace(/^[/\\]+/, '');
     // 检测目录路径使用的分隔符，保持一致
     const sep = movieDir.includes('\\') ? '\\' : '/';
-    const movieFullPath = `${movieDir}${sep}${movieFilename.replace(/[\/\\]/g, sep)}${movieFilename.endsWith('.xml') ? '' : '.xml'}`;
+    const movieFullPath = `${movieDir}${sep}${movieFilename.replace(/[/\\]/g, sep)}${movieFilename.endsWith('.xml') ? '' : '.xml'}`;
     setMoviePreviewPath(movieFullPath);
 
     // 生成电视预览
@@ -525,10 +511,10 @@ const DanmakuStorage = () => {
     tvPreview = tvPreview.replace(/\$\{(\w+)\}/g, (match, varName) => {
       return tvExampleContext[varName] || match;
     });
-    const tvDir = tvDanmakuDirectoryPath.replace(/[\/\\]+$/, '');
-    const tvFilename = tvPreview.replace(/^[\/\\]+/, '');
+    const tvDir = tvDanmakuDirectoryPath.replace(/[/\\]+$/, '');
+    const tvFilename = tvPreview.replace(/^[/\\]+/, '');
     const tvSep = tvDir.includes('\\') ? '\\' : '/';
-    const tvFullPath = `${tvDir}${tvSep}${tvFilename.replace(/[\/\\]/g, tvSep)}${tvFilename.endsWith('.xml') ? '' : '.xml'}`;
+    const tvFullPath = `${tvDir}${tvSep}${tvFilename.replace(/[/\\]/g, tvSep)}${tvFilename.endsWith('.xml') ? '' : '.xml'}`;
     setTvPreviewPath(tvFullPath);
   };
 
@@ -543,9 +529,9 @@ const DanmakuStorage = () => {
       await setConfig('tvDanmakuDirectoryPath', tvDanmakuDirectoryPath);
       await setConfig('tvDanmakuFilenameTemplate', tvDanmakuFilenameTemplate);
 
-      message.success('配置保存成功');
+      message.success(t('danmakuStorage.saveSuccess'));
     } catch (error) {
-      message.error('配置保存失败');
+      message.error(t('danmakuStorage.saveFailed'));
       console.error(error);
     } finally {
       setLoading(false);
@@ -574,7 +560,7 @@ const DanmakuStorage = () => {
       setLibraryPage(page);
     } catch (error) {
       console.error('加载弹幕库失败:', error);
-      message.error('加载弹幕库失败');
+      message.error(t('danmakuStorage.loadLibraryFailed'));
     } finally {
       setLibraryLoading(false);
     }
@@ -618,7 +604,7 @@ const DanmakuStorage = () => {
   // 表格列定义
   const libraryColumns = [
     {
-      title: '标题',
+      title: t('danmakuStorage.colTitle'),
       dataIndex: 'title',
       key: 'title',
       ellipsis: true,
@@ -630,37 +616,37 @@ const DanmakuStorage = () => {
       ),
     },
     {
-      title: '类型',
+      title: t('danmakuStorage.colType'),
       dataIndex: 'type',
       key: 'type',
       width: 80,
       render: (type) => {
         const typeMap = {
-          'movie': { text: '电影', color: 'orange' },
+          'movie': { text: t('danmakuStorage.colTypeMovie'), color: 'orange' },
           'tv_series': { text: 'TV', color: 'blue' },
           'ova': { text: 'OVA', color: 'purple' },
-          'other': { text: '其他', color: 'default' },
+          'other': { text: t('danmakuStorage.colTypeOther'), color: 'default' },
         };
         const config = typeMap[type] || typeMap['other'];
         return <Tag color={config.color}>{config.text}</Tag>;
       },
     },
     {
-      title: '集数',
+      title: t('danmakuStorage.colEpisodeCount'),
       dataIndex: 'episodeCount',
       key: 'episodeCount',
       width: 70,
-      render: (count) => count ? `${count}集` : '-',
+      render: (count) => count ? t('danmakuStorage.colEpisodeCountSuffix', { count }) : '-',
     },
     {
-      title: '弹幕数',
+      title: t('danmakuStorage.colDanmakuCount'),
       dataIndex: 'sourceCount',
       key: 'sourceCount',
       width: 90,
       render: (count) => count ? count.toLocaleString() : '-',
     },
     {
-      title: '收录时间',
+      title: t('danmakuStorage.colCollectedAt'),
       dataIndex: 'createdAt',
       key: 'createdAt',
       width: 100,
@@ -671,7 +657,7 @@ const DanmakuStorage = () => {
   // 打开迁移Modal
   const handleOpenMigrateModal = async () => {
     if (selectedRows.length === 0) {
-      message.warning('请先选择要迁移的条目');
+      message.warning(t('danmakuStorage.selectItemsFirst'));
       return;
     }
     setMigratePreviewData(null); // 清空预览数据
@@ -687,38 +673,17 @@ const DanmakuStorage = () => {
         });
         setMigratePreviewData(response.data);
       } catch (error) {
-        message.error('预览失败: ' + (error.message || '未知错误'));
+        message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
       } finally {
         setPreviewLoading(false);
       }
     }
   };
 
-  // 预览迁移
-  const handlePreviewMigrate = async () => {
-    if (!migrateTargetPath) {
-      message.warning('请输入目标目录');
-      return;
-    }
-    setPreviewLoading(true);
-    try {
-      const response = await previewMigrateDanmaku({
-        animeIds: selectedRowKeys,
-        targetPath: migrateTargetPath,
-        keepStructure: migrateKeepStructure,
-      });
-      setMigratePreviewData(response.data);
-    } catch (error) {
-      message.error('预览失败: ' + (error.message || '未知错误'));
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
   // 打开重命名Modal
   const handleOpenRenameModal = async () => {
     if (selectedRows.length === 0) {
-      message.warning('请先选择要重命名的条目');
+      message.warning(t('danmakuStorage.selectItemsFirstRename'));
       return;
     }
     // 重置多规则状态
@@ -751,7 +716,7 @@ const DanmakuStorage = () => {
       }));
       setRenamePreviewData({ totalCount: items.length, previewItems: previewItems.slice(0, 20) });
     } catch (error) {
-      message.error('获取文件列表失败: ' + (error.message || '未知错误'));
+      message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
       setRenamePreviewData(null);
       setRenameOriginalItems([]);
     } finally {
@@ -762,7 +727,7 @@ const DanmakuStorage = () => {
   // 打开模板转换Modal
   const handleOpenTemplateModal = async () => {
     if (selectedRows.length === 0) {
-      message.warning('请先选择要转换的条目');
+      message.warning(t('danmakuStorage.selectItemsFirstConvert'));
       return;
     }
     setTemplatePreviewData(null);
@@ -777,24 +742,7 @@ const DanmakuStorage = () => {
       });
       setTemplatePreviewData(response.data);
     } catch (error) {
-      message.error('预览失败: ' + (error.message || '未知错误'));
-    } finally {
-      setTemplatePreviewLoading(false);
-    }
-  };
-
-  // 预览应用模板
-  const handlePreviewTemplate = async () => {
-    setTemplatePreviewLoading(true);
-    try {
-      const response = await previewDanmakuTemplate({
-        animeIds: selectedRowKeys,
-        templateType: templateTarget,
-        customTemplate: templateTarget === 'custom' ? customTemplate : undefined,
-      });
-      setTemplatePreviewData(response.data);
-    } catch (error) {
-      message.error('预览失败: ' + (error.message || '未知错误'));
+      message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
     } finally {
       setTemplatePreviewLoading(false);
     }
@@ -803,7 +751,7 @@ const DanmakuStorage = () => {
   // 执行迁移操作
   const handleExecuteMigrate = async () => {
     if (!migrateTargetPath) {
-      message.warning('请输入目标目录');
+      message.warning(t('danmakuStorage.targetDirRequired'));
       return;
     }
     setOperationLoading(true);
@@ -816,9 +764,9 @@ const DanmakuStorage = () => {
       });
       const result = response.data;
       if (result.success) {
-        message.success(`迁移完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
+        message.success(t('danmakuStorage.migrateSuccess', { success: result.successCount, skipped: result.skippedCount }));
       } else {
-        message.warning(`迁移部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
+        message.warning(t('danmakuStorage.migratePartial', { success: result.successCount, failed: result.failedCount, skipped: result.skippedCount }));
       }
       setMigrateModalVisible(false);
       setMigratePreviewData(null);
@@ -826,7 +774,7 @@ const DanmakuStorage = () => {
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
     } catch (error) {
-      message.error('迁移失败: ' + (error.message || '未知错误'));
+      message.error(t('danmakuStorage.migrateFailed', { error: error.message || t('common.unknown') }));
     } finally {
       setOperationLoading(false);
     }
@@ -835,12 +783,12 @@ const DanmakuStorage = () => {
   // 执行重命名操作 - 使用多规则系统
   const handleExecuteRename = async () => {
     if (renameRules.length === 0) {
-      message.warning('请先添加重命名规则');
+      message.warning(t('danmakuStorage.rulesRequired'));
       return;
     }
 
     if (renameOriginalItems.length === 0) {
-      message.warning('没有找到需要重命名的文件');
+      message.warning(t('danmakuStorage.noFilesToRename'));
       return;
     }
 
@@ -865,9 +813,9 @@ const DanmakuStorage = () => {
       });
       const result = response.data;
       if (result.success) {
-        message.success(`重命名完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
+        message.success(t('danmakuStorage.renameSuccess', { success: result.successCount, skipped: result.skippedCount }));
       } else {
-        message.warning(`重命名部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
+        message.warning(t('danmakuStorage.renamePartial', { success: result.successCount, failed: result.failedCount, skipped: result.skippedCount }));
       }
       setRenameModalVisible(false);
       setRenameRules([]);
@@ -875,7 +823,7 @@ const DanmakuStorage = () => {
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
     } catch (error) {
-      message.error('重命名失败: ' + (error.message || '未知错误'));
+      message.error(t('danmakuStorage.renameFailed', { error: error.message || t('common.unknown') }));
     } finally {
       setOperationLoading(false);
     }
@@ -892,9 +840,9 @@ const DanmakuStorage = () => {
       });
       const result = response.data;
       if (result.success) {
-        message.success(`模板应用完成: 成功 ${result.successCount} 个，跳过 ${result.skippedCount} 个`);
+        message.success(t('danmakuStorage.templateSuccess', { success: result.successCount, skipped: result.skippedCount }));
       } else {
-        message.warning(`模板应用部分完成: 成功 ${result.successCount} 个，失败 ${result.failedCount} 个，跳过 ${result.skippedCount} 个`);
+        message.warning(t('danmakuStorage.templatePartial', { success: result.successCount, failed: result.failedCount, skipped: result.skippedCount }));
       }
       setTemplateModalVisible(false);
       setTemplatePreviewData(null);
@@ -902,27 +850,9 @@ const DanmakuStorage = () => {
       setSelectedRows([]);
       loadLibraryItems(libraryPage, libraryKeyword, libraryTypeFilter);
     } catch (error) {
-      message.error('模板应用失败: ' + (error.message || '未知错误'));
+      message.error(t('danmakuStorage.templateFailed', { error: error.message || t('common.unknown') }));
     } finally {
       setOperationLoading(false);
-    }
-  };
-
-  // 应用模板
-  const applyTemplate = () => {
-    if (!selectedTemplate) {
-      message.warning('请选择一个模板');
-      return;
-    }
-
-    if (selectedType === 'movie') {
-      setMovieDanmakuFilenameTemplate(selectedTemplate);
-      form.setFieldValue('movieDanmakuFilenameTemplate', selectedTemplate);
-      message.success('已应用电影模板');
-    } else {
-      setTvDanmakuFilenameTemplate(selectedTemplate);
-      form.setFieldValue('tvDanmakuFilenameTemplate', selectedTemplate);
-      message.success('已应用电视模板');
     }
   };
 
@@ -937,11 +867,11 @@ const DanmakuStorage = () => {
     if (browserTarget === 'movie') {
       setMovieDanmakuDirectoryPath(path);
       form.setFieldValue('movieDanmakuDirectoryPath', path);
-      message.success(`已选择电影存储目录: ${path}`);
+      message.success(t('danmakuStorage.movieDirSelected', { path }));
     } else if (browserTarget === 'tv') {
       setTvDanmakuDirectoryPath(path);
       form.setFieldValue('tvDanmakuDirectoryPath', path);
-      message.success(`已选择电视存储目录: ${path}`);
+      message.success(t('danmakuStorage.tvDirSelected', { path }));
     } else if (browserTarget === 'migrate') {
       // 迁移目录选择后自动预览
       setMigrateTargetPath(path);
@@ -956,7 +886,7 @@ const DanmakuStorage = () => {
         });
         setMigratePreviewData(response.data);
       } catch (error) {
-        message.error('预览失败: ' + (error.message || '未知错误'));
+        message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
       } finally {
         setPreviewLoading(false);
       }
@@ -968,7 +898,7 @@ const DanmakuStorage = () => {
   return (
     <Card>
       <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <TabPane tab="存储配置" key="config">
+        <TabPane tab={t('danmakuStorage.tabConfig')} key="config">
           <Form
             form={form}
             layout="vertical"
@@ -976,7 +906,7 @@ const DanmakuStorage = () => {
           >
             {/* 启用自定义弹幕路径 */}
         <Form.Item
-          label="启用自定义弹幕路径"
+          label={t('danmakuStorage.labelCustomPath')}
           name="customDanmakuPathEnabled"
         >
           <div>
@@ -988,9 +918,9 @@ const DanmakuStorage = () => {
                 // 自动保存开关状态
                 try {
                   await setConfig('customDanmakuPathEnabled', checked ? 'true' : 'false');
-                  message.success(checked ? '已启用自定义弹幕路径' : '已禁用自定义弹幕路径');
+                  message.success(checked ? t('danmakuStorage.pathEnabledSaved') : t('danmakuStorage.pathDisabledSaved'));
                 } catch (error) {
-                  message.error('保存失败');
+                  message.error(t('danmakuStorage.pathSaveFailed'));
                   console.error(error);
                   // 恢复原状态
                   setCustomDanmakuPathEnabled(!checked);
@@ -999,7 +929,7 @@ const DanmakuStorage = () => {
               }}
             />
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-              启用后将使用下方配置的自定义路径和命名模板
+              {t('danmakuStorage.descCustomPath')}
             </div>
           </div>
         </Form.Item>
@@ -1013,9 +943,9 @@ const DanmakuStorage = () => {
               key: 'variables',
               label: (
                 <Space>
-                  <span>📂 可用变量</span>
+                  <span>{t('danmakuStorage.labelAvailableVars')}</span>
                   <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                    (点击插入到光标处)
+                    {t('danmakuStorage.hintClickInsert')}
                   </span>
                 </Space>
               ),
@@ -1067,7 +997,7 @@ const DanmakuStorage = () => {
                     ))}
                   </div>
                   <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px' }}>
-                    💡 电影模板中使用季/集变量时将输出为空
+                    {t('danmakuStorage.hintMovieVarNote')}
                   </div>
                 </div>
               )
@@ -1082,13 +1012,13 @@ const DanmakuStorage = () => {
           items={[
             {
               key: 'movie',
-              label: <span>🎬 电影/剧场版</span>,
+              label: <span>{t('danmakuStorage.tabMovie')}</span>,
               children: (
                 <div>
 
         {/* 电影存储目录 */}
         <Form.Item
-          label="电影存储目录"
+          label={t('danmakuStorage.labelMovieDir')}
           name="movieDanmakuDirectoryPath"
         >
           <div>
@@ -1108,18 +1038,18 @@ const DanmakuStorage = () => {
                 onClick={() => handleBrowseDirectory('movie')}
                 disabled={!customDanmakuPathEnabled}
               >
-                浏览
+                {t('danmakuStorage.btnBrowse')}
               </Button>
             </div>
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-              电影/剧场版弹幕文件的根目录
+              {t('danmakuStorage.descMovieDir')}
             </div>
           </div>
         </Form.Item>
 
         {/* 电影命名模板 */}
         <Form.Item
-          label="命名模板"
+          label={t('danmakuStorage.labelNamingTemplate')}
           name="movieDanmakuFilenameTemplate"
         >
           <div>
@@ -1143,11 +1073,11 @@ const DanmakuStorage = () => {
                 }}
                 disabled={!customDanmakuPathEnabled}
               >
-                快速模板
+                {t('danmakuStorage.btnQuickTemplate')}
               </Button>
             </div>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
-              💡 支持子目录如 {'${title}/${episodeId}'}，.xml后缀会自动拼接
+              {t('danmakuStorage.hintSubdirSupport', { example: '${title}/${episodeId}' })}
             </div>
           </div>
         </Form.Item>
@@ -1155,7 +1085,7 @@ const DanmakuStorage = () => {
         {/* 电影路径预览 */}
         <Form.Item label={
           <Space>
-            👀 路径预览
+            {t('danmakuStorage.labelPathPreview')}
           </Space>
         }>
           <div style={{
@@ -1168,10 +1098,10 @@ const DanmakuStorage = () => {
             wordBreak: 'break-all',
             color: 'var(--color-text)'
           }}>
-            {moviePreviewPath || '请配置模板以查看预览'}
+            {moviePreviewPath || t('danmakuStorage.pathPreviewPlaceholder')}
           </div>
           <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
-            📝 示例: 铃芽之旅 (2022)
+            {t('danmakuStorage.moviePreviewExample')}
           </div>
         </Form.Item>
                 </div>
@@ -1179,12 +1109,12 @@ const DanmakuStorage = () => {
             },
             {
               key: 'tv',
-              label: <span>📺 电视节目</span>,
+              label: <span>{t('danmakuStorage.tabTv')}</span>,
               children: (
                 <div>
         {/* 电视存储目录 */}
         <Form.Item
-          label="存储目录"
+          label={t('danmakuStorage.labelTvDir')}
           name="tvDanmakuDirectoryPath"
         >
           <div>
@@ -1204,18 +1134,18 @@ const DanmakuStorage = () => {
                 onClick={() => handleBrowseDirectory('tv')}
                 disabled={!customDanmakuPathEnabled}
               >
-                浏览
+                {t('danmakuStorage.btnBrowse')}
               </Button>
             </div>
             <div style={{ color: '#999', fontSize: '12px', marginTop: '4px' }}>
-              电视节目弹幕文件的根目录
+              {t('danmakuStorage.descTvDir')}
             </div>
           </div>
         </Form.Item>
 
         {/* 电视命名模板 */}
         <Form.Item
-          label="命名模板"
+          label={t('danmakuStorage.labelNamingTemplate')}
           name="tvDanmakuFilenameTemplate"
         >
           <div>
@@ -1239,11 +1169,11 @@ const DanmakuStorage = () => {
                 }}
                 disabled={!customDanmakuPathEnabled}
               >
-                快速模板
+                {t('danmakuStorage.btnQuickTemplate')}
               </Button>
             </div>
             <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
-              💡 支持子目录如 {'${animeId}/${episodeId}'}，.xml后缀会自动拼接
+              {t('danmakuStorage.hintSubdirSupport', { example: '${animeId}/${episodeId}' })}
             </div>
           </div>
         </Form.Item>
@@ -1251,7 +1181,7 @@ const DanmakuStorage = () => {
         {/* 电视路径预览 */}
         <Form.Item label={
           <Space>
-            👀 路径预览
+            {t('danmakuStorage.labelPathPreview')}
           </Space>
         }>
           <div style={{
@@ -1264,10 +1194,10 @@ const DanmakuStorage = () => {
             wordBreak: 'break-all',
             color: 'var(--color-text)'
           }}>
-            {tvPreviewPath || '请配置模板以查看预览'}
+            {tvPreviewPath || t('danmakuStorage.pathPreviewPlaceholder')}
           </div>
           <div style={{ color: 'var(--color-text-secondary)', fontSize: '12px', marginTop: '8px' }}>
-            📝 示例: 葬送的芙莉莲 S01E01
+            {t('danmakuStorage.tvPreviewExample')}
           </div>
         </Form.Item>
                 </div>
@@ -1290,24 +1220,26 @@ const DanmakuStorage = () => {
                 fontWeight: 500
               }}
             >
-              保存配置
+              {t('danmakuStorage.btnSaveConfig')}
             </Button>
           </Form>
         </TabPane>
 
         {/* 迁移与重命名 Tab */}
-        <TabPane tab="迁移与重命名" key="migrate">
+        <TabPane tab={t('danmakuStorage.tabMigrate')} key="migrate">
           {/* 筛选条件 */}
-          <Card size="small" style={{ marginBottom: 16 }}>
+          {/* why：挂 storage-inner-card——内嵌小卡在玻璃/壁纸主题下会叠一层磨砂白膜，
+              CSS 按主题置透明，与全局卡片定论一致 */}
+          <Card size="small" className="storage-inner-card" style={{ marginBottom: 16 }}>
             <Space wrap>
-              <span>类型:</span>
+              <span>{t('danmakuStorage.labelType')}</span>
               <Select
                 value={libraryTypeFilter}
                 onChange={(v) => { setLibraryTypeFilter(v); setSelectedRowKeys([]); setSelectedRows([]); }}
                 style={{ width: 100 }}
               >
-                <Option value="all">全部</Option>
-                <Option value="movie">电影</Option>
+                <Option value="all">{t('danmakuStorage.optAll')}</Option>
+                <Option value="movie">{t('danmakuStorage.optMovie')}</Option>
                 <Option value="tv">TV/OVA</Option>
               </Select>
               <Popover
@@ -1317,7 +1249,7 @@ const DanmakuStorage = () => {
                   <div style={{ width: 250 }}>
                     <Space direction="vertical" style={{ width: '100%' }}>
                       <Input
-                        placeholder="搜索标题..."
+                        placeholder={t('danmakuStorage.searchPlaceholder')}
                         value={libraryKeyword}
                         onChange={(e) => setLibraryKeyword(e.target.value)}
                         onPressEnter={handleLibrarySearch}
@@ -1332,7 +1264,7 @@ const DanmakuStorage = () => {
                             handleLibrarySearch();
                           }}
                         >
-                          清除
+                          {t('danmakuStorage.btnClear')}
                         </Button>
                         <Button
                           type="primary"
@@ -1340,7 +1272,7 @@ const DanmakuStorage = () => {
                           icon={<SearchOutlined />}
                           onClick={handleLibrarySearch}
                         >
-                          搜索
+                          {t('danmakuStorage.btnSearch')}
                         </Button>
                       </div>
                     </Space>
@@ -1348,11 +1280,11 @@ const DanmakuStorage = () => {
                 )}
               >
                 <Button icon={<SearchOutlined />}>
-                  搜索{libraryKeyword && <span className="ml-1 text-blue-500">({libraryKeyword})</span>}
+                  {libraryKeyword ? t('danmakuStorage.btnSearchWithKeyword', { keyword: libraryKeyword }) : t('danmakuStorage.btnSearch')}
                 </Button>
               </Popover>
               <Button icon={<ReloadOutlined />} onClick={handleLibraryRefresh}>
-                刷新
+                {t('danmakuStorage.btnRefresh')}
               </Button>
             </Space>
           </Card>
@@ -1369,7 +1301,7 @@ const DanmakuStorage = () => {
               pageSize: libraryPageSize,
               total: libraryTotal,
               showSizeChanger: true,
-              showTotal: (total) => `共 ${total} 个条目`,
+              showTotal: (total) => t('danmakuStorage.totalItems', { total }),
               onChange: (page, pageSize) => {
                 setLibraryPageSize(pageSize);
                 loadLibraryItems(page, libraryKeyword, libraryTypeFilter);
@@ -1380,14 +1312,14 @@ const DanmakuStorage = () => {
           />
 
           {/* 选择状态栏 */}
-          <Card size="small" style={{ marginTop: 16, marginBottom: 16 }}>
+          <Card size="small" className="storage-inner-card" style={{ marginTop: 16, marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
               <Space>
                 <Tag color={selectedRows.length > 0 ? 'blue' : 'default'}>
-                  已选择 {selectedRows.length} 个条目
+                  {t('danmakuStorage.selectedCount', { count: selectedRows.length })}
                 </Tag>
                 {selectedRows.length > 0 && (
-                  <Tag color="cyan">含 {selectedEpisodeCount} 个弹幕文件</Tag>
+                  <Tag color="cyan">{t('danmakuStorage.selectedEpisodes', { count: selectedEpisodeCount })}</Tag>
                 )}
               </Space>
               <Space>
@@ -1396,44 +1328,44 @@ const DanmakuStorage = () => {
                   setSelectedRowKeys(allKeys);
                   setSelectedRows(libraryItems);
                 }}>
-                  全选当页
+                  {t('danmakuStorage.btnSelectAll')}
                 </Button>
                 <Button size="small" onClick={() => { setSelectedRowKeys([]); setSelectedRows([]); }}>
-                  清空选择
+                  {t('danmakuStorage.btnClearSelection')}
                 </Button>
               </Space>
             </div>
           </Card>
 
           {/* 批量操作按钮 */}
-          <Card size="small">
+          <Card size="small" className="storage-inner-card">
             <Space wrap>
-              <Tooltip title="将选中条目的弹幕文件迁移到新目录">
+              <Tooltip title={t('danmakuStorage.btnMigrateTo')}>
                 <Button
                   icon={<SwapOutlined />}
                   onClick={handleOpenMigrateModal}
                   disabled={selectedRows.length === 0}
                 >
-                  迁移到...
+                  {t('danmakuStorage.btnMigrateTo')}
                 </Button>
               </Tooltip>
-              <Tooltip title="批量重命名选中条目的弹幕文件">
+              <Tooltip title={t('danmakuStorage.btnBatchRename')}>
                 <Button
                   icon={<EditOutlined />}
                   onClick={handleOpenRenameModal}
                   disabled={selectedRows.length === 0}
                 >
-                  批量重命名
+                  {t('danmakuStorage.btnBatchRename')}
                 </Button>
               </Tooltip>
-              <Tooltip title="按新的存储模板重新组织弹幕文件">
+              <Tooltip title={t('danmakuStorage.btnApplyTemplate')}>
                 <Button
                   type="primary"
                   icon={<SyncOutlined />}
                   onClick={handleOpenTemplateModal}
                   disabled={selectedRows.length === 0}
                 >
-                  应用新模板
+                  {t('danmakuStorage.btnApplyTemplate')}
                 </Button>
               </Tooltip>
             </Space>
@@ -1441,16 +1373,16 @@ const DanmakuStorage = () => {
 
           {/* 迁移Modal */}
           <Modal
-            title="批量迁移"
+            title={t('danmakuStorage.titleMigrateModal')}
             open={migrateModalVisible}
             onCancel={() => { setMigrateModalVisible(false); setMigratePreviewData(null); }}
             onOk={handleExecuteMigrate}
             confirmLoading={operationLoading}
-            okText="确认迁移"
+            okText={t('danmakuStorage.btnConfirmMigrate')}
             width={700}
           >
             <div style={{ marginBottom: 16 }}>
-              <div style={{ marginBottom: 8 }}>目标目录:</div>
+              <div style={{ marginBottom: 8 }}>{t('danmakuStorage.labelTargetDir')}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={migrateTargetPath}
@@ -1463,7 +1395,7 @@ const DanmakuStorage = () => {
                   icon={<FolderOpenOutlined />}
                   onClick={() => handleBrowseDirectory('migrate')}
                 >
-                  浏览
+                  {t('danmakuStorage.btnBrowse')}
                 </Button>
               </div>
             </div>
@@ -1472,50 +1404,50 @@ const DanmakuStorage = () => {
                 checked={migrateKeepStructure}
                 onChange={(e) => setMigrateKeepStructure(e.target.checked)}
               >
-                保持原目录结构
+                {t('danmakuStorage.labelKeepStructure')}
               </Checkbox>
             </div>
             <div style={{ marginBottom: 16 }}>
-              <div style={{ marginBottom: 8 }}>冲突处理:</div>
+              <div style={{ marginBottom: 8 }}>{t('danmakuStorage.labelConflict')}</div>
               <Select
                 value={migrateConflictAction}
                 onChange={setMigrateConflictAction}
                 style={{ width: 200 }}
               >
-                <Option value="skip">跳过</Option>
-                <Option value="overwrite">覆盖</Option>
-                <Option value="rename">重命名</Option>
+                <Option value="skip">{t('danmakuStorage.optSkip')}</Option>
+                <Option value="overwrite">{t('danmakuStorage.optOverwrite')}</Option>
+                <Option value="rename">{t('danmakuStorage.optRenameConflict')}</Option>
               </Select>
             </div>
 
             {/* 预览区域 */}
             {migratePreviewData && (
               <>
-                <Divider orientation="left">迁移预览</Divider>
+                <Divider orientation="left">{t('danmakuStorage.dividerMigratePreview')}</Divider>
                 <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {migratePreviewData.previewItems.map((item, index) => (
                     <div key={index} style={{ marginBottom: 12, padding: 8, background: 'var(--color-hover)', borderRadius: 4 }}>
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
-                        {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
+                        {item.animeTitle} {item.episodeIndex ? t('danmakuStorage.templatePreviewEpisode', { ep: item.episodeIndex }) : ''}
                       </div>
                       <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
                         <div style={{ marginBottom: 4 }}>
-                          <Text type="secondary">原路径: </Text>
+                          <Text type="secondary">{t('danmakuStorage.labelOldPath')}</Text>
                           <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
                         </div>
                         <div>
-                          <Text type="secondary">新路径: </Text>
+                          <Text type="secondary">{t('danmakuStorage.labelNewPath')}</Text>
                           <Text code style={{ fontSize: 13, color: '#52c41a' }}>{item.newPath}</Text>
                         </div>
                         {!item.exists && (
-                          <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
+                          <Tag color="warning" style={{ marginTop: 4 }}>{t('danmakuStorage.tagFileNotExist')}</Tag>
                         )}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div style={{ marginTop: 8, color: 'var(--color-text-secondary)' }}>
-                  共 <strong>{migratePreviewData.totalCount}</strong> 个文件将被迁移
+                  {t('danmakuStorage.migratePreviewTotal', { count: migratePreviewData.totalCount })}
                 </div>
               </>
             )}
@@ -1524,9 +1456,9 @@ const DanmakuStorage = () => {
               <>
                 <Divider />
                 <div style={{ color: '#666' }}>
-                  将迁移 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+                  {t('danmakuStorage.migrateWillMigrate', { items: selectedRows.length, episodes: selectedEpisodeCount })}
                   <div style={{ marginTop: 8, fontSize: 12 }}>
-                    <Text type="secondary">点击"预览"按钮查看详细迁移路径</Text>
+                    <Text type="secondary">{t('danmakuStorage.migrateClickPreview')}</Text>
                   </div>
                 </div>
               </>
@@ -1535,7 +1467,7 @@ const DanmakuStorage = () => {
 
           {/* 重命名Modal - 多规则系统 */}
           <Modal
-            title="批量重命名"
+            title={t('danmakuStorage.titleRenameModal')}
             open={renameModalVisible}
             onCancel={() => {
               setRenameModalVisible(false);
@@ -1546,14 +1478,14 @@ const DanmakuStorage = () => {
             }}
             onOk={handleExecuteRename}
             confirmLoading={operationLoading}
-            okText="确认重命名"
+            okText={t('danmakuStorage.btnConfirmRename')}
             okButtonProps={{ disabled: renameRules.length === 0 }}
             width={800}
           >
             {/* 规则添加区域 */}
             <div style={{ marginBottom: 16, padding: 12, background: 'var(--color-hover)', borderRadius: 8 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>添加规则:</span>
+                <span style={{ color: 'var(--color-text-secondary)', fontSize: 13 }}>{t('danmakuStorage.labelAddRule')}</span>
                 <Select
                   value={selectedRuleType}
                   onChange={(v) => { setSelectedRuleType(v); setRuleParams({}); }}
@@ -1564,33 +1496,33 @@ const DanmakuStorage = () => {
                 {/* 替换规则参数 */}
                 {selectedRuleType === 'replace' && (
                   <>
-                    <Input size="small" value={ruleParams.search || ''} onChange={(e) => setRuleParams(p => ({ ...p, search: e.target.value }))} placeholder="查找" style={{ width: 120 }} />
+                    <Input size="small" value={ruleParams.search || ''} onChange={(e) => setRuleParams(p => ({ ...p, search: e.target.value }))} placeholder={t('danmakuStorage.placeholderSearch')} style={{ width: 120 }} />
                     <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
-                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
-                    <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>区分大小写</Checkbox>
+                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder={t('danmakuStorage.placeholderReplace')} style={{ width: 120 }} />
+                    <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>{t('danmakuStorage.labelCaseSensitive')}</Checkbox>
                   </>
                 )}
                 {/* 正则规则参数 */}
                 {selectedRuleType === 'regex' && (
                   <>
-                    <Input size="small" value={ruleParams.pattern || ''} onChange={(e) => setRuleParams(p => ({ ...p, pattern: e.target.value }))} placeholder="正则表达式" style={{ width: 150 }} />
+                    <Input size="small" value={ruleParams.pattern || ''} onChange={(e) => setRuleParams(p => ({ ...p, pattern: e.target.value }))} placeholder={t('danmakuStorage.placeholderRegex')} style={{ width: 150 }} />
                     <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
-                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder="替换为" style={{ width: 120 }} />
+                    <Input size="small" value={ruleParams.replace || ''} onChange={(e) => setRuleParams(p => ({ ...p, replace: e.target.value }))} placeholder={t('danmakuStorage.placeholderReplace')} style={{ width: 120 }} />
                   </>
                 )}
                 {/* 插入规则参数 */}
                 {selectedRuleType === 'insert' && (
                   <>
-                    <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder="插入文本" style={{ width: 120 }} />
+                    <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder={t('danmakuStorage.placeholderInsertText')} style={{ width: 120 }} />
                     <Select
                       size="small"
                       value={ruleParams.position || 'start'}
                       onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
                       style={{ width: 100 }}
                       options={[
-                        { value: 'start', label: '开头' },
-                        { value: 'end', label: '结尾' },
-                        { value: 'index', label: '指定位置' }
+                        { value: 'start', label: t('danmakuStorage.optInsertStart') },
+                        { value: 'end', label: t('danmakuStorage.optInsertEnd') },
+                        { value: 'index', label: t('danmakuStorage.optInsertIndex') }
                       ]}
                     />
                     {ruleParams.position === 'index' && (
@@ -1599,9 +1531,9 @@ const DanmakuStorage = () => {
                         value={ruleParams.index || 0}
                         onChange={(v) => setRuleParams(p => ({ ...p, index: v }))}
                         min={0}
-                        placeholder="位置"
+                        placeholder={t('danmakuStorage.placeholderPosition')}
                         style={{ width: 80 }}
-                        addonAfter="位"
+                        addonAfter={t('danmakuStorage.addonAfterChars')}
                       />
                     )}
                   </>
@@ -1615,112 +1547,43 @@ const DanmakuStorage = () => {
                       onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))}
                       style={{ width: 140 }}
                       options={[
-                        { value: 'text', label: '删除文本' },
-                        { value: 'first', label: '删除前N个字符' },
-                        { value: 'last', label: '删除后N个字符' },
-                        { value: 'toText', label: '从开头删到文本' },
-                        { value: 'fromText', label: '从文本删到结尾' },
-                        { value: 'range', label: '删除范围' },
+                        { value: 'text', label: t('danmakuStorage.optDelText') },
+                        { value: 'first', label: t('danmakuStorage.optDelFirst') },
+                        { value: 'last', label: t('danmakuStorage.optDelLast') },
+                        { value: 'toText', label: t('danmakuStorage.optDelToText') },
+                        { value: 'fromText', label: t('danmakuStorage.optDelFromText') },
+                        { value: 'range', label: t('danmakuStorage.optDelRange') },
                       ]}
                     />
-                    {/* 删除指定文本 */}
                     {(ruleParams.mode === 'text' || !ruleParams.mode) && (
                       <>
-                        <Input
-                          size="small"
-                          value={ruleParams.text || ''}
-                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
-                          placeholder="要删除的文本"
-                          style={{ width: 120 }}
-                        />
-                        <Checkbox
-                          checked={ruleParams.caseSensitive || false}
-                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
-                        >
-                          区分大小写
-                        </Checkbox>
+                        <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder={t('danmakuStorage.placeholderDelText')} style={{ width: 120 }} />
+                        <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>{t('danmakuStorage.labelCaseSensitive')}</Checkbox>
                       </>
                     )}
-                    {/* 删除前N个字符 */}
                     {ruleParams.mode === 'first' && (
-                      <Input
-                        size="small"
-                        type="number"
-                        value={ruleParams.count || ''}
-                        onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
-                        placeholder="字符数"
-                        style={{ width: 100 }}
-                      />
+                      <Input size="small" type="number" value={ruleParams.count || ''} onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))} placeholder={t('danmakuStorage.placeholderCount')} style={{ width: 100 }} />
                     )}
-                    {/* 删除后N个字符 */}
                     {ruleParams.mode === 'last' && (
-                      <Input
-                        size="small"
-                        type="number"
-                        value={ruleParams.count || ''}
-                        onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
-                        placeholder="字符数"
-                        style={{ width: 100 }}
-                      />
+                      <Input size="small" type="number" value={ruleParams.count || ''} onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))} placeholder={t('danmakuStorage.placeholderCount')} style={{ width: 100 }} />
                     )}
-                    {/* 从开头删到文本 */}
                     {ruleParams.mode === 'toText' && (
                       <>
-                        <Input
-                          size="small"
-                          value={ruleParams.text || ''}
-                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
-                          placeholder="删除到此文本"
-                          style={{ width: 120 }}
-                        />
-                        <Checkbox
-                          checked={ruleParams.caseSensitive || false}
-                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
-                        >
-                          区分大小写
-                        </Checkbox>
+                        <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder={t('danmakuStorage.placeholderToText')} style={{ width: 120 }} />
+                        <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>{t('danmakuStorage.labelCaseSensitive')}</Checkbox>
                       </>
                     )}
-                    {/* 从文本删到结尾 */}
                     {ruleParams.mode === 'fromText' && (
                       <>
-                        <Input
-                          size="small"
-                          value={ruleParams.text || ''}
-                          onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))}
-                          placeholder="从此文本删除"
-                          style={{ width: 120 }}
-                        />
-                        <Checkbox
-                          checked={ruleParams.caseSensitive || false}
-                          onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}
-                        >
-                          区分大小写
-                        </Checkbox>
+                        <Input size="small" value={ruleParams.text || ''} onChange={(e) => setRuleParams(p => ({ ...p, text: e.target.value }))} placeholder={t('danmakuStorage.placeholderFromText')} style={{ width: 120 }} />
+                        <Checkbox checked={ruleParams.caseSensitive || false} onChange={(e) => setRuleParams(p => ({ ...p, caseSensitive: e.target.checked }))}>{t('danmakuStorage.labelCaseSensitive')}</Checkbox>
                       </>
                     )}
-                    {/* 删除范围 */}
                     {ruleParams.mode === 'range' && (
                       <>
-                        <span style={{ fontSize: 13 }}>从位置</span>
-                        <Input
-                          size="small"
-                          type="number"
-                          value={ruleParams.from || ''}
-                          onChange={(e) => setRuleParams(p => ({ ...p, from: e.target.value }))}
-                          placeholder="起始位置"
-                          style={{ width: 90 }}
-                        />
-                        <span style={{ fontSize: 13 }}>删除</span>
-                        <Input
-                          size="small"
-                          type="number"
-                          value={ruleParams.count || ''}
-                          onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))}
-                          placeholder="字符数"
-                          style={{ width: 80 }}
-                        />
-                        <span style={{ fontSize: 13 }}>个字符</span>
+                        <span style={{ fontSize: 13 }}>{t('danmakuStorage.placeholderStart')}</span>
+                        <Input size="small" type="number" value={ruleParams.from || ''} onChange={(e) => setRuleParams(p => ({ ...p, from: e.target.value }))} placeholder={t('danmakuStorage.placeholderStart')} style={{ width: 90 }} />
+                        <Input size="small" type="number" value={ruleParams.count || ''} onChange={(e) => setRuleParams(p => ({ ...p, count: e.target.value }))} placeholder={t('danmakuStorage.placeholderCount')} style={{ width: 80 }} />
                       </>
                     )}
                   </>
@@ -1728,74 +1591,32 @@ const DanmakuStorage = () => {
                 {/* 序列化规则参数 */}
                 {selectedRuleType === 'serialize' && (
                   <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'var(--color-hover)', borderRadius: '6px' }}>
-                    {/* 第一行：格式结构 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>格式结构:</span>
-                      <Input
-                        size="small"
-                        value={ruleParams.prefix || ''}
-                        onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))}
-                        placeholder="第"
-                        style={{ width: 120 }}
-                        addonBefore="前缀"
-                      />
+                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>{t('danmakuStorage.labelSerializeFormat')}</span>
+                      <Input size="small" value={ruleParams.prefix || ''} onChange={(e) => setRuleParams(p => ({ ...p, prefix: e.target.value }))} placeholder={t('danmakuStorage.serializePlaceholderPrefix')} style={{ width: 120 }} addonBefore={t('danmakuStorage.addonSerializePrefix')} />
                       <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>+</span>
-                      <span style={{ padding: '2px 8px', background: '#e6f7ff', color: '#1890ff', borderRadius: '4px', fontSize: 12, fontFamily: 'monospace' }}>
-                        序号
-                      </span>
+                      <span style={{ padding: '2px 8px', background: '#e6f7ff', color: '#1890ff', borderRadius: '4px', fontSize: 12, fontFamily: 'monospace' }}>{t('danmakuStorage.serialNumber')}</span>
                       <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>+</span>
-                      <Input
-                        size="small"
-                        value={ruleParams.suffix || ''}
-                        onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))}
-                        placeholder="集"
-                        style={{ width: 120 }}
-                        addonBefore="后缀"
-                      />
+                      <Input size="small" value={ruleParams.suffix || ''} onChange={(e) => setRuleParams(p => ({ ...p, suffix: e.target.value }))} placeholder={t('danmakuStorage.serializePlaceholderSuffix')} style={{ width: 120 }} addonBefore={t('danmakuStorage.addonSerializeSuffix')} />
                     </div>
-                    {/* 第二行：序号参数 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>序号设置:</span>
-                      <InputNumber
-                        size="small"
-                        value={ruleParams.start || 1}
-                        onChange={(v) => setRuleParams(p => ({ ...p, start: v }))}
-                        min={0}
-                        placeholder="起始"
-                        style={{ width: 130 }}
-                        addonBefore="起始值"
-                      />
-                      <InputNumber
-                        size="small"
-                        value={ruleParams.digits || 2}
-                        onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))}
-                        min={1}
-                        max={5}
-                        placeholder="位数"
-                        style={{ width: 130 }}
-                        addonBefore="补零位数"
-                      />
-                      <Select
-                        size="small"
-                        value={ruleParams.position || 'replace'}
-                        onChange={(v) => setRuleParams(p => ({ ...p, position: v }))}
-                        style={{ width: 100 }}
-                        options={[
-                          { value: 'start', label: '添加到开头' },
-                          { value: 'end', label: '添加到结尾' },
-                          { value: 'replace', label: '替换文件名' }
-                        ]}
-                      />
+                      <span style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>{t('danmakuStorage.labelSerializeSettings')}</span>
+                      <InputNumber size="small" value={ruleParams.start || 1} onChange={(v) => setRuleParams(p => ({ ...p, start: v }))} min={0} style={{ width: 130 }} addonBefore={t('danmakuStorage.addonSerializeStart')} />
+                      <InputNumber size="small" value={ruleParams.digits || 2} onChange={(v) => setRuleParams(p => ({ ...p, digits: v }))} min={1} max={5} style={{ width: 130 }} addonBefore={t('danmakuStorage.addonSerializeDigits')} />
+                      <Select size="small" value={ruleParams.position || 'replace'} onChange={(v) => setRuleParams(p => ({ ...p, position: v }))} style={{ width: 100 }} options={[
+                        { value: 'start', label: t('danmakuStorage.optSerializeStart') },
+                        { value: 'end', label: t('danmakuStorage.optSerializeEnd') },
+                        { value: 'replace', label: t('danmakuStorage.optSerializeReplace') }
+                      ]} />
                     </div>
-                    {/* 第三行：效果预览 */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>效果预览:</span>
+                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>{t('danmakuStorage.labelSerializePreview')}</span>
                       <span style={{ fontSize: 13, fontFamily: 'monospace', color: '#1890ff', fontWeight: '600' }}>
                         {
                           ruleParams.position === 'start'
-                            ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}原文件名`
+                            ? `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}${t('danmakuStorage.serializeOriginalName')}`
                             : ruleParams.position === 'end'
-                            ? `原文件名${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
+                            ? `${t('danmakuStorage.serializeOriginalName')}${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
                             : `${ruleParams.prefix || ''}${String(ruleParams.start || 1).padStart(ruleParams.digits || 2, '0')}${ruleParams.suffix || ''}`
                         }
                       </span>
@@ -1804,17 +1625,17 @@ const DanmakuStorage = () => {
                 )}
                 {/* 大小写规则参数 */}
                 {selectedRuleType === 'case' && (
-                  <Select size="small" value={ruleParams.mode || 'upper'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 120 }} options={[{ value: 'upper', label: '全大写' }, { value: 'lower', label: '全小写' }, { value: 'title', label: '首字母大写' }]} />
+                  <Select size="small" value={ruleParams.mode || 'upper'} onChange={(v) => setRuleParams(p => ({ ...p, mode: v }))} style={{ width: 120 }} options={[{ value: 'upper', label: t('danmakuStorage.optCaseUpper') }, { value: 'lower', label: t('danmakuStorage.optCaseLower') }, { value: 'title', label: t('danmakuStorage.optCaseTitle') }]} />
                 )}
                 {/* 清理规则参数 */}
                 {selectedRuleType === 'strip' && (
                   <>
-                    <Checkbox checked={ruleParams.trimSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimSpaces: e.target.checked }))}>首尾空格</Checkbox>
-                    <Checkbox checked={ruleParams.trimDuplicateSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimDuplicateSpaces: e.target.checked }))}>重复空格</Checkbox>
-                    <Input size="small" value={ruleParams.chars || ''} onChange={(e) => setRuleParams(p => ({ ...p, chars: e.target.value }))} placeholder="删除字符" style={{ width: 80 }} />
+                    <Checkbox checked={ruleParams.trimSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimSpaces: e.target.checked }))}>{t('danmakuStorage.labelTrimSpaces')}</Checkbox>
+                    <Checkbox checked={ruleParams.trimDuplicateSpaces || false} onChange={(e) => setRuleParams(p => ({ ...p, trimDuplicateSpaces: e.target.checked }))}>{t('danmakuStorage.labelTrimDuplicateSpaces')}</Checkbox>
+                    <Input size="small" value={ruleParams.chars || ''} onChange={(e) => setRuleParams(p => ({ ...p, chars: e.target.value }))} placeholder={t('danmakuStorage.placeholderDeleteChars')} style={{ width: 80 }} />
                   </>
                 )}
-                <Button type="primary" size="small" onClick={handleAddRenameRule}>+ 添加</Button>
+                <Button type="primary" size="small" onClick={handleAddRenameRule}>{t('danmakuStorage.btnAddRule')}</Button>
               </div>
             </div>
 
@@ -1829,29 +1650,22 @@ const DanmakuStorage = () => {
                     <span style={{ fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {rule.type === 'replace' && `"${rule.params.search}" → "${rule.params.replace || ''}"`}
                       {rule.type === 'regex' && `/${rule.params.pattern}/ → "${rule.params.replace || ''}"`}
-                      {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? '开头' : '结尾'})`}
+                      {rule.type === 'insert' && `"${rule.params.text}" (${rule.params.position === 'start' ? t('danmakuStorage.ruleDescInsertStart') : t('danmakuStorage.ruleDescInsertEnd')})`}
                       {rule.type === 'delete' && (() => {
                         const mode = rule.params.mode || 'text';
                         switch (mode) {
-                          case 'text':
-                            return `删除文本 "${rule.params.text}"`;
-                          case 'first':
-                            return `删除前 ${rule.params.count || 0} 个字符`;
-                          case 'last':
-                            return `删除后 ${rule.params.count || 0} 个字符`;
-                          case 'toText':
-                            return `从开头删到 "${rule.params.text}"`;
-                          case 'fromText':
-                            return `从 "${rule.params.text}" 删到结尾`;
-                          case 'range':
-                            return `从位置 ${rule.params.from || 0} 删除 ${rule.params.count || 0} 个字符`;
-                          default:
-                            return '删除';
+                          case 'text': return t('danmakuStorage.ruleDescDelText', { text: rule.params.text });
+                          case 'first': return t('danmakuStorage.ruleDescDelFirst', { count: rule.params.count || 0 });
+                          case 'last': return t('danmakuStorage.ruleDescDelLast', { count: rule.params.count || 0 });
+                          case 'toText': return t('danmakuStorage.ruleDescDelToText', { text: rule.params.text });
+                          case 'fromText': return t('danmakuStorage.ruleDescDelFromText', { text: rule.params.text });
+                          case 'range': return t('danmakuStorage.ruleDescDelRange', { from: rule.params.from || 0, count: rule.params.count || 0 });
+                          default: return t('danmakuStorage.ruleDescDel');
                         }
                       })()}
                       {rule.type === 'serialize' && `${rule.params.prefix || ''}{${String(rule.params.start || 1).padStart(rule.params.digits || 2, '0')}}${rule.params.suffix || ''}`}
-                      {rule.type === 'case' && (rule.params.mode === 'upper' ? '全大写' : rule.params.mode === 'lower' ? '全小写' : '首字母大写')}
-                      {rule.type === 'strip' && '清理空格/字符'}
+                      {rule.type === 'case' && (rule.params.mode === 'upper' ? t('danmakuStorage.optCaseUpper') : rule.params.mode === 'lower' ? t('danmakuStorage.optCaseLower') : t('danmakuStorage.optCaseTitle'))}
+                      {rule.type === 'strip' && t('danmakuStorage.ruleDescCaseStrip')}
                     </span>
                     <Button type="text" danger size="small" onClick={() => handleDeleteRenameRule(rule.id)}>🗑</Button>
                   </div>
@@ -1862,7 +1676,7 @@ const DanmakuStorage = () => {
             {/* 预览开关和操作 */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13 }}>👁 预览效果</span>
+                <span style={{ fontSize: 13 }}>{t('danmakuStorage.labelPreviewToggle')}</span>
                 <Switch
                   checked={isRenamePreviewMode}
                   onChange={(checked) => {
@@ -1892,14 +1706,14 @@ const DanmakuStorage = () => {
                 />
               </div>
               <Text type="secondary" style={{ fontSize: 12 }}>
-                将重命名 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{renameOriginalItems.length}</strong> 个弹幕文件
+                {t('danmakuStorage.renameWillRename', { items: selectedRows.length, files: renameOriginalItems.length })}
               </Text>
             </div>
 
             {/* 预览区域 */}
             {isRenamePreviewMode && renamePreviewData && (
               <>
-                <Divider orientation="left" style={{ margin: '8px 0' }}>重命名预览 (显示前20条)</Divider>
+                <Divider orientation="left" style={{ margin: '8px 0' }}>{t('danmakuStorage.dividerRenamePreview')}</Divider>
                 <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {renamePreviewData.previewItems.map((item, index) => (
                     <div key={index} style={{ marginBottom: 8, padding: 6, background: 'var(--color-hover)', borderRadius: 4 }}>
@@ -1912,7 +1726,7 @@ const DanmakuStorage = () => {
                   ))}
                 </div>
                 <div style={{ marginTop: 8, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-                  共 <strong>{renamePreviewData.totalCount}</strong> 个文件将被重命名
+                  {t('danmakuStorage.renamePreviewTotal', { count: renamePreviewData.totalCount })}
                 </div>
               </>
             )}
@@ -1920,21 +1734,21 @@ const DanmakuStorage = () => {
 
           {/* 模板转换Modal */}
           <Modal
-            title="应用新模板"
+            title={t('danmakuStorage.titleTemplateModal')}
             open={templateModalVisible}
             onCancel={() => setTemplateModalVisible(false)}
             onOk={handleExecuteTemplate}
             confirmLoading={operationLoading}
-            okText="确认应用"
+            okText={t('danmakuStorage.btnConfirmTemplate')}
             width={isMobile ? '95%' : 1350}
           >
             <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
-              <Text type="secondary">💡 将选中条目的弹幕文件按新的存储模板重新组织命名</Text>
+              <Text type="secondary">{t('danmakuStorage.descTemplateModal')}</Text>
             </div>
 
             {/* 可用参数按钮组 */}
             <div style={{ marginBottom: 16 }}>
-              <div style={{ marginBottom: 8, color: '#666' }}>可用参数（点击插入）:</div>
+              <div style={{ marginBottom: 8, color: '#666' }}>{t('danmakuStorage.labelAvailableParams')}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {(templateVariables || []).map((v) => (
                   <Tooltip
@@ -1960,7 +1774,7 @@ const DanmakuStorage = () => {
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <div style={{ marginBottom: 8 }}>目标模板:</div>
+              <div style={{ marginBottom: 8 }}>{t('danmakuStorage.labelTargetTemplate')}</div>
               <Row gutter={12}>
                 <Col span={isMobile ? 24 : 8}>
                   <Select
@@ -1972,7 +1786,6 @@ const DanmakuStorage = () => {
                         if (preset) {
                           setCustomTemplate(preset.template);
                         }
-                        // 选择预设模板后自动预览
                         setTemplatePreviewLoading(true);
                         try {
                           const response = await previewDanmakuTemplate({
@@ -1982,7 +1795,7 @@ const DanmakuStorage = () => {
                           });
                           setTemplatePreviewData(response.data);
                         } catch (error) {
-                          message.error('预览失败: ' + (error.message || '未知错误'));
+                          message.error(t('danmakuStorage.previewFailed', { error: error.message || t('common.unknown') }));
                         } finally {
                           setTemplatePreviewLoading(false);
                         }
@@ -1993,7 +1806,7 @@ const DanmakuStorage = () => {
                     {presetTemplates.map(p => (
                       <Option key={p.value} value={p.value}>{p.label}</Option>
                     ))}
-                    <Option value="custom">自定义模板</Option>
+                    <Option value="custom">{t('danmakuStorage.optCustomTemplate')}</Option>
                   </Select>
                 </Col>
                 <Col span={isMobile ? 24 : 16}>
@@ -2003,44 +1816,44 @@ const DanmakuStorage = () => {
                       setCustomTemplate(e.target.value);
                       setTemplateTarget('custom');
                     }}
-                    placeholder="输入自定义模板，如: ${title}/Season ${season}/${title} - S${season}E${episode}"
+                    placeholder={t('danmakuStorage.placeholderCustomTemplate')}
                     style={{ fontFamily: 'monospace' }}
                   />
                 </Col>
               </Row>
               <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
-                当前模板: <Text code style={{ fontSize: 12 }}>{customTemplate || presetTemplates.find(p => p.value === templateTarget)?.template || ''}.xml</Text>
+                {t('danmakuStorage.currentTemplate')}<Text code style={{ fontSize: 12 }}>{customTemplate || presetTemplates.find(p => p.value === templateTarget)?.template || ''}.xml</Text>
               </div>
             </div>
 
             {/* 预览区域 */}
             {templatePreviewData && (
               <>
-                <Divider orientation="left">转换预览</Divider>
+                <Divider orientation="left">{t('danmakuStorage.dividerTemplatePreview')}</Divider>
                 <div style={{ maxHeight: 300, overflowY: 'auto', border: '1px solid var(--color-border)', borderRadius: 4, padding: 8 }}>
                   {templatePreviewData.previewItems.map((item, index) => (
                     <div key={index} style={{ marginBottom: 12, padding: 8, background: 'var(--color-hover)', borderRadius: 4 }}>
                       <div style={{ fontWeight: 500, marginBottom: 4 }}>
-                        {item.animeTitle} {item.episodeIndex ? `第${item.episodeIndex}集` : ''}
+                        {item.animeTitle} {item.episodeIndex ? t('danmakuStorage.templatePreviewEpisode', { ep: item.episodeIndex }) : ''}
                       </div>
                       <div style={{ fontSize: 13, color: 'var(--color-text-secondary)' }}>
                         <div style={{ marginBottom: 4 }}>
-                          <Text type="secondary">原路径: </Text>
+                          <Text type="secondary">{t('danmakuStorage.labelOldPath')}</Text>
                           <Text code style={{ fontSize: 13 }}>{item.oldPath}</Text>
                         </div>
                         <div>
-                          <Text type="secondary">新路径: </Text>
+                          <Text type="secondary">{t('danmakuStorage.labelNewPath')}</Text>
                           <Text code style={{ fontSize: 13, color: '#52c41a' }}>{item.newPath}</Text>
                         </div>
                         {!item.exists && (
-                          <Tag color="warning" style={{ marginTop: 4 }}>文件不存在</Tag>
+                          <Tag color="warning" style={{ marginTop: 4 }}>{t('danmakuStorage.tagFileNotExist')}</Tag>
                         )}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div style={{ marginTop: 8, color: 'var(--color-text-secondary)' }}>
-                  共 <strong>{templatePreviewData.totalCount}</strong> 个文件将被转换
+                  {t('danmakuStorage.templatePreviewTotal', { count: templatePreviewData.totalCount })}
                 </div>
               </>
             )}
@@ -2049,42 +1862,85 @@ const DanmakuStorage = () => {
               <>
                 <Divider />
                 <div style={{ color: 'var(--color-text-secondary)' }}>
-                  将转换 <strong>{selectedRows.length}</strong> 个条目，共 <strong>{selectedEpisodeCount}</strong> 个弹幕文件
+                  {t('danmakuStorage.templateWillConvert', { items: selectedRows.length, episodes: selectedEpisodeCount })}
                   <div style={{ marginTop: 8, fontSize: 12 }}>
-                    <Text type="secondary">选择模板后将自动显示预览</Text>
+                    <Text type="secondary">{t('danmakuStorage.templateClickPreview')}</Text>
                   </div>
                 </div>
               </>
             )}
             {templatePreviewLoading && (
               <div style={{ textAlign: 'center', padding: 20, color: 'var(--color-text-secondary)' }}>
-                正在加载预览...
+                {t('danmakuStorage.templateLoadingPreview')}
               </div>
             )}
           </Modal>
         </TabPane>
 
-        <TabPane tab="设置" key="settings">
+        <TabPane tab={t('danmakuStorage.tabSettings')} key="settings">
           <div style={{ maxWidth: 600 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-              <span>获取点赞</span>
+              <span>{t('danmakuStorage.labelFetchLikes')}</span>
               <Switch
                 checked={likesFetchEnabled}
                 onChange={async (checked) => {
                   setLikesFetchEnabled(checked);
                   try {
                     await setDanmakuLikesFetchEnabled({ value: checked ? 'true' : 'false' });
-                    message.success(checked ? '已启用获取点赞' : '已关闭获取点赞');
+                    message.success(checked ? t('danmakuStorage.likesEnabled') : t('danmakuStorage.likesDisabled'));
                   } catch (error) {
-                    message.error('保存失败');
+                    message.error(t('danmakuStorage.likesSaveFailed'));
                     setLikesFetchEnabled(!checked);
                   }
                 }}
               />
             </div>
-            <div style={{ color: '#999', fontSize: 12 }}>
-              启用后，下载弹幕时会获取并存储点赞信息到弹幕文件中。关闭后新下载的弹幕将不包含点赞数据。
+            <div style={{ color: '#999', fontSize: 12, marginBottom: 20 }}>
+              {t('danmakuStorage.descFetchLikes')}
             </div>
+
+            <Divider style={{ margin: '0 0 16px 0' }} />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+              <span>{t('danmakuStorage.labelSourceTagCompress')}</span>
+              <Switch
+                checked={sourceTagEnabled}
+                onChange={async (checked) => {
+                  setSourceTagEnabled(checked);
+                  try {
+                    await setDanmakuSourceTagEnabled({ value: checked ? 'true' : 'false' });
+                    message.success(checked ? t('danmakuStorage.sourceTagEnabled') : t('danmakuStorage.sourceTagDisabled'));
+                  } catch (error) {
+                    message.error(t('danmakuStorage.sourceTagSaveFailed'));
+                    setSourceTagEnabled(!checked);
+                  }
+                }}
+              />
+            </div>
+            <div style={{ color: '#999', fontSize: 12, marginBottom: 12 }}>
+              {t('danmakuStorage.descSourceTagCompress')}
+            </div>
+            {sourceTagEnabled && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13 }}>{t('danmakuStorage.labelSourceTagAlias')}</span>
+                <Input
+                  size="small"
+                  style={{ width: 120 }}
+                  value={sourceTagAlias}
+                  placeholder="0"
+                  onChange={e => setSourceTagAlias(e.target.value)}
+                  onBlur={async () => {
+                    try {
+                      await setDanmakuSourceTagAlias({ value: sourceTagAlias || '0' });
+                      message.success(t('danmakuStorage.sourceTagAliasSaved'));
+                    } catch (error) {
+                      message.error(t('danmakuStorage.sourceTagSaveFailed'));
+                    }
+                  }}
+                />
+                <span style={{ color: '#999', fontSize: 12 }}>{t('danmakuStorage.descSourceTagAlias')}</span>
+              </div>
+            )}
           </div>
         </TabPane>
       </Tabs>
@@ -2098,14 +1954,14 @@ const DanmakuStorage = () => {
 
       {/* 快速模板选择弹窗 */}
       <Modal
-        title="📋 选择模板"
+        title={t('danmakuStorage.titleQuickTemplate')}
         open={quickTemplateModalVisible}
         onCancel={() => setQuickTemplateModalVisible(false)}
         footer={null}
         width={500}
       >
         <div style={{ marginBottom: '16px', color: 'var(--color-text-secondary)', fontSize: '13px' }}>
-          选择一个预设模板，将自动填充到{quickTemplateType === 'movie' ? '电影' : '电视节目'}命名模板中
+          {quickTemplateType === 'movie' ? t('danmakuStorage.descQuickTemplateMovie') : t('danmakuStorage.descQuickTemplateTv')}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {presetTemplates.filter(t => !t.value.startsWith('custom_')).map((tpl) => (
@@ -2129,7 +1985,7 @@ const DanmakuStorage = () => {
                   form.setFieldValue('tvDanmakuFilenameTemplate', tpl.template);
                 }
                 setQuickTemplateModalVisible(false);
-                message.success(`已应用模板: ${tpl.label}`);
+                message.success(t('danmakuStorage.templateApplied', { label: tpl.label }));
               }}
             >
               <div style={{ fontWeight: 500 }}>{tpl.label}</div>

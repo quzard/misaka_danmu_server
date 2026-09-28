@@ -6,15 +6,55 @@
 
 import asyncio
 import hashlib
+import importlib.util
+import inspect
 import json
 import logging
+import shutil
+import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from src.services import DownloadTaskManager, DownloadTask, TaskStatus, get_download_task_manager
+from src._version import APP_VERSION
+from src.api.ui.scraper_resources import (
+    BACKUP_DIR,
+    _build_base_url as build_url,
+    _download_and_extract_release,
+    _fetch_github_release_asset,
+    _fetch_gitee_release_asset,
+    _get_deferred_overlay_dir,
+    _get_scrapers_dir as get_dir,
+    _is_docker_environment,
+    apply_deferred_overlay,
+    backup_scrapers,
+    get_platform_info as get_info,
+    get_platform_key as get_key,
+    parse_gitee_url as parse_gt,
+    parse_github_url as parse_gh,
+    restore_scrapers,
+)
+import src.api.ui.scraper_resources as scraper_resources_module
+from src.db import CacheManager, get_db_session_factory
+from src.scrapers.base import BaseScraper
+from src.services import DownloadTask, DownloadTaskManager, get_download_task_manager
+# why：src.services 顶层的 TaskStatus 是主任务管理器的中文枚举（失败/已完成/运行中，且无 CANCELLED），
+#      下载任务用的是 download_task_manager 里的英文枚举（failed/completed/cancelled）。
+#      从顶层导入会写入中文状态，导致 SSE 终态判断（比对英文值）永不命中而无限推送 progress。
+#      必须直接从 download_task_manager 导入，禁止改回 from src.services import TaskStatus。
+from src.services.download_task_manager import TaskStatus
+from src.services.scraper_manager import _version_satisfies
+from src.utils.docker_utils import (
+    get_current_container_id,
+    is_docker_socket_available,
+    is_running_in_docker,
+    restart_container,
+)
+from src.utils.scraper_version_manager import ScraperVersionManager
+from src.utils.version_comparator import VersionComparator
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +73,6 @@ SCRAPERS_VERSIONS_FILE = SCRAPERS_DIR / "versions.json"
 
 def _get_temp_download_base_dir() -> Path:
     """获取临时下载目录的基础路径"""
-    from src.api.ui.scraper_resources import _is_docker_environment
     if _is_docker_environment():
         return Path("/app/config/temp_downloads")
     else:
@@ -42,38 +81,194 @@ def _get_temp_download_base_dir() -> Path:
 
 def _get_scrapers_dir() -> Path:
     """获取弹幕源目录"""
-    from src.api.ui.scraper_resources import _get_scrapers_dir as get_dir
     return get_dir()
 
 
 def get_platform_key() -> str:
     """获取平台标识"""
-    from src.api.ui.scraper_resources import get_platform_key as get_key
     return get_key()
 
 
 def get_platform_info() -> Dict[str, str]:
     """获取平台信息"""
-    from src.api.ui.scraper_resources import get_platform_info as get_info
     return get_info()
 
 
 def parse_github_url(url: str):
     """解析 GitHub URL"""
-    from src.api.ui.scraper_resources import parse_github_url as parse_gh
     return parse_gh(url)
 
 
 def parse_gitee_url(url: str):
     """解析 Gitee URL"""
-    from src.api.ui.scraper_resources import parse_gitee_url as parse_gt
     return parse_gt(url)
 
 
 def _build_base_url(repo_info, repo_url: str, gitee_info, branch: str = "main") -> str:
     """构建基础 URL"""
-    from src.api.ui.scraper_resources import _build_base_url as build_url
     return build_url(repo_info, repo_url, gitee_info, branch)
+
+
+async def check_scraper_compat_in_dir(check_dir: Path) -> dict:
+    """从目录中逐个 import .so/.pyd，检查 min_server_version 类属性。
+    与 scraper_manager.load_and_sync_scrapers 使用相同机制，是部署前最可靠的校验点。
+    返回不兼容的 {provider_name: required_version} 字典。
+
+    why：提到模块级供手动下载与自动更新两条链路共用——此前只有手动路径做预检，
+    自动更新直接下载后重启，导致"重启后才发现全部源不满足版本"（源全废）。
+    """
+
+    def _probe_single(file_path: Path):
+        """在线程中同步加载单个 .so，返回 (provider_name, min_ver) 或 None。
+        why：exec_module 是同步阻塞调用，直接在事件循环中执行会阻塞所有 SSE 推送，
+        导致前端始终收到 status='运行中' 的旧消息，无法感知任务结束。
+        """
+        module_stem = file_path.stem.split('.')[0]
+        spec = importlib.util.spec_from_file_location(
+            f"_compat_probe_{module_stem}", file_path
+        )
+        if not spec or not spec.loader:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        for _, obj in inspect.getmembers(mod, inspect.isclass):
+            if not (issubclass(obj, BaseScraper) and obj is not BaseScraper):
+                continue
+            provider_name = getattr(obj, 'provider_name', None)
+            source_min_ver = getattr(obj, 'min_server_version', None) or ''
+            if source_min_ver and not _version_satisfies(APP_VERSION, source_min_ver):
+                if provider_name:
+                    return (provider_name, source_min_ver)
+        return None
+
+    incompatible: dict = {}
+    for file_path in sorted(check_dir.iterdir()):
+        if not (file_path.name.endswith(".so") or file_path.name.endswith(".pyd")):
+            continue
+        module_stem = file_path.stem.split('.')[0]
+        if module_stem.startswith("_") or module_stem == "base":
+            continue
+        if file_path.stat().st_size == 0:
+            continue
+        try:
+            result = await asyncio.to_thread(_probe_single, file_path)
+            if result:
+                provider_name, source_min_ver = result
+                incompatible[provider_name] = source_min_ver
+        except Exception as e:
+            # 无法 import 的模块跳过，不阻断整体校验
+            logger.debug(f"check_scraper_compat_in_dir 跳过 {file_path.name}: {e}")
+    return incompatible
+
+
+async def ensure_manifest_in_dir(check_dir: Path) -> Optional[Dict[str, Any]]:
+    """确保目录内存在权威文件；缺失时从 legacy 两份配置整合生成并落盘。
+
+    生成即整合完整数据（版本/哈希/架构/大小），之后该目录的一切操作只读权威文件。
+    """
+    manifest = await asyncio.to_thread(ScraperVersionManager.load_manifest, check_dir)
+    if manifest and ScraperVersionManager.validate_manifest(manifest):
+        return manifest
+
+    logger.info(f"{check_dir.name} 内无有效权威文件，从 legacy 配置整合生成")
+    manifest = await asyncio.to_thread(
+        ScraperVersionManager.extract_manifest_from_legacy,
+        check_dir / "package.json",
+        check_dir / "versions.json",
+        check_dir,
+    )
+    if manifest and manifest.get("sources"):
+        await asyncio.to_thread(ScraperVersionManager.save_manifest, manifest, check_dir)
+        return manifest
+
+    logger.warning(f"{check_dir.name} 无法生成权威文件（无源文件或 legacy 配置）")
+    return None
+
+
+async def verify_scraper_package(
+    check_dir: Path,
+    expected_version: Optional[str] = None,
+) -> Tuple[bool, List[str]]:
+    """对目录（通常是解压出的临时目录）做部署前四项校验。
+
+    校验项：架构 / 各源版本 / 最低可用版本 / 哈希。
+    全部通过才应继续备份与部署流程。
+
+    Returns:
+        (是否通过, 失败原因列表)
+    """
+    errors: List[str] = []
+
+    if not check_dir.exists():
+        return False, [f"目录不存在: {check_dir}"]
+
+    manifest = await ensure_manifest_in_dir(check_dir)
+    if not manifest:
+        return False, ["缺少权威文件且无法生成"]
+
+    platform_key = ScraperVersionManager.get_platform_key()
+    expected_arch = ScraperVersionManager.normalize_arch(platform_key)
+    sources = manifest.get("sources") or {}
+
+    # ── 1. 包版本与远程声明一致 ──
+    pkg_version = ScraperVersionManager.get_version_from_manifest(manifest)
+    if expected_version and pkg_version:
+        if pkg_version.lstrip('v') != expected_version.lstrip('v'):
+            errors.append(
+                f"包版本不符：声明 {expected_version}，实际 {pkg_version}"
+            )
+
+    # ── 2. 包级最低可用版本 ──
+    min_server = manifest.get("min_server_version")
+    if min_server and not _version_satisfies(APP_VERSION, min_server):
+        errors.append(
+            f"服务器版本不足：当前 {APP_VERSION}，包要求 >= {min_server}"
+        )
+
+    binaries = [p for p in sorted(check_dir.iterdir())
+                if ScraperVersionManager.is_scraper_binary(p)]
+    if not binaries:
+        return False, ["目录内无弹幕源二进制文件"]
+
+    # ── 3. 架构与哈希（逐文件，均以权威文件为基准） ──
+    def _verify_files() -> List[str]:
+        problems: List[str] = []
+        for file_path in binaries:
+            name = file_path.name.split('.')[0]
+            entry = sources.get(name) or {}
+
+            actual_arch = ScraperVersionManager.detect_binary_arch(file_path)
+            if actual_arch and expected_arch:
+                if ScraperVersionManager.normalize_arch(actual_arch) != expected_arch:
+                    problems.append(
+                        f"{name} 架构不符：本机 {expected_arch}，文件 {actual_arch}"
+                    )
+                    continue
+
+            expected_hash = None
+            hashes = entry.get("hashes")
+            if isinstance(hashes, dict):
+                expected_hash = hashes.get(platform_key)
+            if not expected_hash:
+                expected_hash = entry.get("hash")
+
+            if expected_hash:
+                actual_hash = ScraperVersionManager.calculate_file_hash(file_path)
+                if actual_hash != expected_hash:
+                    problems.append(
+                        f"{name} 哈希不符：期望 {expected_hash[:12]}…，实际 {actual_hash[:12]}…"
+                    )
+        return problems
+
+    errors.extend(await asyncio.to_thread(_verify_files))
+
+    # ── 4. 各源 min_server_version（import 探测，最可靠） ──
+    incompatible = await check_scraper_compat_in_dir(check_dir)
+    if incompatible:
+        detail = ", ".join(f"{k} 需要 >= {v}" for k, v in sorted(incompatible.items()))
+        errors.append(f"{len(incompatible)} 个源版本要求不满足（{detail}）")
+
+    return (not errors), errors
 
 
 class ScraperDownloadExecutor:
@@ -111,8 +306,6 @@ class ScraperDownloadExecutor:
             need_restart: 是否需要重启容器
             extra_info: 额外信息
         """
-        from src.db import CacheManager
-        from src.db import get_db_session_factory
 
         try:
             cache_manager = CacheManager(get_db_session_factory())
@@ -147,9 +340,6 @@ class ScraperDownloadExecutor:
         Returns:
             临时目录路径，失败返回 None
         """
-        import shutil
-        from src.db import CacheManager
-        from src.db import get_db_session_factory
 
         if not downloaded_files:
             return None
@@ -206,9 +396,6 @@ class ScraperDownloadExecutor:
         Returns:
             过滤后仍需下载的文件列表
         """
-        import shutil
-        from src.db import CacheManager
-        from src.db import get_db_session_factory
 
         try:
             cache_manager = CacheManager(get_db_session_factory())
@@ -288,9 +475,6 @@ class ScraperDownloadExecutor:
 
     async def _cleanup_temp_dir(self, task_id: str):
         """清理指定任务的临时目录"""
-        import shutil
-        from src.db import CacheManager
-        from src.db import get_db_session_factory
 
         try:
             temp_base_dir = _get_temp_download_base_dir()
@@ -390,14 +574,6 @@ class ScraperDownloadExecutor:
 
     async def _do_full_replace(self, repo_info, gitee_info, headers, proxy_to_use, platform_key):
         """全量替换模式"""
-        from src.api.ui.scraper_resources import (
-            _fetch_github_release_asset,
-            _fetch_gitee_release_asset,
-            _download_and_extract_release,
-            backup_scrapers,
-            restore_scrapers,
-        )
-
         self._log("使用全量替换模式")
 
         # 获取 Release 资产信息
@@ -408,7 +584,8 @@ class ScraperDownloadExecutor:
                 gitee_info=gitee_info,
                 platform_key=platform_key,
                 headers=headers,
-                proxy=proxy_to_use
+                proxy=proxy_to_use,
+                tag_or_branch=self.task.branch  # 传递用户选择的版本/分支
             )
         elif repo_info:
             self._log("正在从 GitHub Releases 获取压缩包...")
@@ -416,7 +593,8 @@ class ScraperDownloadExecutor:
                 repo_info=repo_info,
                 platform_key=platform_key,
                 headers=headers,
-                proxy=proxy_to_use
+                proxy=proxy_to_use,
+                tag_or_branch=self.task.branch  # 传递用户选择的版本/分支
             )
 
         if not asset_info:
@@ -424,12 +602,42 @@ class ScraperDownloadExecutor:
 
         self._log(f"找到压缩包: {asset_info['filename']} (版本: {asset_info['version']})")
 
-        # 备份当前文件
-        self._log("正在备份当前弹幕源...")
-        await backup_scrapers(self.current_user)
-        self._log("备份完成")
+        # 前置版本校验：在备份/下载之前先取 {base_url}/package.json（几KB）核验 min_server_version。
+        # why：全量路径仅先拿到 asset_info（文件名/版本），版本约束在 package.json 里；
+        #      下载整包+备份耗时可达数分钟，若版本不满足应在任何磁盘写入之前快速报错。
+        #      与 _do_incremental_download 中第一步就校验 min_server_version 的做法对齐。
+        # 额外用途：全量包（tar.gz）本身不内置 package.json，把这里拉到的内容保存为
+        # remote_pre_pkg，后续传给 _persist_new_version_to_backup 作兜底，确保生成的
+        # scraper_manifest.json 即使在包内缺文件时也能正确写入版本信息，避免循环重启。
+        self._log("正在预检弹幕源包服务器版本要求...")
+        remote_pre_pkg = None  # 保存网络拉取的 package.json，供后续兜底
+        try:
+            pre_base_url = _build_base_url(repo_info, self.task.repo_url or "", gitee_info, self.task.branch)
+            remote_pre_pkg = await self._fetch_package_json(
+                f"{pre_base_url}/package.json", headers, proxy_to_use,
+                httpx.Timeout(15.0, read=15.0),
+            )
+            if remote_pre_pkg:
+                # min_server_version 与 min_fetchable_version 语义相同：
+                # 都表示"服务器版本必须 >= 该值才能使用本弹幕源包"。
+                # 两者取其一即可阻断下载（优先 min_server_version，回退 min_fetchable_version）。
+                _pre_min = remote_pre_pkg.get("min_server_version") or remote_pre_pkg.get("min_fetchable_version")
+                if _pre_min:
+                    if not _version_satisfies(APP_VERSION, _pre_min):
+                        raise ValueError(
+                            f"弹幕源包要求服务器版本 >= {_pre_min}，"
+                            f"当前版本 {APP_VERSION}，请先升级服务器再下载"
+                        )
+                    self._log(f"✓ 版本预检通过（要求 >= {_pre_min}，当前 {APP_VERSION}）")
+                else:
+                    self._log("✓ 版本预检通过（无最低版本要求）")
+        except ValueError:
+            raise  # 版本不满足直接上抛，不做备份/下载
+        except Exception as _pre_err:
+            # 预检网络失败不阻断：解压后从 manifest 读取 min_server_version 仍会做后置校验
+            self._log(f"版本预检跳过（网络异常: {_pre_err}）", "debug")
 
-        # 下载并解压
+        # 下载并解压（先不备份，等版本校验通过后再备份）
         scrapers_dir = _get_scrapers_dir()
         self._log("正在下载压缩包...")
 
@@ -438,30 +646,47 @@ class ScraperDownloadExecutor:
             scrapers_dir=scrapers_dir,
             headers=headers,
             proxy=proxy_to_use,
-            progress_callback=self._log_async
+            progress_callback=self._log_async,
+            # 只解压到临时目录 + 持久化到 backup，不覆盖运行中的 .so。
+            # why: 对齐逐文件更新路径的做法——覆盖 .so 之后进程随时可能 segfault，
+            # 必须等版本信息写完、SSE 终态发完，才在紧邻重启处执行覆盖。
+            defer_overlay=True,
+            # 预检阶段拉到的远端 package.json，作为生成权威文件时的兜底数据源。
+            # why: 全量包内只有 versions.json（无 resources/多平台哈希），缺 package.json
+            # 时各源的完整信息无从补齐，需要用远端内容填补。
+            remote_package_json=remote_pre_pkg,
         )
 
         if not success:
-            # 下载失败，还原备份
-            self._log("全量替换失败，正在还原备份...", "error")
-            await restore_scrapers(self.current_user, self.scraper_manager)
-            self._log("已还原备份")
+            # 下载失败，直接返回（此时还未备份，无需还原）
+            self._log("全量替换失败", "error")
             raise ValueError("全量替换失败")
 
-        # 下载成功，更新 versions.json
-        self._log("正在更新版本信息...")
-        full_replace_min_ver = await self._update_versions_json(asset_info, scrapers_dir, platform_key)
+        # 下载成功（新版已解压到临时目录并持久化到 backup，运行目录尚未被覆盖）
+        pending_dir = _get_deferred_overlay_dir(scrapers_dir)
+
+        # 从权威文件读取最低服务器版本要求
+        # why：原先此处调用 _update_versions_json 重新生成 package.json / versions.json 并
+        # 同步进备份目录，但 _persist_new_version_to_backup 早已生成 manifest 并删掉这两个
+        # legacy 文件。该后置步骤会（1）把 legacy 文件重新造回备份目录，推翻清理；
+        # （2）因 package.json 已被删而走远端兜底，写入远端最新版本号——与本次实际部署的
+        # .so 版本不一致，造成"备份里 manifest 版本号与二进制对不上"。
+        # 权威文件已在持久化阶段完成全部数据整合，这里只读取，不再写任何文件。
+        pending_manifest = await asyncio.to_thread(
+            ScraperVersionManager.load_manifest, pending_dir
+        )
+        full_replace_min_ver = (pending_manifest or {}).get("min_server_version")
 
         # 全量替换后检查：解压出的弹幕源包是否要求更高的服务器版本
         if full_replace_min_ver:
-            from src._version import APP_VERSION
-            from src.services.scraper_manager import _version_satisfies
             if not _version_satisfies(APP_VERSION, full_replace_min_ver):
                 msg = (
                     f"远程弹幕源包要求服务器版本 >= {full_replace_min_ver}，"
-                    f"当前版本 {APP_VERSION}，正在还原备份..."
+                    f"当前版本 {APP_VERSION}，已取消本次更新"
                 )
                 self._log(f"⚠️ {msg}", "warning")
+                # 运行目录的 .so 还没被覆盖，只需丢弃临时目录并还原备份中的版本信息
+                await asyncio.to_thread(shutil.rmtree, pending_dir, True)
                 await restore_scrapers(self.current_user, self.scraper_manager)
                 self._log("已还原备份，请先升级服务器版本")
                 raise ValueError(msg)
@@ -469,34 +694,90 @@ class ScraperDownloadExecutor:
         # 清除版本缓存，让前端能获取到最新版本号
         self._clear_version_cache()
 
+        # 注：新版本已由解压流程持久化到 backup 目录，无需再次 backup_scrapers
+
+        # .so 版本兼容性预检（首次/非首次均需校验）
+        # why：package.json 的 min_fetchable_version / min_server_version 是全局字段，
+        #      而每个 .so 的类属性 min_server_version 才是真正的细粒度约束，两者可以不一致。
+        #      必须在覆盖运行目录（或重启）之前做后置校验，否则部署后重启才报错，
+        #      整次更新白费且弹幕源全部跳过。
+        self._log("正在校验临时目录中弹幕源的服务器版本要求...")
+        compat_errors = await self._check_scraper_compat_in_dir(pending_dir)
+        if compat_errors:
+            detail = "、".join(f"{n}(要求 >= {v})" for n, v in compat_errors.items())
+            msg = (
+                f"弹幕源版本不兼容，当前服务器 {APP_VERSION} 不满足：{detail}，"
+                "已取消部署，请先升级服务器"
+            )
+            self._log(f"⚠️ {msg}", "warning")
+            await asyncio.to_thread(shutil.rmtree, pending_dir, True)
+            await restore_scrapers(self.current_user, self.scraper_manager)
+            self._log("已还原备份")
+            raise ValueError(msg)
+
+        # 校验通过后才设进度为完成，避免校验失败时前端进度条误显示绿色满格
         self.task.progress.current = 1
         self.task.progress.total = 1
         self.task.progress.downloaded.append("full_replace")
         self._log("全量替换完成")
 
-        # 备份新下载的资源
-        self._log("正在备份新下载的资源...")
-        await backup_scrapers(self.current_user)
-        self._log("✓ 新资源备份完成")
+        # 最终版本验证：解压后的文件是否与本地不同
+        # why: 用户可能下载了相同版本的压缩包，在这里做最后检查，避免不必要的部署和重启
+        if remote_pre_pkg:
+
+            remote_version = remote_pre_pkg.get("version", "unknown")
+            remote_branch = self.task.branch if hasattr(self.task, 'branch') else None
+
+            should_update, reason = VersionComparator.should_update(
+                local_dir=scrapers_dir,
+                remote_version=remote_version,
+                remote_branch=remote_branch
+            )
+
+            if not should_update:
+                self._log(f"✓ 最终版本验证: {reason}，跳过部署")
+                # 清理临时目录
+                await asyncio.to_thread(shutil.rmtree, pending_dir, True)
+                self._log("✓ 已清理临时目录")
+
+                # 清除版本缓存
+                self._clear_version_cache()
+
+                # why: 版本相同不需要还原备份（备份的就是当前版本），直接标记完成即可
+                # 避免触发无意义的文件复制和容器重启
+                self.task.status = TaskStatus.COMPLETED
+                self.task.need_restart = False
+                self.task.success_message = f"当前弹幕源版本与所选加载版本（{remote_version}）相同，无需重载"
+                return
+
+        # 版本不同，需要部署
+        # 注意：全量替换模式下，_download_and_extract_release 内部的 _persist_new_version_to_backup
+        # 已经将新版本写入备份目录，此处不再备份旧版本（否则会覆盖新版本的 manifest）
+        # 旧版本的 .so 文件会在覆盖时自然被替换，不需要单独备份
 
         # 判断是否是首次下载（本地没有任何弹幕源）
         existing_scrapers = set(self.scraper_manager.scrapers.keys())
         is_first_download = len(existing_scrapers) == 0
 
         if is_first_download:
-            # 首次下载：执行热加载
-            self._log("检测到首次下载弹幕源，正在热加载...")
+            # 版本兼容，正式应用覆盖并热加载
+            self._log("检测到首次下载弹幕源，正在应用更新...")
+            overlay_count = await asyncio.to_thread(apply_deferred_overlay, scrapers_dir)
+            self._log(f"✓ 已应用 {overlay_count} 个文件")
             logger.info(f"用户 '{self.current_user.username}' 首次通过全量替换模式下载了弹幕源，正在热加载")
-            await self.scraper_manager.load_and_sync_scrapers()
+            # why：传 skip_backup_restore=True，避免 apply_deferred_overlay 将
+            #      临时目录中没有 updated_at 的 versions.json 覆盖运行目录后，
+            #      load_and_sync_scrapers 误判"备份更新 > scrapers"而触发不必要的备份还原，
+            #      进而在热加载过程中重复 import .so 导致 native crash / 容器重启。
+            await self.scraper_manager.load_and_sync_scrapers(skip_backup_restore=True)
             self._log("✓ 弹幕源加载完成")
         else:
-            # 非首次下载：检查是否有 Docker socket，决定重启方式
-            from src.utils.docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
+            # 非首次下载：检查是否在 Docker 容器内且有 Docker socket，决定重启方式
+            # 同时满足两个条件才走自动重启路径：socket 可用 + 确实在 Docker 容器内
+            docker_available = is_docker_socket_available() and is_running_in_docker()
 
             if docker_available:
                 # 有 Docker socket，执行容器级别重启
-                from src.utils.docker_utils import get_current_container_id
                 detected_id = get_current_container_id()
 
                 self._log("⚠️ 全量替换后需要重启容器以加载新的 .so 文件")
@@ -525,7 +806,6 @@ class ScraperDownloadExecutor:
                 self.task.restart_pending = True
 
                 # 刷新日志缓冲区，确保日志输出
-                import sys
                 for handler in logging.getLogger().handlers:
                     handler.flush()
                 sys.stdout.flush()
@@ -541,6 +821,26 @@ class ScraperDownloadExecutor:
                     handler.flush()
 
                 fallback_name = await self.config_manager.get("containerName", "misaka_danmu_server")
+
+                # ========== 最后一步：覆盖运行目录里正在被加载的 .so，然后立即重启 ==========
+                # why: 覆盖后进程内存中是旧模块而磁盘已是新二进制，此后任何延迟 import 或
+                # 未加载符号的访问都可能 segfault（旧实现就是在覆盖后继续执行
+                # _update_versions_json / backup_scrapers 而崩溃，导致 SSE 心跳永久消失、
+                # 前端一直卡在中间状态）。这里对齐逐文件更新路径：SSE 终态消息已发送完毕，
+                # 覆盖完只做重启，中间不执行任何业务代码。
+                logger.info(f"[任务 {self.task.task_id}] 正在应用新版 .so 到运行目录...")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                try:
+                    overlay_count = apply_deferred_overlay(scrapers_dir)
+                    logger.info(f"[任务 {self.task.task_id}] 已应用 {overlay_count} 个文件，立即重启")
+                except Exception as overlay_err:
+                    # 覆盖失败不影响重启：backup 目录已是新版，重启后会从备份恢复
+                    logger.error(f"[任务 {self.task.task_id}] 应用新版文件失败: {overlay_err}")
+                for handler in logging.getLogger().handlers:
+                    handler.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
 
                 # 在重启前再次刷新所有日志
                 logger.info(f"[任务 {self.task.task_id}] 正在发送容器重启指令...")
@@ -570,16 +870,29 @@ class ScraperDownloadExecutor:
                 # 任务状态已在上面设置，直接返回
                 return
             else:
-                # 非首次下载且没有 Docker socket：提示手动重启，不执行热加载
+                # 非首次下载且没有 Docker socket：应用更新后提示手动重启，不执行热加载
+                # 覆盖放在最后并紧跟返回，覆盖后不再执行业务代码（见上方 segfault 说明）
                 self._log("⚠️ 未检测到 Docker 套接字，无法自动重启容器")
-                self._log("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                self.task.status = TaskStatus.COMPLETED
+                await self._persist_task_status("completed", need_restart=True)
+                self._log("正在应用新版文件...")
+                self.task.need_restart = True
+                # 等 SSE 把上面的消息推送出去，再执行危险的覆盖操作
+                await asyncio.sleep(1.5)
+                try:
+                    overlay_count = apply_deferred_overlay(scrapers_dir)
+                    logger.info(f"已应用 {overlay_count} 个文件（等待手动重启生效）")
+                except Exception as overlay_err:
+                    logger.error(f"应用新版文件失败: {overlay_err}")
                 logger.info(f"用户 '{self.current_user.username}' 通过全量替换模式更新了弹幕源，需要手动重启容器")
+                logger.warning("⚠️ 请手动重启容器以加载新的弹幕源（.so 文件需要重启才能生效）")
+                self.task.restart_pending = True
+                return
 
         self.task.status = TaskStatus.COMPLETED
 
     async def _do_incremental_download(self, base_url, headers, proxy_to_use, platform_key, platform_info):
         """增量下载模式"""
-        from src.api.ui.scraper_resources import backup_scrapers, restore_scrapers, BACKUP_DIR
 
         # 下载 package.json
         package_url = f"{base_url}/package.json"
@@ -592,10 +905,9 @@ class ScraperDownloadExecutor:
             raise ValueError("获取资源包信息失败")
 
         # 前置检查：远程弹幕源包是否要求更高的服务器版本
-        remote_min_server = package_data.get('min_server_version')
+        # min_server_version 与 min_fetchable_version 语义相同，两者取其一即可阻断下载
+        remote_min_server = package_data.get('min_server_version') or package_data.get('min_fetchable_version')
         if remote_min_server:
-            from src._version import APP_VERSION
-            from src.services.scraper_manager import _version_satisfies
             if not _version_satisfies(APP_VERSION, remote_min_server):
                 msg = (
                     f"远程弹幕源包要求服务器版本 >= {remote_min_server}，"
@@ -630,30 +942,18 @@ class ScraperDownloadExecutor:
             self._log("所有弹幕源都是最新的，无需下载")
             self.task.need_restart = False
             self.task.status = TaskStatus.COMPLETED
-
-            # 等待 SSE 发送最新的进度消息
-            await asyncio.sleep(1.0)
-
-            # 设置 restart_pending 让 SSE 发送 done 消息并退出
-            self.task.restart_pending = True
-            logger.info(f"[任务 {self.task.task_id}] 所有弹幕源已是最新，设置 restart_pending=True，等待 SSE 发送 done 消息")
-
-            # 等待 SSE 发送 done 消息
-            await asyncio.sleep(2.0)
+            self.task.success_message = f"所有弹幕源文件哈希值与远程版本（{package_data.get('version', 'unknown')}）一致，无需下载"
+            # why: 所有文件都是最新，不需要重启
+            # 直接返回即可，SSE会因为status=COMPLETED自动发送done消息
             return
 
         # 创建临时下载目录
-        import shutil
         temp_dir = _get_temp_download_base_dir() / f"download_{self.task.task_id}"
         temp_dir.mkdir(parents=True, exist_ok=True)
         self._log(f"创建临时下载目录: {temp_dir}")
 
         try:
-            # 先备份当前文件（在修改任何文件之前备份，以便失败时恢复）
-            self._log("正在备份当前弹幕源...")
-            await backup_scrapers(self.current_user)
-            self._log("备份完成")
-
+            # 先下载到临时目录（不备份，等版本校验通过后再备份）
             self._log(f"开始下载 {need_download_count} 个文件到临时目录...")
 
             # 下载文件到临时目录
@@ -689,12 +989,9 @@ class ScraperDownloadExecutor:
             download_count = len(self.task.progress.downloaded)
             self._log(f"下载完成: 成功 {download_count}/{need_download_count} 个，跳过 {skip_count} 个，失败 {len(failed_downloads)} 个")
 
-            # 检查下载结果：有失败时还原备份
+            # 检查下载结果：有失败时直接返回（此时还未备份，无需还原）
             if failed_downloads:
                 self._log(f"有 {len(failed_downloads)} 个弹幕源下载失败: {', '.join(failed_downloads)}", "error")
-                self._log("正在还原备份...")
-                await restore_scrapers(self.current_user, self.scraper_manager)
-                self._log("已还原备份")
                 self.task.status = TaskStatus.FAILED
                 self.task.error_message = f"下载失败: {', '.join(failed_downloads)}"
                 return
@@ -715,13 +1012,68 @@ class ScraperDownloadExecutor:
                 await asyncio.sleep(2.0)
                 return
 
+            # 最终版本验证：临时目录的文件是否与本地不同
+            # why: 下载过程中可能有网络问题或其他原因导致下载的版本实际上和本地一样
+            # 在这里做最后检查，避免不必要的部署和重启
+
+            remote_version = package_data.get("version", "unknown")
+            remote_branch = self.task.branch if hasattr(self.task, 'branch') else None
+
+            should_update, reason = VersionComparator.should_update(
+                local_dir=scrapers_dir,
+                remote_version=remote_version,
+                remote_branch=remote_branch
+            )
+
+            if not should_update:
+                self._log(f"✓ 最终版本验证: {reason}，跳过部署")
+                # 清理临时目录
+                if temp_dir.exists():
+                    shutil.rmtree(temp_dir)
+                    self._log("✓ 已清理临时目录")
+
+                # 清除版本缓存
+                self._clear_version_cache()
+
+                # why: 版本相同不需要还原备份（备份的就是当前版本），直接标记完成即可
+                # 避免触发无意义的文件复制和容器重启
+                self.task.status = TaskStatus.COMPLETED
+                self.task.need_restart = False
+                self.task.success_message = f"当前弹幕源版本与所选加载版本（{remote_version}）相同，无需重载"
+                return
+
+            # 版本不同，需要部署，先备份当前版本
+            self._log("正在备份当前弹幕源...")
+            await backup_scrapers(self.current_user)
+            self._log("备份完成")
+
             # 判断是否是首次下载（本地没有任何弹幕源）
             existing_scrapers = set(self.scraper_manager.scrapers.keys())
             is_first_download = len(existing_scrapers) == 0
 
-            # 检查是否有 Docker socket
-            from src.utils.docker_utils import is_docker_socket_available, restart_container
-            docker_available = is_docker_socket_available()
+            # 检查是否在 Docker 容器内且有 Docker socket
+            docker_available = is_docker_socket_available() and is_running_in_docker()
+
+            # why：预检 package.json 只能拦截全局 min_server_version，
+            # 但 .so 内部的类属性 min_server_version 才是实际生效的约束；
+            # 两者可能不一致，如果不在这里做后置校验，下载+部署后重启才报错，
+            # 导致所有弹幕源全部跳过、整次更新白费。
+            # 在部署前从已下载到临时目录的 .so 文件中读取实际版本约束，
+            # 不通过则立即还原备份并以 ValueError 结束任务。
+            self._log("正在校验临时目录中弹幕源的服务器版本要求...")
+            compat_errors = await self._check_scraper_compat_in_dir(temp_dir)
+            if compat_errors:
+                detail = "、".join(
+                    f"{n}(要求 >= {v})" for n, v in compat_errors.items()
+                )
+                msg = (
+                    f"弹幕源版本不兼容，当前服务器 {APP_VERSION} 不满足：{detail}，"
+                    "已取消部署，请先升级服务器"
+                )
+                self._log(f"⚠️ {msg}", "warning")
+                await restore_scrapers(self.current_user, self.scraper_manager)
+                self._log("已还原备份")
+                raise ValueError(msg)
 
             if is_first_download:
                 # 首次下载（本地没有弹幕源）：部署到 scrapers 和 backup 目录，然后热加载
@@ -758,7 +1110,6 @@ class ScraperDownloadExecutor:
                 # 先清理临时目录（在设置 COMPLETED 之前，确保 SSE 发送的最后消息是完成消息）
                 if temp_dir.exists():
                     try:
-                        import shutil
                         shutil.rmtree(temp_dir)
                         self._log("✓ 已清理临时下载目录")
                     except Exception as e:
@@ -811,7 +1162,6 @@ class ScraperDownloadExecutor:
 
                 if docker_available:
                     # 有 Docker socket，执行容器级别重启
-                    from src.utils.docker_utils import get_current_container_id
                     detected_id = get_current_container_id()
 
                     self._log("⚠️ 检测到弹幕源更新，需要重启容器以加载新的 .so 文件")
@@ -840,7 +1190,6 @@ class ScraperDownloadExecutor:
                     self.task.restart_pending = True
 
                     # 刷新日志缓冲区
-                    import sys
                     for handler in logging.getLogger().handlers:
                         handler.flush()
                     sys.stdout.flush()
@@ -905,7 +1254,6 @@ class ScraperDownloadExecutor:
             # 注意：热加载场景下，临时目录已在设置 COMPLETED 之前清理，这里不会重复清理
             if temp_dir.exists():
                 try:
-                    import shutil
                     shutil.rmtree(temp_dir)
                     # 不发送日志消息，避免在 COMPLETED 状态后添加新消息影响 SSE 流
                     logger.info(f"[任务 {self.task.task_id}] 已清理临时下载目录")
@@ -956,9 +1304,11 @@ class ScraperDownloadExecutor:
         # 优先从 backup 目录读取（因为非首次下载时只更新 backup 目录）
         # 如果 backup 目录没有，再从 scrapers 目录读取
         local_hashes = {}
-        from src.api.ui.scraper_resources import BACKUP_DIR
         backup_versions_file = BACKUP_DIR / "versions.json"
         scrapers_versions_file = scrapers_dir / "versions.json"
+
+        # 获取当前任务的分支信息
+        current_branch = self.task.branch if hasattr(self.task, 'branch') else 'main'
 
         # 选择更新的 versions.json 文件
         versions_file = None
@@ -983,14 +1333,23 @@ class ScraperDownloadExecutor:
         elif scrapers_versions_file.exists():
             versions_file = scrapers_versions_file
 
+        # 检查分支是否匹配
+        branch_mismatch = False
         if versions_file and versions_file.exists():
             try:
                 local_versions = json.loads(await asyncio.to_thread(versions_file.read_text))
-                local_hashes = local_versions.get('hashes', {})
-                self._log(f"已读取本地版本信息，包含 {len(local_hashes)} 个哈希值")
-                # 调试：显示本地哈希值的 key
-                if local_hashes:
-                    self._log(f"本地哈希值 keys: {list(local_hashes.keys())[:5]}...", "debug")
+                local_branch = local_versions.get('branch', 'main')
+
+                # 检查分支是否一致
+                if local_branch != current_branch:
+                    branch_mismatch = True
+                    self._log(f"⚠ 分支不匹配: 本地版本来自分支 '{local_branch}'，当前下载分支 '{current_branch}'，将忽略本地哈希值", "warning")
+                else:
+                    local_hashes = local_versions.get('hashes', {})
+                    self._log(f"已读取本地版本信息，包含 {len(local_hashes)} 个哈希值（分支: {local_branch}）")
+                    # 调试：显示本地哈希值的 key
+                    if local_hashes:
+                        self._log(f"本地哈希值 keys: {list(local_hashes.keys())[:5]}...", "debug")
             except Exception as e:
                 self._log(f"读取本地版本文件失败: {e}", "warning")
 
@@ -1090,9 +1449,12 @@ class ScraperDownloadExecutor:
             logger.warning(f"校验文件哈希失败 {file_path}: {e}")
             return False
 
+    async def _check_scraper_compat_in_dir(self, check_dir: Path) -> dict:
+        """薄封装，实际实现见模块级 check_scraper_compat_in_dir（与自动更新链路共用）。"""
+        return await check_scraper_compat_in_dir(check_dir)
+
     async def _copy_and_verify(self, src_path: Path, dst_path: Path, expected_hash: str, scraper_name: str) -> bool:
         """复制文件并校验哈希值"""
-        import shutil
         try:
             # 复制文件
             await asyncio.to_thread(shutil.copy2, src_path, dst_path)
@@ -1123,7 +1485,6 @@ class ScraperDownloadExecutor:
         Returns:
             (成功部署的列表, 部署失败的列表)
         """
-        import shutil
 
         deployed = []
         failed = []
@@ -1174,7 +1535,6 @@ class ScraperDownloadExecutor:
             self._log(f"✓ 已部署: {scraper_name}")
 
         # 刷新日志缓冲区，确保部署日志输出
-        import sys
         for handler in logging.getLogger().handlers:
             handler.flush()
         sys.stdout.flush()
@@ -1235,7 +1595,6 @@ class ScraperDownloadExecutor:
             self._log(f"✓ 已部署到备份目录: {scraper_name}")
 
         # 刷新日志缓冲区
-        import sys
         for handler in logging.getLogger().handlers:
             handler.flush()
         sys.stdout.flush()
@@ -1252,31 +1611,40 @@ class ScraperDownloadExecutor:
         hashes_data: dict,
         platform_info: dict
     ):
-        """更新版本信息文件到 scrapers 和 backup 目录"""
-        import shutil
+        """更新版本信息文件（只生成 scraper_manifest.json，不再保存 package.json 和 versions.json 到 scrapers）"""
 
         self._log("正在更新版本信息...")
 
-        # 1. 保存新的 package.json 到 scrapers 目录
-        scrapers_package_file = scrapers_dir / "package.json"
-        package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
-        await asyncio.to_thread(scrapers_package_file.write_text, package_json_str)
+        # 1. 在 backup 目录保存 package.json 和 versions.json（作为中间文件）
+        backup_package_file = backup_dir / "package.json"
+        backup_versions_file = backup_dir / "versions.json"
 
-        # 2. 保存 versions.json 到 scrapers 目录
+        package_json_str = json.dumps(package_data, indent=2, ensure_ascii=False)
+        await asyncio.to_thread(backup_package_file.write_text, package_json_str)
+
+        # 保存 versions.json 到 backup
         await self._save_versions(versions_data, hashes_data, platform_info, package_data, [])
 
-        # 3. 同步 package.json 和 versions.json 到 backup 目录
-        scrapers_versions_file = scrapers_dir / "versions.json"
-        backup_versions_file = backup_dir / "versions.json"
-        backup_package_file = backup_dir / "package.json"
+        # 2. 从 backup 目录的两个文件提取信息，生成完整的 scraper_manifest.json
+        try:
+            manifest = await asyncio.to_thread(
+                ScraperVersionManager.extract_manifest_from_legacy,
+                backup_package_file,
+                backup_versions_file,
+                scrapers_dir
+            )
 
-        if scrapers_versions_file.exists():
-            shutil.copy2(scrapers_versions_file, backup_versions_file)
+            # 保存到 scrapers 目录（权威文件）
+            await asyncio.to_thread(ScraperVersionManager.save_manifest, manifest, scrapers_dir)
+            self._log(f"✓ 已生成权威文件 scraper_manifest.json: {len(manifest.get('sources', {}))} 个源")
 
-        if scrapers_package_file.exists():
-            shutil.copy2(scrapers_package_file, backup_package_file)
+            # 同时保存到 backup 目录
+            await asyncio.to_thread(ScraperVersionManager.save_manifest, manifest, backup_dir)
 
-        self._log("✓ 版本信息已更新并同步到备份目录")
+        except Exception as e:
+            self._log(f"生成 scraper_manifest.json 失败: {e}", "warning")
+
+        self._log("✓ 版本信息已更新（scrapers 目录仅保留 scraper_manifest.json）")
 
     async def _update_version_files_backup_only(
         self,
@@ -1324,6 +1692,7 @@ class ScraperDownloadExecutor:
             "type": platform_info.get('arch', 'unknown'),
             "scrapers": existing_scrapers,
             "hashes": existing_hashes,
+            "branch": self.task.branch if hasattr(self.task, 'branch') else 'main',  # 记录分支信息
             "updated_at": datetime.now().isoformat()
         }
         if min_server_version:
@@ -1334,14 +1703,57 @@ class ScraperDownloadExecutor:
 
         self._log("✓ 备份目录版本信息已更新")
 
+        # 同时生成/更新 backup 目录的 scraper_manifest.json
+        # why: 重启后恢复逻辑依赖 manifest 的 updated_at 比较，必须同步更新
+        try:
+
+            # 直接使用已有数据构造 manifest，避免重新读取文件
+            manifest = {
+                "version": package_data.get("version", versions_json.get("version", "unknown")),
+                "updated_at": versions_json["updated_at"],
+                "platform": versions_json["platform"],
+                "branch": versions_json.get("branch", "main"),
+                "sources": {}
+            }
+
+            # 添加 min_server_version（如果存在）
+            min_server_version = package_data.get("min_server_version") or package_data.get("min_fetchable_version")
+            if min_server_version:
+                manifest["min_server_version"] = min_server_version
+
+            # 构造 sources
+            for scraper_name, version in existing_scrapers.items():
+                source_entry = {
+                    "version": version
+                }
+
+                # 添加哈希值（如果存在）
+                if scraper_name in existing_hashes:
+                    source_entry["hashes"] = {
+                        platform_info.get('platform', 'unknown'): existing_hashes[scraper_name]
+                    }
+
+                manifest["sources"][scraper_name] = source_entry
+
+            # 保存到 backup 目录
+            await asyncio.to_thread(
+                ScraperVersionManager.save_manifest,
+                manifest,
+                BACKUP_DIR
+            )
+
+            self._log(f"✓ 已更新 backup 目录的 scraper_manifest.json: {len(manifest.get('sources', {}))} 个源")
+        except Exception as e:
+            self._log(f"更新 backup manifest 失败: {e}", "warning")
+            logger.warning(f"更新 backup manifest 详细错误: {traceback.format_exc()}")
+
     async def _save_versions(self, versions_data, hashes_data, platform_info, package_data, failed_downloads):
-        """保存版本信息"""
+        """保存版本信息到 backup 目录（不再保存到 scrapers 目录）"""
         if not versions_data:
             return
 
         try:
-            scrapers_dir = _get_scrapers_dir()
-            versions_file = scrapers_dir / "versions.json"
+            versions_file = BACKUP_DIR / "versions.json"
 
             # 合并旧版本信息
             existing_scrapers = {}
@@ -1360,11 +1772,12 @@ class ScraperDownloadExecutor:
             # 从 package_data 读取全局版本限制字段
             min_server_version = package_data.get('min_server_version')
 
+            # versions.json 只作为中间文件，保存到 backup 目录
             full_versions_data = {
                 "platform": platform_info['platform'],
                 "type": platform_info['arch'],
-                "version": package_data.get("version", "unknown"),
                 "scrapers": merged_scrapers,
+                "branch": self.task.branch if hasattr(self.task, 'branch') else 'main',
                 "updated_at": datetime.now().isoformat()
             }
 
@@ -1375,111 +1788,19 @@ class ScraperDownloadExecutor:
 
             versions_json_str = json.dumps(full_versions_data, indent=2, ensure_ascii=False)
             await asyncio.to_thread(versions_file.write_text, versions_json_str)
-            self._log(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息")
+            self._log(f"已保存 {len(merged_scrapers)} 个弹幕源的版本信息到 backup 目录")
+
         except Exception as e:
             self._log(f"保存版本信息失败: {e}", "warning")
 
     def _clear_version_cache(self):
         """清除版本缓存，让前端能获取到最新版本号"""
         try:
-            import src.api.ui.scraper_resources as scraper_resources_module
             scraper_resources_module._version_cache = None
             scraper_resources_module._version_cache_time = None
             logger.info("已清除版本缓存")
         except Exception as e:
             logger.warning(f"清除版本缓存失败: {e}")
-
-    async def _update_versions_json(self, asset_info: Dict[str, Any], scrapers_dir: Path, platform_key: str) -> Optional[str]:
-        """全量替换后更新 versions.json，返回 min_server_version（如有）"""
-        try:
-            platform_info = get_platform_info()
-            release_version = asset_info['version'].lstrip('v')
-
-            # 从解压后的 package.json 读取各个源的版本信息
-            scrapers_versions = {}
-            scrapers_hashes = {}
-            local_package_file = scrapers_dir / "package.json"
-
-            # 从解压后的 versions.json 读取全局版本限制字段（覆盖前读取）
-            min_server_version = None
-            existing_versions_file = scrapers_dir / "versions.json"
-            if existing_versions_file.exists():
-                try:
-                    existing_ver_data = json.loads(await asyncio.to_thread(existing_versions_file.read_text))
-                    min_server_version = existing_ver_data.get('min_server_version')
-                except Exception:
-                    pass
-
-            if local_package_file.exists():
-                try:
-                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
-                    # 从 resources 字段提取各个源的版本号和哈希值
-                    resources = package_content.get('resources', {})
-                    for scraper_name, scraper_info in resources.items():
-                        if isinstance(scraper_info, dict):
-                            version = scraper_info.get('version')
-                            if version:
-                                scrapers_versions[scraper_name] = version
-                            # 提取哈希值 - 使用 platform_key (如 linux-x86) 而不是 platform_arch 组合
-                            hashes = scraper_info.get('hashes', {})
-                            if platform_key in hashes:
-                                scrapers_hashes[scraper_name] = hashes[platform_key]
-                    logger.info(f"从 package.json 读取到 {len(scrapers_versions)} 个源的版本信息, {len(scrapers_hashes)} 个哈希值")
-                    # package.json 也可能携带版本限制字段
-                    if not min_server_version:
-                        min_server_version = package_content.get('min_server_version')
-                except Exception as e:
-                    logger.warning(f"读取 package.json 中的源版本信息失败: {e}")
-
-            # 构建 versions.json 数据
-            versions_data = {
-                "platform": platform_info['platform'],
-                "type": platform_info['arch'],
-                "version": release_version,
-                "scrapers": scrapers_versions,
-                "hashes": scrapers_hashes,
-                "full_replace": True,
-                "updated_at": datetime.now().isoformat()  # 使用 updated_at 与其他地方保持一致
-            }
-            if min_server_version:
-                versions_data['min_server_version'] = min_server_version
-
-            # 写入 versions.json 到 scrapers 目录
-            versions_file = scrapers_dir / "versions.json"
-            versions_json_str = json.dumps(versions_data, indent=2, ensure_ascii=False)
-            await asyncio.to_thread(versions_file.write_text, versions_json_str)
-            logger.info(f"已更新 versions.json: {len(scrapers_versions)} 个源版本, {len(scrapers_hashes)} 个哈希值")
-
-            # 同步到 backup 目录
-            from src.api.ui.scraper_resources import BACKUP_DIR
-            import shutil
-            BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-            backup_versions_file = BACKUP_DIR / "versions.json"
-            backup_package_file = BACKUP_DIR / "package.json"
-            shutil.copy2(versions_file, backup_versions_file)
-            if local_package_file.exists():
-                shutil.copy2(local_package_file, backup_package_file)
-            logger.info("已同步版本信息到备份目录")
-
-            # 同时更新 package.json 的版本号（前端从这里读取整体版本）
-            try:
-                if local_package_file.exists():
-                    package_content = json.loads(await asyncio.to_thread(local_package_file.read_text))
-                    package_content['version'] = release_version
-                else:
-                    package_content = {"version": release_version}
-                package_json_str = json.dumps(package_content, indent=2, ensure_ascii=False)
-                await asyncio.to_thread(local_package_file.write_text, package_json_str)
-                logger.info(f"已更新 package.json 版本号为: {release_version}")
-            except Exception as pkg_err:
-                logger.warning(f"更新 package.json 失败: {pkg_err}")
-
-            return min_server_version
-
-        except Exception as e:
-            logger.error(f"更新版本信息失败: {e}", exc_info=True)
-            self._log(f"更新版本信息失败: {e}", "warning")
-            return None
 
 
 async def start_download_task(

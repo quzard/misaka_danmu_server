@@ -17,6 +17,9 @@ from src.utils import (
     parse_search_keyword, ai_type_and_season_mapping_and_correction,
     SearchTimer, SEARCH_TYPE_WEBHOOK
 )
+from src.utils.filename_parser import is_movie_by_title
+from src.utils.search_timer import SubStepTiming
+from src.utils.task_profiler import TaskProfiler, FLOW_WEBHOOK_IMPORT
 
 # ORM 模型别名
 AnimeSource = orm_models.AnimeSource
@@ -126,10 +129,11 @@ async def webhook_search_and_dispatch_task(
     """
     generic_import_task = _get_generic_import_task()
 
-    # 🚀 V2.1.6: 创建搜索计时器
+    # 初始化搜索计时器（打日志）+ 性能统计 profiler（写 DB）
     ep_label = f"E{currentEpisodeIndex:02d}" if currentEpisodeIndex is not None else "全季"
     timer = SearchTimer(SEARCH_TYPE_WEBHOOK, f"{animeTitle} S{season:02d}{ep_label}", logger)
     timer.start()
+    profiler = TaskProfiler(FLOW_WEBHOOK_IMPORT)
 
     # 🔒 Webhook 搜索锁：防止同一作品同季的多个请求同时搜索导致重复任务
     webhook_lock_key = f"webhook-{animeTitle}-S{season}"
@@ -199,8 +203,32 @@ async def webhook_search_and_dispatch_task(
                     mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
                     mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
                 )
+                # 补齐 task_parameters：供完成通知展示作品名/季/集/类型/来源（否则微信通知只剩弹幕数）
+                # currentEpisodeIndex/selectedEpisodes 供 _rebuild_coro_factory 的 generic_import 分支重建（任务重启恢复）
+                fav_task_parameters = {
+                    "provider": favorited_source['providerName'],
+                    "mediaId": favorited_source['mediaId'],
+                    "animeTitle": favorited_source['animeTitle'],
+                    "mediaType": favorited_source.get('mediaType'),
+                    "season": season,
+                    "episode": currentEpisodeIndex,
+                    "currentEpisodeIndex": currentEpisodeIndex,
+                    "selectedEpisodes": selectedEpisodes,
+                    "year": year,
+                    "tmdbId": tmdbId,
+                    "imdbId": imdbId,
+                    "tvdbId": tvdbId,
+                    "doubanId": doubanId,
+                    "bangumiId": bangumiId,
+                    "imageUrl": favorited_source.get('imageUrl'),
+                    "webhookSource": webhookSource,
+                }
                 try:
-                    await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                    await task_manager.submit_task(
+                        task_coro, task_title, unique_key=unique_key,
+                        task_type="generic_import",
+                        task_parameters=fav_task_parameters,
+                    )
                 except HTTPException as e:
                     if e.status_code == 409:
                         # 409 表示已有相同任务在队列中，视为成功
@@ -209,7 +237,11 @@ async def webhook_search_and_dispatch_task(
                     raise
 
                 timer.step_end(details="找到收藏源")
+                _dur = timer.step_end(details="找到收藏源")
+                profiler.record_step("查找收藏源", _dur)
                 timer.finish()  # 打印计时报告
+                # 写入性能统计（收藏源快速路径）
+                await profiler.flush(session)
                 # 根据来源动态生成成功消息
                 if webhookSource == "media_server":
                     success_message = f"已为收藏源 '{favorited_source['providerName']}' 创建导入任务。"
@@ -294,7 +326,8 @@ async def webhook_search_and_dispatch_task(
         )
 
         logger.info(f"Webhook 任务: 已将搜索词 '{searchKeyword}' 解析为标题 '{search_title}' 进行搜索。")
-        timer.step_end()
+        _dur = timer.step_end()
+        profiler.record_step("关键词解析与预处理", _dur)
 
         timer.step_start("统一搜索")
         # 使用统一的搜索函数（与 WebUI 搜索保持一致）
@@ -313,7 +346,6 @@ async def webhook_search_and_dispatch_task(
             alias_similarity_threshold=70,
         )
         # 收集单源搜索耗时信息（分组显示）
-        from src.utils.search_timer import SubStepTiming
         source_timing_sub_steps = []
         for name, dur, cnt in manager.last_search_timing:
             if name.startswith("补充:"):
@@ -324,7 +356,8 @@ async def webhook_search_and_dispatch_task(
                 source_timing_sub_steps.append(
                     SubStepTiming(name=name, duration_ms=dur, result_count=cnt, group="弹幕源")
                 )
-        timer.step_end(details=f"{len(all_search_results)}个结果", sub_steps=source_timing_sub_steps)
+        _dur = timer.step_end(details=f"{len(all_search_results)}个结果", sub_steps=source_timing_sub_steps)
+        profiler.record_step("统一搜索", _dur)
 
         if not all_search_results:
             timer.finish()  # 打印计时报告
@@ -362,23 +395,21 @@ async def webhook_search_and_dispatch_task(
 
                         # 更新搜索结果（已经直接修改了all_search_results）
                         all_search_results = mapping_result['corrected_results']
-                        timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
+                        _dur = timer.step_end(details=f"修正{mapping_result['total_corrections']}个")
                     else:
                         logger.info(f"○ Webhook 统一AI映射: 未找到需要修正的信息")
-                        timer.step_end(details="无修正")
+                        _dur = timer.step_end(details="无修正")
                 else:
                     logger.warning("○ Webhook AI映射: AI匹配器未启用或初始化失败")
-                    timer.step_end(details="匹配器未启用")
+                    _dur = timer.step_end(details="匹配器未启用")
+                profiler.record_step("AI映射修正", _dur)
 
             except Exception as e:
                 logger.warning(f"Webhook 统一AI映射任务执行失败: {e}")
-                timer.step_end(details=f"失败: {e}")
-        else:
-            logger.info("○ Webhook 统一AI映射: 功能未启用")
+                _dur = timer.step_end(details=f"失败: {e}")
+                profiler.record_step("AI映射修正", _dur, success=False)
 
         # 3. 根据标题关键词修正媒体类型（与 WebUI 一致）
-        from src.utils import is_movie_by_title
-
         for item in all_search_results:
             if item.type == "tv_series" and is_movie_by_title(item.title):
                 logger.info(
@@ -541,8 +572,13 @@ async def webhook_search_and_dispatch_task(
 
                 # 获取精确标记信息
                 favorited_info = {}
+                # 库内已有源信息（复用前面已算好的 existing_source_keys，供 AI 优先复用库内源）
+                existing_info = {}
 
                 for result in all_search_results:
+                    source_key = f"{result.provider}:{result.mediaId}"
+                    if source_key in existing_source_keys:
+                        existing_info[source_key] = True
                     # 查找是否有相同provider和mediaId的源被标记
                     stmt = (
                         select(AnimeSource.isFavorited)
@@ -558,9 +594,17 @@ async def webhook_search_and_dispatch_task(
                         key = f"{result.provider}:{result.mediaId}"
                         favorited_info[key] = True
 
+                # 识别词认知校正上下文（统一函数，命中标记+提示文案；不改排序）
+                recognition_info, recognition_hint = (
+                    await title_recognition_manager.build_recognition_context_for_results(all_search_results)
+                    if title_recognition_manager else ({}, None)
+                )
+                if recognition_hint:
+                    query_info["recognition_hint"] = recognition_hint
+
                 # 使用AIMatcherManager进行匹配
                 ai_selected_index = await ai_matcher_manager.select_best_match(
-                    query_info, all_search_results, favorited_info
+                    query_info, all_search_results, favorited_info, existing_info, recognition_info
                 )
 
                 if ai_selected_index is not None:
@@ -619,8 +663,33 @@ async def webhook_search_and_dispatch_task(
                 mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
                 mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
+            # 补齐 task_parameters：供完成通知展示作品名/季/集/类型/来源
+            # currentEpisodeIndex/selectedEpisodes/元数据ID 供 _rebuild_coro_factory 的
+            # generic_import 分支重建（任务重启恢复），否则重启后此叶子导入任务无法恢复。
+            match_task_parameters = {
+                "provider": best_match.provider,
+                "mediaId": best_match.mediaId,
+                "animeTitle": best_match.title,
+                "mediaType": best_match.type,
+                "season": season,
+                "episode": currentEpisodeIndex,
+                "currentEpisodeIndex": currentEpisodeIndex,
+                "selectedEpisodes": selectedEpisodes,
+                "year": final_year,
+                "tmdbId": tmdbId,
+                "imdbId": imdbId,
+                "tvdbId": tvdbId,
+                "doubanId": doubanId,
+                "bangumiId": bangumiId,
+                "imageUrl": best_match.imageUrl,
+                "webhookSource": webhookSource,
+            }
             try:
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                await task_manager.submit_task(
+                    task_coro, task_title, unique_key=unique_key,
+                    task_type="generic_import",
+                    task_parameters=match_task_parameters,
+                )
             except HTTPException as e:
                 if e.status_code == 409:
                     logger.info(f"Webhook 任务: AI匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
@@ -628,6 +697,8 @@ async def webhook_search_and_dispatch_task(
                 raise
 
             timer.step_end(details="AI匹配成功")
+            _dur = timer.step_end(details="结果排序与AI匹配")
+            profiler.record_step("结果排序与匹配", _dur)
             timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
@@ -743,8 +814,33 @@ async def webhook_search_and_dispatch_task(
                 mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
                 mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
             )
+            # 补齐 task_parameters：供完成通知展示作品名/季/集/类型/来源
+            # currentEpisodeIndex/selectedEpisodes/元数据ID 供 _rebuild_coro_factory 的
+            # generic_import 分支重建（任务重启恢复），否则重启后此叶子导入任务无法恢复。
+            match_task_parameters = {
+                "provider": best_match.provider,
+                "mediaId": best_match.mediaId,
+                "animeTitle": best_match.title,
+                "mediaType": best_match.type,
+                "season": season,
+                "episode": currentEpisodeIndex,
+                "currentEpisodeIndex": currentEpisodeIndex,
+                "selectedEpisodes": selectedEpisodes,
+                "year": final_year,
+                "tmdbId": tmdbId,
+                "imdbId": imdbId,
+                "tvdbId": tvdbId,
+                "doubanId": doubanId,
+                "bangumiId": bangumiId,
+                "imageUrl": best_match.imageUrl,
+                "webhookSource": webhookSource,
+            }
             try:
-                await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+                await task_manager.submit_task(
+                    task_coro, task_title, unique_key=unique_key,
+                    task_type="generic_import",
+                    task_parameters=match_task_parameters,
+                )
             except HTTPException as e:
                 if e.status_code == 409:
                     logger.info(f"Webhook 任务: 传统匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
@@ -752,6 +848,8 @@ async def webhook_search_and_dispatch_task(
                 raise
 
             timer.step_end(details="传统匹配成功")
+            _dur = timer.step_end(details="结果排序与传统匹配")
+            profiler.record_step("结果排序与匹配", _dur)
             timer.finish()  # 打印计时报告
             # 根据来源动态生成成功消息
             if webhookSource == "media_server":
@@ -838,8 +936,33 @@ async def webhook_search_and_dispatch_task(
             mediaServerType=mediaServerType, mediaServerSeriesId=mediaServerSeriesId,
             mediaServerSeasonId=mediaServerSeasonId, mediaServerEpisodeId=mediaServerEpisodeId,
         )
+        # 补齐 task_parameters：供完成通知展示作品名/季/集/类型/来源
+        # currentEpisodeIndex/selectedEpisodes/元数据ID 供 _rebuild_coro_factory 的
+        # generic_import 分支重建（任务重启恢复），否则重启后此叶子导入任务无法恢复。
+        match_task_parameters = {
+            "provider": best_match.provider,
+            "mediaId": best_match.mediaId,
+            "animeTitle": best_match.title,
+            "mediaType": best_match.type,
+            "season": season,
+            "episode": currentEpisodeIndex,
+            "currentEpisodeIndex": currentEpisodeIndex,
+            "selectedEpisodes": selectedEpisodes,
+            "year": final_year,
+            "tmdbId": tmdbId,
+            "imdbId": imdbId,
+            "tvdbId": tvdbId,
+            "doubanId": doubanId,
+            "bangumiId": bangumiId,
+            "imageUrl": best_match.imageUrl,
+            "webhookSource": webhookSource,
+        }
         try:
-            await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+            await task_manager.submit_task(
+                task_coro, task_title, unique_key=unique_key,
+                task_type="generic_import",
+                task_parameters=match_task_parameters,
+            )
         except HTTPException as e:
             if e.status_code == 409:
                 logger.info(f"Webhook 任务: 顺延匹配任务已在队列中 (unique_key={unique_key})，跳过重复提交。")
@@ -847,7 +970,12 @@ async def webhook_search_and_dispatch_task(
             raise
 
         timer.step_end(details="顺延匹配成功")
+        _dur = timer.step_end(details="结果排序与顺延匹配")
+        profiler.record_step("结果排序与匹配", _dur)
         timer.finish()  # 打印计时报告
+        # 写入性能统计（触发导入步骤）
+        profiler.record_step("触发导入任务", profiler.total_duration_ms)
+        await profiler.flush(session)
         # 根据来源动态生成成功消息
         if webhookSource == "media_server":
             success_message = f"已为源 '{best_match.provider}' 创建导入任务。"
@@ -855,8 +983,10 @@ async def webhook_search_and_dispatch_task(
             success_message = f"Webhook: 已为源 '{best_match.provider}' 创建导入任务。"
         raise TaskSuccess(success_message)
     except TaskSuccess:
+        await profiler.flush(session)
         raise
     except Exception as e:
+        await profiler.flush(session)
         timer.finish()  # 打印计时报告（即使失败也打印）
         logger.error(f"Webhook 搜索与分发任务发生严重错误: {e}", exc_info=True)
         raise

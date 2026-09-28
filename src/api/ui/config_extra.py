@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import secrets
+import socket
 import string
 import time
 from typing import Optional, List, Any, Dict
@@ -16,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src import security
 from src.db import crud, models, get_db_session, ConfigManager
+from src.db.crud.ai_metrics import get_ai_metrics_stats, get_ai_metrics_summary
 from src.core import get_config_schema
-from src.services import ScraperManager, MetadataSourceManager
+from src.services import ScraperManager, MetadataSourceManager, SchedulerManager
 from src.ai.ai_prompts import (
     DEFAULT_AI_MATCH_PROMPT,
     DEFAULT_AI_SEASON_MAPPING_PROMPT,
@@ -32,10 +34,11 @@ from src.utils import DanmakuPathTemplate
 
 from src.api.dependencies import (
     get_scraper_manager, get_metadata_manager, get_config_manager,
-    get_ai_matcher_manager
+    get_ai_matcher_manager, get_scheduler_manager
 )
 from .models import (
     ProxyTestResult, ProxyTestRequest, FullProxyTestResponse,
+    SingleTargetTestRequest, SingleTargetTestResponse,
     CustomDanmakuPathRequest, CustomDanmakuPathResponse,
     MatchFallbackTokensResponse, ConfigValueResponse, ConfigValueRequest,
     TmdbReverseLookupConfig, TmdbReverseLookupConfigRequest,
@@ -114,11 +117,7 @@ async def update_proxy_settings(
     config_manager: ConfigManager = Depends(get_config_manager)
 ):
     """更新全局代理配置。"""
-    # 保存代理模式
-    await crud.update_config_value(session, "proxyMode", payload.proxyMode)
-    config_manager.invalidate("proxyMode")
-
-    # 构建并保存 HTTP/SOCKS 代理 URL
+    # 构建 HTTP/SOCKS 代理 URL
     proxy_url = ""
     if payload.proxyHost and payload.proxyPort:
         # URL-encode username and password to handle special characters like '@'
@@ -131,23 +130,62 @@ async def update_proxy_settings(
 
         proxy_url = f"{payload.proxyProtocol}://{userinfo}{payload.proxyHost}:{payload.proxyPort}"
 
-    await crud.update_config_value(session, "proxyUrl", proxy_url)
-    config_manager.invalidate("proxyUrl")
-
-    # 保存兼容性字段 proxyEnabled（根据 proxyMode 自动设置）
+    # why: 代理设置是一个整体，必须全部写入成功后再提交，避免半套配置生效。
     proxy_enabled = payload.proxyMode != "none"
-    await crud.update_config_value(session, "proxyEnabled", str(proxy_enabled).lower())
-    config_manager.invalidate("proxyEnabled")
-
-    await crud.update_config_value(session, "proxySslVerify", str(payload.proxySslVerify).lower())
-    config_manager.invalidate("proxySslVerify")
-
-    # 保存加速代理地址
-    await crud.update_config_value(session, "accelerateProxyUrl", payload.accelerateProxyUrl or "")
-    config_manager.invalidate("accelerateProxyUrl")
+    config_values = {
+        "proxyMode": payload.proxyMode,
+        "proxyUrl": proxy_url,
+        "proxyEnabled": str(proxy_enabled).lower(),
+        "proxySslVerify": str(payload.proxySslVerify).lower(),
+        "accelerateProxyUrl": payload.accelerateProxyUrl or "",
+    }
+    await crud.update_config_values_atomic(session, config_values)
+    for key in config_values:
+        config_manager.invalidate(key)
 
     logger.info(f"用户 '{current_user.username}' 更新了代理配置 (mode={payload.proxyMode})。")
 
+
+
+def _extract_host(url: str) -> str:
+    """从 URL 或裸域名中提取主机名（用于 DNS 解析）。"""
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    # 没有协议时补一个，方便 urlparse 解析出 netloc
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    return parsed.hostname or ""
+
+
+async def _resolve_dns(host: str, timeout: float = 5.0) -> Dict[str, Any]:
+    """对主机名做 DNS 解析，返回 {status, dns_latency, resolved_ip, dns_error}。
+
+    使用 asyncio 的 getaddrinfo（线程池执行同步 socket），避免阻塞事件循环。
+    注意：DNS 解析走系统本地解析器，不经过 HTTP 代理。
+    """
+    if not host:
+        return {"dns_status": "failure", "dns_error": "无法提取主机名"}
+    loop = asyncio.get_event_loop()
+    start = time.time()
+    try:
+        infos = await asyncio.wait_for(
+            loop.getaddrinfo(host, None, proto=socket.IPPROTO_TCP),
+            timeout=timeout,
+        )
+        dns_latency = (time.time() - start) * 1000
+        # 取首个解析到的 IP（infos 项形如 (family, type, proto, canonname, sockaddr)）
+        resolved_ip = infos[0][4][0] if infos and infos[0][4] else None
+        return {
+            "dns_status": "success",
+            "dns_latency": dns_latency,
+            "resolved_ip": resolved_ip,
+        }
+    except asyncio.TimeoutError:
+        return {"dns_status": "failure", "dns_error": "DNS 解析超时"}
+    except Exception as e:
+        return {"dns_status": "failure", "dns_error": f"{type(e).__name__}"}
 
 
 @router.post("/proxy/test", response_model=FullProxyTestResponse, summary="测试代理连接和延迟")
@@ -223,6 +261,8 @@ async def test_proxy_latency(
     # --- 步骤 2: 动态构建要测试的目标域名列表 ---
     target_sites_results: Dict[str, ProxyTestResult] = {}
     test_domains = set()
+    # 域名归属映射：domain -> { group, source }
+    domain_source_map: Dict[str, Dict[str, str]] = {}
 
     # 统一获取所有源的设置
     enabled_metadata_settings = await crud.get_all_metadata_source_settings(session)
@@ -230,9 +270,9 @@ async def test_proxy_latency(
 
     # 合并所有源的设置，并添加一个获取实例的函数
     all_sources_settings = [
-        (s, lambda name=s['providerName']: metadata_manager.get_source(name)) for s in enabled_metadata_settings
+        (s, lambda name=s['providerName']: metadata_manager.get_source(name), "metadata") for s in enabled_metadata_settings
     ] + [
-        (s, lambda name=s['providerName']: scraper_manager.get_scraper(name)) for s in scraper_settings
+        (s, lambda name=s['providerName']: scraper_manager.get_scraper(name), "scraper") for s in scraper_settings
     ]
 
     # 根据代理模式决定测试哪些源
@@ -240,7 +280,7 @@ async def test_proxy_latency(
     log_message = "代理未启用，将测试所有已启用的源。" if not is_proxy_enabled else "代理已启用，将仅测试已配置代理的源。"
     logger.info(log_message)
 
-    for setting, get_instance_func in all_sources_settings:
+    for setting, get_instance_func, source_type in all_sources_settings:
         provider_name = setting.get('providerName')
 
         # 优化：只测试已启用的源
@@ -250,27 +290,42 @@ async def test_proxy_latency(
         if should_test:
             try:
                 instance = get_instance_func()
-                # 修正：支持异步获取 test_url
+                # 优先读取 test_urls 列表（多域名），兼容旧的 test_url（单域名）
+                collected_urls = []
+
+                # 1. 读取 test_urls 列表
+                if hasattr(instance, 'test_urls'):
+                    urls_attr = getattr(instance, 'test_urls')
+                    if isinstance(urls_attr, (list, tuple)):
+                        collected_urls.extend(urls_attr)
+
+                # 2. 读取 test_url（单值，兼容旧源）
                 if hasattr(instance, 'test_url'):
                     test_url_attr = getattr(instance, 'test_url')
                     # 检查是否是协程对象 (async property 返回的)
                     if asyncio.iscoroutine(test_url_attr):
                         result = await test_url_attr
                         if result:
-                            test_domains.add(result)
+                            collected_urls.append(result)
                     # 检查是否是异步方法（callable）
                     elif asyncio.iscoroutinefunction(test_url_attr):
                         result = await test_url_attr()
                         if result:
-                            test_domains.add(result)
+                            collected_urls.append(result)
                     # 检查是否是普通方法
                     elif callable(test_url_attr):
                         result = test_url_attr()
                         if result:
-                            test_domains.add(result)
+                            collected_urls.append(result)
                     # 普通属性
                     elif test_url_attr:
-                        test_domains.add(test_url_attr)
+                        collected_urls.append(test_url_attr)
+
+                test_domains.update(collected_urls)
+                # 记录域名归属
+                group_label = "弹幕源" if source_type == "scraper" else "元数据源"
+                for url in collected_urls:
+                    domain_source_map[url] = {"group": group_label, "source": provider_name}
             except ValueError:
                 pass
             except Exception as e:
@@ -283,6 +338,23 @@ async def test_proxy_latency(
         "https://raw.githubusercontent.com"
     ]
     test_domains.update(github_domains)
+    for d in github_domains:
+        domain_source_map[d] = {"group": "资源下载", "source": "GitHub"}
+
+    # 添加其他服务的固定测试域名
+    extra_service_domains = {
+        "https://api.telegram.org": ("通知服务", "Telegram"),
+        "https://qyapi.weixin.qq.com": ("通知服务", "企业微信"),
+        "https://api.openai.com": ("AI 服务", "OpenAI"),
+        "https://api.deepseek.com": ("AI 服务", "DeepSeek"),
+        "https://api.siliconflow.cn": ("AI 服务", "SiliconFlow"),
+        "https://generativelanguage.googleapis.com": ("AI 服务", "Google Gemini"),
+        "https://cdn.jsdelivr.net": ("资源下载", "jsDelivr"),
+        "https://webservice.fanart.tv": ("图片服务", "FanArt"),
+    }
+    test_domains.update(extra_service_domains.keys())
+    for url, (group, source) in extra_service_domains.items():
+        domain_source_map[url] = {"group": group, "source": source}
 
     # --- 步骤 3: 并发执行所有测试 ---
     # 定义 URL 转换函数（用于加速代理模式）
@@ -295,17 +367,20 @@ async def test_proxy_latency(
         return url
 
     async def test_domain(domain: str, client: httpx.AsyncClient) -> tuple[str, ProxyTestResult]:
+        # 先做 DNS 解析检测（直连系统解析器，不经代理）
+        host = _extract_host(domain)
+        dns_info = await _resolve_dns(host)
         try:
             test_url = transform_url_for_test(domain)
             start_time = time.time()
             # 使用 HEAD 请求以提高效率，我们只关心连通性
             await client.head(test_url, timeout=10.0)
             latency = (time.time() - start_time) * 1000
-            return domain, ProxyTestResult(status="success", latency=latency)
+            return domain, ProxyTestResult(status="success", latency=latency, **dns_info)
         except Exception as e:
             # 简化错误信息，避免在UI上显示过长的堆栈跟踪
             error_str = f"{type(e).__name__}"
-            return domain, ProxyTestResult(status="failure", error=error_str)
+            return domain, ProxyTestResult(status="failure", error=error_str, **dns_info)
 
     if test_domains:
         async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0) as client:
@@ -316,8 +391,76 @@ async def test_proxy_latency(
 
     return FullProxyTestResponse(
         proxy_connectivity=proxy_connectivity_result,
-        target_sites=target_sites_results
+        target_sites=target_sites_results,
+        domain_map=domain_source_map
     )
+
+
+@router.post("/proxy/test-single", response_model=SingleTargetTestResponse, summary="单独测试某个域名的速度 / DNS 解析")
+async def test_single_target(
+    request: SingleTargetTestRequest,
+    current_user: models.User = Depends(security.get_current_user),
+):
+    """对用户指定的单个域名/URL 进行 DNS 解析与 HTTP 连通性测试。
+
+    - check_dns: 做 DNS 解析（系统本地解析器，不经代理），返回解析耗时与首个 IP。
+    - check_http: 做 HTTP HEAD 连通性测试（按代理模式：直连 / HTTP·SOCKS / 加速代理）。
+    两项可单独开启，便于排查「DNS 解析正常但连接失败」之类问题。
+    """
+    raw_url = (request.url or "").strip()
+    if not raw_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="URL不能为空")
+
+    # 规范化 URL（裸域名补 https://）
+    normalized = raw_url if "://" in raw_url else f"https://{raw_url}"
+    host = _extract_host(normalized)
+    if not host:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法从输入中解析出有效的主机名")
+
+    # 1. DNS 解析检测
+    dns_info: Dict[str, Any] = {}
+    if request.check_dns:
+        dns_info = await _resolve_dns(host)
+
+    # 2. HTTP 连通性检测
+    http_status = None
+    http_latency = None
+    http_error = None
+    if request.check_http:
+        proxy_to_use = None
+        test_target = normalized
+        if request.proxy_mode == "http_socks" and request.proxy_url:
+            proxy_to_use = request.proxy_url
+        elif request.proxy_mode == "accelerate" and request.accelerate_proxy_url:
+            proxy_base = request.accelerate_proxy_url.rstrip('/')
+            protocol = "https" if normalized.startswith("https://") else "http"
+            target = normalized.replace(f"{protocol}://", "")
+            test_target = f"{proxy_base}/{protocol}/{target}"
+        try:
+            async with httpx.AsyncClient(proxy=proxy_to_use, timeout=10.0, follow_redirects=False) as client:
+                start_time = time.time()
+                await client.head(test_target, timeout=10.0)
+                http_latency = (time.time() - start_time) * 1000
+                http_status = "success"
+        except Exception as e:
+            http_status = "failure"
+            http_error = f"{type(e).__name__}"
+
+    # 3. 汇总：整体 status 以 HTTP 为准（未检测 HTTP 时以 DNS 为准）
+    if request.check_http:
+        overall_status = http_status or "failure"
+    elif request.check_dns:
+        overall_status = dns_info.get("dns_status", "failure")
+    else:
+        overall_status = "skipped"
+
+    result = ProxyTestResult(
+        status=overall_status,
+        latency=http_latency,
+        error=http_error,
+        **dns_info,
+    )
+    return SingleTargetTestResponse(url=normalized, host=host, result=result)
 
 
 
@@ -355,10 +498,13 @@ async def set_custom_danmaku_path(
             logger.error(f"模板验证失败: {e}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"路径模板格式错误: {str(e)}")
 
-    await crud.update_config_value(session, "customDanmakuPathEnabled", request.enabled)
-    await crud.update_config_value(session, "customDanmakuPathTemplate", request.template)
-    config_manager.invalidate("customDanmakuPathEnabled")
-    config_manager.invalidate("customDanmakuPathTemplate")
+    config_values = {
+        "customDanmakuPathEnabled": request.enabled,
+        "customDanmakuPathTemplate": request.template,
+    }
+    await crud.update_config_values_atomic(session, config_values)
+    for key in config_values:
+        config_manager.invalidate(key)
     logger.info(f"自定义弹幕路径配置已保存")
     return CustomDanmakuPathResponse(enabled=request.enabled, template=request.template)
 
@@ -388,6 +534,35 @@ async def set_match_fallback_tokens(
     await crud.update_config_value(session, "matchFallbackTokens", request.value)
     config_manager.invalidate("matchFallbackTokens")
     logger.info(f"匹配后备Token配置已保存: {request.value}")
+    return
+
+# --- 外联海报模式 Token 授权配置 ---
+
+
+
+@router.get("/config/posterProxyTokens", response_model=MatchFallbackTokensResponse, summary="获取外联海报模式允许的Token列表")
+async def get_poster_proxy_tokens(
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """获取允许使用外联海报模式的Token列表（JSON格式的token ID数组）。
+    列表为空时表示所有Token均可使用外联海报模式（若后备搜索已启用）。"""
+    value = await crud.get_config_value(session, "posterProxyTokens", "[]")
+    return MatchFallbackTokensResponse(value=value)
+
+
+
+@router.put("/config/posterProxyTokens", status_code=status.HTTP_204_NO_CONTENT, summary="设置外联海报模式允许的Token列表")
+async def set_poster_proxy_tokens(
+    request: MatchFallbackTokensResponse,
+    current_user: models.User = Depends(security.get_current_user),
+    session: AsyncSession = Depends(get_db_session),
+    config_manager: ConfigManager = Depends(get_config_manager)
+):
+    """设置允许使用外联海报模式的Token列表（JSON格式的token ID数组）。"""
+    await crud.update_config_value(session, "posterProxyTokens", request.value)
+    config_manager.invalidate("posterProxyTokens")
+    logger.info(f"外联海报模式Token配置已保存: {request.value}")
     return
 
 # --- 后备搜索配置 ---
@@ -487,6 +662,15 @@ async def update_config_item(
     if value is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing 'value' in request body")
 
+    # why: 该路由是实际注册的通用配置入口，必须阻止重新启用永不过期令牌。
+    if config_key == "jwtExpireMinutes":
+        try:
+            expire_minutes = int(value)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="JWT 有效期必须是整数分钟") from exc
+        if not 1 <= expire_minutes <= 30 * 24 * 60:
+            raise HTTPException(status_code=400, detail="JWT 有效期必须在 1～43200 分钟之间")
+
     # 确保value是字符串类型
     value_str = str(value) if value is not None else ""
 
@@ -552,36 +736,34 @@ async def set_provider_settings(
     providerName: str,
     settings: Dict[str, Any],
     current_user: models.User = Depends(security.get_current_user),
-    config_manager: ConfigManager = Depends(get_config_manager)
+    config_manager: ConfigManager = Depends(get_config_manager),
+    metadata_manager: MetadataSourceManager = Depends(get_metadata_manager),
+    scheduler_manager: SchedulerManager = Depends(get_scheduler_manager)
 ):
-    """批量更新指定元数据源的相关配置。"""
-    config_keys_map = {
-        "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-        "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken", "authMode"],
-        "douban": "doubanCookie", # 单值配置
-        "tvdb": "tvdbApiKey",   # 单值配置
-    }
-
-    if providerName in ["douban", "tvdb"]:
-        key = config_keys_map.get(providerName)
-        if key:
-            # 修复：使用正确的字段名获取配置值
-            if providerName == "tvdb":
-                value = settings.get("tvdbApiKey", "")
-            elif providerName == "douban":
-                value = settings.get("doubanCookie", "")
-            else:
-                value = settings.get("value", "")
-            await config_manager.setValue(configKey=key, configValue=value)
-    else:
-        keys_to_update = config_keys_map.get(providerName, [])
-        tasks = [
-            config_manager.setValue(configKey=key, configValue=settings[key])
-            for key in keys_to_update if key in settings
-        ]
-        if tasks:
-            await asyncio.gather(*tasks)
+    """批量更新指定元数据源的相关配置。config keys 从源类自动获取，无需硬编码。"""
+    keys_to_update = metadata_manager.get_config_keys(providerName)
+    tasks = [
+        config_manager.setValue(configKey=key, configValue=settings[key])
+        for key in keys_to_update if key in settings
+    ]
+    if tasks:
+        await asyncio.gather(*tasks)
     logger.info(f"用户 '{current_user.username}' 更新了元数据源 '{providerName}' 的配置。")
+
+    # 方案甲：保存 Bangumi 配置时，按「开关 + cron」自动维护 bangumi-data 同步调度任务
+    if providerName == "bangumi" and ("bangumiDataSyncEnabled" in settings or "bangumiDataSyncCron" in settings):
+        try:
+            enabled_raw = settings.get("bangumiDataSyncEnabled")
+            if isinstance(enabled_raw, bool):
+                enabled = enabled_raw
+            elif enabled_raw is not None:
+                enabled = str(enabled_raw).lower() == "true"
+            else:
+                enabled = (await config_manager.get("bangumiDataSyncEnabled", "false")).lower() == "true"
+            cron = settings.get("bangumiDataSyncCron") or await config_manager.get("bangumiDataSyncCron", "0 4 * * *")
+            await scheduler_manager.sync_bangumi_data_schedule(enabled, cron)
+        except Exception as e:
+            logger.error(f"维护 bangumi-data 同步调度任务失败: {e}", exc_info=True)
 
 
 
@@ -677,11 +859,10 @@ async def test_ai_connection(
             "Content-Type": "application/json"
         }
 
-        # 新版 OpenAI 模型（o1/o3/o4/gpt-4.1 系列）使用 max_completion_tokens
-        _new_series = ("o1", "o3", "o4", "gpt-4.1", "gpt-4o-2024")
-        _token_key = "max_completion_tokens" if any(
-            request.model.startswith(p) for p in _new_series
-        ) else "max_tokens"
+        # 新版 OpenAI 模型统一使用 max_completion_tokens；
+        # deepseek/siliconflow 等第三方兼容接口保留旧版 max_tokens
+        _third_party = ("deepseek", "siliconflow")
+        _token_key = "max_tokens" if request.provider.lower() in _third_party else "max_completion_tokens"
         payload = {
             "model": request.model,
             "messages": [
@@ -780,8 +961,6 @@ async def get_ai_metrics(
     Returns:
         AI调用统计数据
     """
-    from src.db.crud.ai_metrics import get_ai_metrics_stats, get_ai_metrics_summary
-
     # 优先从数据库读取（持久化数据）
     if source == "db":
         try:

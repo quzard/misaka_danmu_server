@@ -6,6 +6,7 @@ import { Header } from './Header.jsx'
 import { useAtomValue, useSetAtom } from 'jotai'
 import { isMobileAtom, userinfoAtom } from '../../store/index.js'
 import { getUserInfo, autoLogin } from '../apis/index.js'
+import { useAnchorScroll } from '../hooks/useAnchorScroll.js'
 import classNames from 'classnames'
 import Cookies from 'js-cookie'
 
@@ -13,6 +14,9 @@ export const Layout = () => {
   const setUserinfo = useSetAtom(userinfoAtom)
   const isMobile = useAtomValue(isMobileAtom)
   const [isAuthenticating, setIsAuthenticating] = useState(true)
+
+  // 全功能搜索：监听 location.hash，跳转后滚动到目标功能区块并高亮
+  useAnchorScroll()
 
   useEffect(() => {
     const token = Cookies.get('danmu_token')
@@ -23,7 +27,7 @@ export const Layout = () => {
         .then(res => {
           // 自动登录成功，保存 token
           const { accessToken, expiresIn } = res.data
-          const expiresInMinutes = (!expiresIn || expiresIn <= 0) ? (365 * 24 * 60) : expiresIn
+          const expiresInMinutes = (expiresIn > 0) ? expiresIn : (3 * 24 * 60)
           const expiresInDays = expiresInMinutes / (60 * 24)
           Cookies.set('danmu_token', accessToken, {
             expires: expiresInDays,

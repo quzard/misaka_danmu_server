@@ -81,6 +81,11 @@ class ProviderSearchInfo(BaseModel):
     url: Optional[str] = Field(None, description="平台播放页面URL")
     supportsEpisodeUrls: Optional[bool] = Field(None, description="该源是否支持获取分集URL (用于补充源功能)")
     supplementSource: Optional[str] = Field(None, description="搜索补充源名称 (如 '360')，非补充结果时为null")
+    recognitionTitle: Optional[str] = Field(None, description="识别词指定的入库正确名，前端用于展示识别词标签")
+    sourceType: Optional[str] = Field(None, description="弹幕源原始媒体类型")
+    typeSuggestion: Optional[str] = Field(None, description="元数据建议的媒体类型")
+    typeDecision: Optional[str] = Field(None, description="类型判定状态: corrected/needs_confirmation")
+    typeDecisionReason: Optional[str] = Field(None, description="类型判定依据")
 
 
 class ProviderSearchResponse(BaseModel):
@@ -599,7 +604,11 @@ class ScheduledTaskInfo(ScheduledTaskCreate):
 class AvailableJobInfo(BaseModel):
     jobType: str
     name: str
+    name_en: str = ""
+    name_tw: str = ""
     description: str = ""
+    description_en: str = ""
+    description_tw: str = ""
     isSystemTask: bool = False
     configSchema: list = []
 

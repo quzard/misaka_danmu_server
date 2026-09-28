@@ -13,8 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException
 
 from src.db import crud, orm_models, ConfigManager
-from src.services import ScraperManager, TaskManager, TaskSuccess
+from src.services import ScraperManager, TaskManager, TaskSuccess, TaskFailed
 from src.rate_limiter import RateLimiter
+from src.utils.episode_filter import get_and_apply_single_episode_filter
 
 logger = logging.getLogger(__name__)
 
@@ -177,9 +178,16 @@ async def try_predownload_next_episode(
                     logger.info(f"预下载: 正在获取分集列表 (provider={provider}, mediaId={media_id})")
                     episodes = await scraper_manager.get_episodes_routed(provider, media_id)
 
+                    # 应用单剧过滤规则
+                    if episodes and anime and anime.title:
+                        episodes = await get_and_apply_single_episode_filter(
+                            episodes, config_manager, anime.title, provider, media_id
+                        )
+
                     if not episodes or len(episodes) == 0:
                         logger.warning(f"预下载失败: 无法获取分集列表 (provider={provider}, mediaId={media_id})")
-                        raise TaskSuccess("无法获取分集列表")
+                        # why：分集列表获取失败属于真实错误，应标记任务失败而非已完成
+                        raise TaskFailed("无法获取分集列表")
 
                     # 查找下一集
                     # 如果有 partial_offset 规则，需要反向偏移到源站实际集数再查找
@@ -224,7 +232,8 @@ async def try_predownload_next_episode(
 
                     if not comments or len(comments) == 0:
                         logger.warning(f"预下载: 第 {next_episode_index} 集没有弹幕")
-                        raise TaskSuccess("未找到弹幕")
+                        # why：弹幕获取失败（源存在但无弹幕），应标记任务失败而非已完成
+                        raise TaskFailed("未找到弹幕")
 
                     await rate_limiter.increment_fallback("search", provider)
 
@@ -259,7 +268,18 @@ async def try_predownload_next_episode(
                 f"预下载弹幕: {anime.title} 第{next_episode_index}集",
                 unique_key=unique_key,
                 task_type="predownload",
-                queue_type="fallback"  # 预下载使用后备队列
+                queue_type="fallback",  # 预下载使用后备队列
+                # 结构化参数：供预下载完成通知渲染「作品名/季集/弹幕源」结构块 + 海报，
+                # 与匹配后备通知样式统一（imageUrl 会被 task_manager 映射为通知 image_url）。
+                task_parameters={
+                    "anime_title": anime.title,
+                    "season": anime.season,
+                    "episode": next_episode_index,
+                    "provider": provider,
+                    "year": anime.year,
+                    "imageUrl": anime.imageUrl or "",
+                    "is_movie": (anime.type == "movie"),
+                },
             )
             logger.info(f"✓ 预下载任务已提交: anime='{anime.title}', index={next_episode_index}, taskId={task_id}")
 

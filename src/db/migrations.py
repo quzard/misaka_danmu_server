@@ -137,6 +137,7 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'token_access_logs': ['access_time'],
         'ua_rules': ['created_at'],
         'bangumi_auth': ['expires_at', 'authorized_at'],
+        'oauth_credentials': ['expires_at', 'authorized_at'],
         'oauth_states': ['expires_at'],
         'scheduled_tasks': ['last_run_at', 'next_run_at'],
         'webhook_tasks': ['reception_time', 'execute_time'],
@@ -220,13 +221,14 @@ async def _rollback_to_original_types_v1(conn: AsyncConnection, db_type: str):
         'user_sessions': {'jti': 500, 'ip_address': 500, 'user_agent': 500},
         'scrapers': {'provider_name': 500},
         'metadata_sources': {'provider_name': 500},
-        'anime_metadata': {'tmdb_id': 500, 'tmdb_episode_group_id': 500, 'imdb_id': 500, 'tvdb_id': 500, 'douban_id': 500, 'bangumi_id': 500},
+        'anime_metadata': {'tmdb_id': 500, 'tmdb_episode_group_id': 500, 'imdb_id': 500, 'tvdb_id': 500, 'douban_id': 500, 'bangumi_id': 500, 'trakt_id': 500, 'air_time': 10},
         'config': {'config_key': 500},
         'cache_data': {'cache_provider': 500, 'cache_key': 500},
         'api_tokens': {'name': 500, 'token': 500},
         'token_access_logs': {'ip_address': 500, 'status': 500, 'path': 512},
         'ua_rules': {'ua_string': 500},
         'bangumi_auth': {'nickname': 500, 'avatar_url': 512, 'redirect_uri': 512},
+        'oauth_credentials': {'provider_user_id': 500, 'provider_username': 500},
         'oauth_states': {'state_key': 500},
         'anime_aliases': {'name_en': 500, 'name_jp': 500, 'name_romaji': 500, 'alias_cn_1': 500, 'alias_cn_2': 500, 'alias_cn_3': 500},
         'tmdb_episode_mapping': {'tmdb_episode_group_id': 500},
@@ -718,6 +720,44 @@ async def _migrate_anime_group_fk_v1(conn: AsyncConnection, db_type: str):
             logger.warning(f"  ⚠️  添加 anime.group_id 外键约束失败: {e}")
 
 
+async def _reset_ai_match_prompt_v1(conn: AsyncConnection):
+    """删除 config 表中的 aiMatchPrompt 条目，使其在 register_defaults 时用新默认值回填。
+
+    why：DEFAULT_AI_MATCH_PROMPT 新增了「库内已有源优先」等规则，但 register_defaults
+    只在 key 不存在时才写入，已有自定义/旧默认值不会被覆盖。此迁移删除旧条目，
+    随后启动流程的 register_defaults 会自动用最新默认提示词回填。
+    若日后再次更新默认提示词需强制刷新，新增 _v2 迁移即可。
+    """
+    logger.info("删除旧的 aiMatchPrompt 配置，使其用新默认提示词回填...")
+    await conn.execute(text("DELETE FROM config WHERE config_key = 'aiMatchPrompt'"))
+    logger.info("aiMatchPrompt 已删除，将在 register_defaults 阶段用新默认值回填。")
+
+
+async def _reset_ai_match_prompt_v2(conn: AsyncConnection):
+    """删除 config 表中的 aiMatchPrompt 条目，使其在 register_defaults 时用新默认值回填。
+
+    why：DEFAULT_AI_MATCH_PROMPT 新增了「matchesRecognitionRule 识别词身份校正」字段说明，
+    用于让 AI 理解某结果经识别词规则转换后的真实身份。register_defaults 只在 key 不存在时
+    写入，老用户 config 表里的旧 prompt 不含该说明，必须删除旧条目使其重新回填最新默认值。
+    若日后再次更新默认提示词需强制刷新，新增 _v3 迁移即可。
+    """
+    logger.info("删除旧的 aiMatchPrompt 配置(v2)，使其用含识别词校正的新默认提示词回填...")
+    await conn.execute(text("DELETE FROM config WHERE config_key = 'aiMatchPrompt'"))
+    logger.info("aiMatchPrompt 已删除(v2)，将在 register_defaults 阶段用新默认值回填。")
+
+
+async def _reset_server_instance_id_v1(conn: AsyncConnection):
+    """删除 config 表中的 serverInstanceId 条目
+    """
+    await conn.execute(text("DELETE FROM config WHERE config_key = 'serverInstanceId'"))
+
+
+async def _reset_server_instance_id_v2(conn: AsyncConnection):
+    """删除旧的 serverInstanceId。
+    """
+    await conn.execute(text("DELETE FROM config WHERE config_key = 'serverInstanceId'"))
+
+
 # 所有迁移任务的 ID 列表（新增迁移时需同步更新此列表）
 ALL_MIGRATION_IDS = [
     "migrate_clear_rate_limit_state_v1",
@@ -729,6 +769,10 @@ ALL_MIGRATION_IDS = [
     "drop_force_scrape_column_v1",
     "remove_system_token_reset_task_v1",
     "migrate_anime_group_fk_v1",
+    "reset_ai_match_prompt_v1",
+    "reset_ai_match_prompt_v2",
+    "reset_server_instance_id_v1",
+    "reset_server_instance_id_v2",
 ]
 
 
@@ -766,6 +810,10 @@ async def run_migrations(conn: AsyncConnection, db_type: str, db_name: str):
         ("drop_force_scrape_column_v1", _drop_force_scrape_column_v1, (db_type,)),  # 删除已废弃的 force_scrape 列
         ("remove_system_token_reset_task_v1", _remove_system_token_reset_task_v1, ()),  # 删除已迁移到内部轮询的 tokenReset 定时任务
         ("migrate_anime_group_fk_v1", _migrate_anime_group_fk_v1, (db_type,)),  # 为 anime.group_id 添加外键约束
+        ("reset_ai_match_prompt_v1", _reset_ai_match_prompt_v1, ()),  # 删除旧 aiMatchPrompt，用新默认提示词回填
+        ("reset_ai_match_prompt_v2", _reset_ai_match_prompt_v2, ()),  # 再次删除 aiMatchPrompt，回填含识别词校正的新默认值
+        ("reset_server_instance_id_v1", _reset_server_instance_id_v1, ()),
+        ("reset_server_instance_id_v2", _reset_server_instance_id_v2, ()),  # 重置为带归属标记的可反解格式
     ]
 
     for migration_id, migration_func, args in migrations:

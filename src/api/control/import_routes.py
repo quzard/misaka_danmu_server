@@ -504,7 +504,22 @@ async def direct_import(
             progress_callback=cb, session=session, manager=manager, task_manager=task_manager,
             rate_limiter=rate_limiter, title_recognition_manager=title_recognition_manager
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        # 补齐 task_parameters：供完成通知展示作品名/季/集/类型/来源
+        direct_task_parameters = {
+            "provider": item_to_import.provider,
+            "mediaId": item_to_import.mediaId,
+            "animeTitle": item_to_import.title,
+            "mediaType": item_to_import.type,
+            "season": item_to_import.season,
+            "episode": item_to_import.currentEpisodeIndex,
+            "year": item_to_import.year,
+            "imageUrl": item_to_import.imageUrl,
+            "tmdbId": payload.tmdbId or "",
+        }
+        task_id, _ = await task_manager.submit_task(
+            task_coro, task_title, unique_key=unique_key,
+            task_parameters=direct_task_parameters,
+        )
         return {"message": "导入任务已提交", "taskId": task_id}
     except HTTPException as e:
         raise e
@@ -674,13 +689,32 @@ async def edited_import(
     episodes_hash = hashlib.md5(episode_indices_str.encode('utf-8')).hexdigest()[:8]
     unique_key = f"import-{edited_request.provider}-{edited_request.mediaId}-{episodes_hash}"
 
+    # 构造 task_parameters，供完成通知格式化使用（否则媒体信息段为空）
+    first_episode = payload.episodes[0].episodeIndex if payload.episodes else None
+    edited_task_parameters = {
+        "animeTitle": edited_request.animeTitle,
+        "season": edited_request.season,
+        "episode": first_episode,
+        "episodeCount": len(payload.episodes),
+        "provider": edited_request.provider,
+        "mediaId": edited_request.mediaId,
+        "type": edited_request.mediaType,
+        "mediaType": edited_request.mediaType,
+        "tmdbId": edited_request.tmdbId or "",
+        "imageUrl": edited_request.imageUrl or "",
+        "bangumiId": edited_request.bangumiId or "",
+    }
+
     try:
         task_coro = lambda session, cb: tasks.edited_import_task(
             request_data=edited_request, progress_callback=cb, session=session,
             config_manager=config_manager, manager=manager, rate_limiter=rate_limiter,
             metadata_manager=metadata_manager, title_recognition_manager=title_recognition_manager
         )
-        task_id, _ = await task_manager.submit_task(task_coro, task_title, unique_key=unique_key)
+        task_id, _ = await task_manager.submit_task(
+            task_coro, task_title, unique_key=unique_key,
+            task_parameters=edited_task_parameters,
+        )
         return {"message": "编辑后导入任务已提交", "taskId": task_id}
     except HTTPException as e:
         raise e

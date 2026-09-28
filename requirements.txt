@@ -1,12 +1,14 @@
-fastapi
+fastapi>=0.115.0,<0.116.0
+starlette>=0.40.0,<0.42.0
 uvicorn[standard]
-aiomysql
-asyncpg
-SQLAlchemy[asyncio]
+asyncmy>=0.2.9
+asyncpg>=0.29.0
+SQLAlchemy[asyncio]>=2.0.32
 greenlet
 apscheduler
 pydantic-settings
-httpx[socks]>=0.23.0
+# httpx 0.26+ 才支持 AsyncClient(proxy=...) 参数（旧版为 proxies=），代码使用 proxy= 故锁 >=0.26
+httpx[socks]>=0.26.0
 # 使用固定的 passlib 和 bcrypt 版本以避免兼容性问题
 # passlib 未适配 bcrypt>=4.1 的 API 变更（__about__ 移除、72字节密码限制）
 # 锁定 bcrypt<4.1 直到 passlib 发布兼容版本
@@ -50,8 +52,13 @@ pyTelegramBotAPI
 # Redis 缓存后端（可选，仅 cache.backend 配置为 redis 时需要）
 redis>=5.0.0  # redis-py，含 asyncio 支持
 # MCP Server（Model Context Protocol）支持
-fastapi-mcp>=0.3.0  # 将FastAPI路由暴露为MCP工具
+# why：fastapi-mcp 0.4.0 未声明 mcp<2，宽松解析会安装不兼容的 mcp 2.x。
+fastapi-mcp==0.4.0
+mcp==1.29.0
 # 两步验证 (TOTP)
 pyotp  # RFC 6238 TOTP 实现
 # WebAuthn PassKey 支持
 webauthn>=2.0.0  # FIDO2/WebAuthn 服务端实现
+# 支持不等长 lookbehind 的正则引擎，用于兜底全局分集标题过滤
+regex
+Pillow>=10.0.0  # 用于将搜索结果海报聚合为九宫格图片（Telegram 搜索体验）

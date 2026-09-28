@@ -141,7 +141,7 @@ async def unified_search(
                     from src.db import models
                     user = models.User(id=0, username="system")
                     # 使用核心标题获取别名
-                    all_possible_aliases, supp_results, _ = await metadata_manager.search_supplemental_sources(core_title, user)
+                    all_possible_aliases, supp_results, _, _ = await metadata_manager.search_supplemental_sources(core_title, user)
 
                     # 将补充结果输出到调用方（如果提供了输出参数）
                     if supplemental_results_out is not None and supp_results:
@@ -180,9 +180,35 @@ async def unified_search(
             max_results_per_source = 30
             logger.warning(f"无效的searchMaxResultsPerSource配置值: {config_value}，使用默认值30")
 
-    # 创建搜索任务
+    # 🚀 bangumi-data 别名增强
+    # 别名增强：把离线库命中的全语言译名（尤其繁中）也加入搜索关键词，解决「官方主名 vs 平台译名」不一致。
+    # 注：id 直链补充源已迁移到 bangumi 元数据源的 supplement_search 模板（仅弹幕源空结果时兜底，全入口统一）。
+    search_keywords = [search_term]
+    try:
+        from src.services.bangumi_data_manager import get_bangumi_data_manager
+        _bgm_mgr = get_bangumi_data_manager()
+        if _bgm_mgr is not None:
+            _bgm_enabled = True
+            if _bgm_mgr.config_manager is not None:
+                _bgm_enabled = (await _bgm_mgr.config_manager.get("bangumiDataOfflineEnabled", "true")).lower() == "true"
+            if _bgm_enabled:
+                from src.utils import parse_search_keyword as _pk
+                _core = _pk(search_term)["title"]
+                bgm_aliases = await _bgm_mgr.get_search_aliases(_core, limit=3)
+                seen_kw = {search_term.replace(" ", "")}
+                for a in bgm_aliases:
+                    k = a.replace(" ", "")
+                    if k and k not in seen_kw:
+                        seen_kw.add(k)
+                        search_keywords.append(a)
+                if len(search_keywords) > 1:
+                    logger.info(f"bangumi-data 别名增强: '{search_term}' 追加 {len(search_keywords)-1} 个译名搜索词")
+    except Exception as e:
+        logger.warning(f"bangumi-data 别名增强失败（忽略）: {type(e).__name__}: {e}")
+
+    # 创建搜索任务（用增强后的关键词列表，search_all 内部对每个关键词并发搜各源）
     async def perform_search():
-        return await scraper_manager.search_all([search_term], episode_info=episode_info, max_results_per_source=max_results_per_source)
+        return await scraper_manager.search_all(search_keywords, episode_info=episode_info, max_results_per_source=max_results_per_source)
 
     search_task = asyncio.create_task(perform_search())
 
@@ -222,8 +248,16 @@ async def unified_search(
         def normalize_for_filtering(title: str) -> str:
             if not title: return ""
             import re
-            title = re.sub(r'[\[【(（].*?[\]】)）]', '', title)
-            return title.lower().replace(" ", "").replace("：", ":").strip()
+            # why: 只剥掉括号符号，保留括号内的内容。
+            # 原先的 re.sub(r'[\[【(（].*?[\]】)）]', ...) 会把 "【我推的孩子】 第二季"
+            # 处理成 "第二季"——这是无意义的通用词，fuzz.partial_ratio 会让所有含"第二季"
+            # 的搜索结果（如"蜡笔小新 第二季"）都通过过滤，产生大量误包含。
+            # 正确做法是只移除括号符号本身，保留内容：
+            #   "【我推的孩子】 第二季" → "我推的孩子 第二季"
+            #   "【我推的孩子】"       → "我推的孩子"
+            #   "[1080P][剧名]"       → "1080P剧名"（含质量标识也不影响匹配精度）
+            cleaned = re.sub(r'[【】\[\]（）()]', '', title).strip()
+            return cleaned.lower().replace(" ", "").replace("：", ":").strip()
 
         normalized_filter_aliases = {normalize_for_filtering(alias) for alias in filter_aliases if alias}
         filtered_results = []
@@ -323,7 +357,7 @@ async def unified_search(
                        f"长度跳过={skipped_by_length}, 字符跳过={skipped_by_chars}")
 
         logger.info(f"别名过滤: 从 {len(all_results)} 个原始结果中，保留了 {len(filtered_results)} 个相关结果。")
-    
+
     # 4. 排序
     await progress_callback(70, "排序搜索结果...")
     

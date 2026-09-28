@@ -8,11 +8,13 @@
 import asyncio
 import base64
 import hashlib
-import logging
+import mimetypes
 import struct
 import time
 import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
+import logging
+
 
 import httpx
 
@@ -24,9 +26,10 @@ except ImportError:
 
 from src.notification.base import (
     BaseNotificationChannel,
-    ChannelCapability, ChannelCapabilities, CommandResult,
+    ChannelCapability, ChannelCapabilities, CommandResult, IMAGE_MODE_FIELD,
 )
 from src._version import APP_VERSION
+from src.utils.image_utils import load_image_bytes
 
 logger = logging.getLogger(__name__)
 bot_raw_logger = logging.getLogger("bot_raw")
@@ -103,11 +106,14 @@ class WeChatChannel(BaseNotificationChannel):
 
     channel_type = "wechat"
     display_name = "企业微信"
+    display_name_en = "WeCom"
+    display_name_tw = "企業微信"
     hide_proxy = True   # 企业微信使用 wecom_proxy 反代地址，不需要全局 HTTP 代理开关
 
+    # 企业微信发送端使用 msgtype:text 纯文本，不渲染 markdown，故不声明 RICH_TEXT
     _CAPABILITIES = ChannelCapabilities(
         capabilities={
-            ChannelCapability.RICH_TEXT,
+            ChannelCapability.IMAGES,
             ChannelCapability.LINKS,
             ChannelCapability.MENU_COMMANDS,
         },
@@ -122,21 +128,39 @@ class WeChatChannel(BaseNotificationChannel):
         # 按钮编号→callback_data 映射（用于数字选择降级交互）
         self._button_mappings: Dict[str, list] = {}
 
-    def get_capabilities(self) -> ChannelCapabilities:
-        return self._CAPABILITIES
-
     def _api_base(self) -> str:
-        """返回企业微信 API Base URL（支持通用出网代理路由 /out/）"""
+        """返回企业微信 API Base URL，智能识别代理格式：
+        - 留空 → 直连官方 https://qyapi.weixin.qq.com/cgi-bin
+        - 包含 /cgi-bin → 用户给了完整路径，直接用
+        - 以 /out 结尾 → MoviePilot 通用出网代理格式
+        - 其他 → 简单反代（Flask/Nginx 直接转发 /cgi-bin/*）
+        """
         proxy = self.config.get("wecom_proxy", "").strip().rstrip("/")
         if not proxy:
             return WECOM_API_BASE
-        # 通用出网代理格式：{vps_url}/out/qyapi.weixin.qq.com/cgi-bin
-        return f"{proxy}/out/qyapi.weixin.qq.com/cgi-bin"
+
+        # 已包含 /cgi-bin → 完整路径，直接用
+        if "/cgi-bin" in proxy:
+            return proxy if proxy.endswith("/cgi-bin") else proxy.split("/cgi-bin")[0] + "/cgi-bin"
+
+        # 以 /out 结尾 → MoviePilot 通用出网代理格式
+        if proxy.endswith("/out"):
+            return f"{proxy}/qyapi.weixin.qq.com/cgi-bin"
+
+        # 默认：简单反代，直接拼 /cgi-bin
+        # 兼容 Flask/Nginx 等直接转发 /cgi-bin/* 到企业微信的代理
+        return f"{proxy}/cgi-bin"
 
     def _relay_headers(self) -> dict:
-        """当使用 VPS 代理时注入认证 Header，防止代理被滥用"""
+        """当使用 VPS 代理且开启「代理鉴权请求头」开关时，注入认证 Header，
+        用于 misaka-relay 这类需要 X-Relay-Key 校验的代理；防止代理被滥用。
+        使用不校验该头的第三方代理时应关闭此开关（默认关闭）。
+        """
         proxy = self.config.get("wecom_proxy", "").strip()
         if not proxy:
+            return {}
+        # 开关控制（默认关闭）：仅在显式开启时才附带鉴权头
+        if str(self.config.get("wecom_proxy_relay_auth", "false")).lower() != "true":
             return {}
         key = self.config.get("__webhook_api_key", "")
         return {"X-Relay-Key": key} if key else {}
@@ -185,9 +209,15 @@ class WeChatChannel(BaseNotificationChannel):
         self._loop = None
         self.logger.info("企业微信渠道已停止")
 
-    async def _get_access_token(self) -> Optional[str]:
+    async def _get_access_token(self, force: bool = False) -> Optional[str]:
+        """获取企业微信 access_token。
+
+        Args:
+            force: 为 True 时忽略缓存强制重新获取（用于 token 失效 42001 后的恢复）。
+        """
         now = time.time()
-        if self._access_token and now < self._token_expires_at - 300:
+        # 非强制刷新时，命中未过期缓存直接返回（提前 300 秒视为过期）
+        if not force and self._access_token and now < self._token_expires_at - 300:
             return self._access_token
         corp_id = self.config.get("corp_id", "").strip()
         corp_secret = self.config.get("corp_secret", "").strip()
@@ -200,7 +230,18 @@ class WeChatChannel(BaseNotificationChannel):
                     params={"corpid": corp_id, "corpsecret": corp_secret},
                     headers=self._relay_headers(),
                 )
-                d = resp.json()
+                # 企业微信正常返回 JSON；若返回空响应/HTML 错误页（常见于代理地址
+                # 配错、VPS 反代未就绪、网络不通），resp.json() 会抛 JSONDecodeError，
+                # 这里单独捕获并打印实际 URL + 状态码 + 正文片段，便于定位代理问题。
+                try:
+                    d = resp.json()
+                except Exception:
+                    body_preview = (resp.text or "")[:200]
+                    self.logger.error(
+                        f"获取 token 失败：服务器未返回 JSON（疑似代理地址配置错误或网络异常）。"
+                        f" URL={self._api_base()}/gettoken, HTTP状态={resp.status_code}, 响应内容={body_preview!r}"
+                    )
+                    return None
                 if d.get("errcode", -1) == 0:
                     self._access_token = d["access_token"]
                     self._token_expires_at = now + d.get("expires_in", 7200)
@@ -211,59 +252,132 @@ class WeChatChannel(BaseNotificationChannel):
         return None
 
     async def _api_post(self, path: str, payload: dict, extra_params: Optional[dict] = None) -> Optional[dict]:
-        """统一 API POST 请求"""
+        """统一 API POST 请求。
+
+        当企业微信返回 errcode 42001（access_token 失效/过期）时，
+        强制刷新 token 并自动重发一次，避免单次失效导致消息丢失。
+        """
         token = await self._get_access_token()
         if not token:
             return None
-        params = {"access_token": token}
-        if extra_params:
-            params.update(extra_params)
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    f"{self._api_base()}/{path}",
-                    params=params,
-                    json=payload,
-                    headers=self._relay_headers(),
-                )
-                return resp.json()
-        except Exception as e:
-            self.logger.error(f"API [{path}] 异常: {e}")
+
+        async def _do_post(access_token: str) -> Optional[dict]:
+            params = {"access_token": access_token}
+            if extra_params:
+                params.update(extra_params)
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    resp = await client.post(
+                        f"{self._api_base()}/{path}",
+                        params=params,
+                        json=payload,
+                        headers=self._relay_headers(),
+                    )
+                    return resp.json()
+            except Exception as e:
+                self.logger.error(f"API [{path}] 异常: {e}")
+                return None
+
+        d = await _do_post(token)
+        # token 失效（42001）：强制刷新后重发一次
+        if d and d.get("errcode", -1) == 42001:
+            self.logger.warning(f"API [{path}] access_token 失效(42001)，强制刷新后重试")
+            new_token = await self._get_access_token(force=True)
+            if new_token:
+                d = await _do_post(new_token)
+        return d
+
+    async def _upload_image_media(self, image_bytes: bytes, filename: str = "poster.jpg") -> Optional[str]:
+        """上传企业微信临时图片素材并返回 media_id。"""
+        token = await self._get_access_token()
+        if not token or not image_bytes:
             return None
 
-    async def send_message(self, title: str, text: str, **kwargs):
-        agent_id = self.config.get("agent_id", "").strip()
-        if not agent_id:
-            return
-        to_user = kwargs.get("to_user") or self.config.get("to_user", "@all").strip() or "@all"
-        image: str = kwargs.get("image", "")   # 封面图 URL
-        url: str = kwargs.get("url", "")       # 点击跳转 URL
+        async def _upload(access_token: str) -> Optional[dict]:
+            content_type = mimetypes.guess_type(filename)[0] or "image/jpeg"
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{self._api_base()}/media/upload",
+                        params={"access_token": access_token, "type": "image"},
+                        files={"media": (filename, image_bytes, content_type)},
+                        headers=self._relay_headers(),
+                    )
+                    return response.json()
+            except Exception as e:
+                self.logger.warning(f"企业微信上传图片素材失败: {e}")
+                return None
 
-        if image or url:
-            # 图文消息（news 类型），参考 MoviePilot 实现
-            article = {
-                "title": title or text[:64],
-                "description": text,
-                "picurl": image,
-                "url": url,
-            }
-            payload = {
-                "touser": to_user,
-                "msgtype": "news",
-                "agentid": int(agent_id),
-                "news": {"articles": [article]},
-            }
-        else:
-            content = f"【{title}】\n{text}" if title else text
-            payload = {
-                "touser": to_user,
-                "msgtype": "text",
-                "agentid": int(agent_id),
-                "text": {"content": content},
-            }
-        d = await self._api_post("message/send", payload)
-        if d and d.get("errcode", -1) != 0:
-            self.logger.error(f"发送消息失败: {d.get('errmsg')}")
+        result = await _upload(token)
+        if result and result.get("errcode") == 42001:
+            token = await self._get_access_token(force=True)
+            result = await _upload(token) if token else None
+        if not result or result.get("errcode", 0) != 0:
+            self.logger.warning(f"企业微信上传图片素材失败: {(result or {}).get('errmsg', '无响应')}")
+            return None
+        return result.get("media_id")
+
+    async def _send_image_to(self, to_user: str, media_id: str, agent_id: int) -> bool:
+        """发送已上传的企业微信图片消息。"""
+        payload = {
+            "touser": to_user, "msgtype": "image", "agentid": agent_id,
+            "image": {"media_id": media_id},
+        }
+        result = await self._api_post("message/send", payload)
+        if result and result.get("errcode", -1) == 0:
+            return True
+        self.logger.warning(f"企业微信图片消息发送失败: {(result or {}).get('errmsg', '无响应')}")
+        return False
+
+    async def send_message(self, title: str, text: str, **kwargs):
+        agent_id_raw = self.config.get("agent_id", "").strip()
+        if not agent_id_raw:
+            return
+        agent_id = int(agent_id_raw)
+        to_user = kwargs.get("to_user") or self.config.get("to_user", "@all").strip() or "@all"
+        image_url: str = kwargs.get("image", "")
+        image_bytes: Optional[bytes] = kwargs.get("image_bytes")
+
+        # 图片发送模式：
+        # base.send_rendered 已在「纯文字」模式下不传图片，故此处只需区分
+        # separate（图片与文字分两条，历史行为）与 poster（图文合一 news 卡片）。
+        separate = bool(kwargs.get("image_separate"))
+        poster_mode = (image_url or image_bytes) and not separate
+
+        # why：企业微信主动拉取 news.picurl 容易受防盗链和内网地址影响，改为服务端取图后上传素材。
+        if not image_bytes and image_url:
+            image_bytes = await load_image_bytes(image_url)
+
+        content = f"【{title}】\n{text}" if title else text
+
+        if poster_mode and image_url:
+            # 海报模式：用 news 图文卡片实现图文合一（需要可访问的 picurl）
+            article_title = kwargs.get("article_title") or title or "通知"
+            try:
+                await self._send_news_to(to_user, [{
+                    "title": article_title,
+                    "description": text[:512],
+                    "url": kwargs.get("link") or image_url,
+                    "picurl": image_url,
+                }])
+                return
+            except Exception as news_err:
+                self.logger.warning(f"海报模式发送 news 卡片失败，降级为图片+文字: {news_err}")
+
+        if image_bytes:
+            media_id = await self._upload_image_media(image_bytes)
+            if media_id:
+                await self._send_image_to(to_user, media_id, agent_id)
+
+        payload = {
+            "touser": to_user,
+            "msgtype": "text",
+            "agentid": agent_id,
+            "text": {"content": content},
+        }
+        result = await self._api_post("message/send", payload)
+        if result and result.get("errcode", -1) != 0:
+            self.logger.error(f"发送消息失败: {result.get('errmsg')}")
 
     async def _send_text_to(self, to_user: str, text: str):
         """回复消息给指定用户"""
@@ -283,6 +397,10 @@ class WeChatChannel(BaseNotificationChannel):
         if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(self._register_menu_async(commands), loop)
 
+    # 一级菜单分组名。按 MENU_COMMANDS 的顺序每 5 个命令归一组：
+    # 第 1 组是搜索/导入类，第 2 组是库与系统管理类。
+    _MENU_GROUP_NAMES = ["搜索导入", "管理设置", "更多功能"]
+
     async def _register_menu_async(self, commands: Dict[str, str]):
         agent_id = self.config.get("agent_id", "").strip()
         if not agent_id:
@@ -292,23 +410,44 @@ class WeChatChannel(BaseNotificationChannel):
         items = list(commands.items())
         for i in range(0, min(len(items), 15), 5):
             chunk = items[i:i + 5]
+            group_idx = i // 5
             if len(chunk) == 1:
                 cmd, desc = chunk[0]
-                buttons.append({"type": "click", "name": desc[:8], "key": cmd})
+                buttons.append({"type": "click", "name": desc[:8], "key": self._menu_key(cmd)})
             else:
+                group_name = (
+                    self._MENU_GROUP_NAMES[group_idx]
+                    if group_idx < len(self._MENU_GROUP_NAMES)
+                    else f"功能{group_idx + 1}"
+                )
                 buttons.append({
-                    "name": f"功能{i // 5 + 1}",
-                    "sub_button": [{"type": "click", "name": d[:8], "key": c} for c, d in chunk],
+                    "name": group_name,
+                    "sub_button": [
+                        {"type": "click", "name": d[:8], "key": self._menu_key(c)}
+                        for c, d in chunk
+                    ],
                 })
         if not buttons:
             return
-        d = await self._api_post("menu/create", {"button": buttons[:3]}, extra_params={"agentid": agent_id})
+        payload = {"button": buttons[:3]}
+        self._log_raw("⬆ menu/create 请求", payload)
+        d = await self._api_post("menu/create", payload, extra_params={"agentid": agent_id})
         if d is None:
             return
         if d.get("errcode", -1) == 0:
             self.logger.info("企业微信菜单注册成功")
         else:
-            self.logger.error(f"菜单注册失败: {d.get('errmsg')}")
+            self.logger.error(f"菜单注册失败: {d.get('errmsg')} (code={d.get('errcode')})")
+
+    @staticmethod
+    def _menu_key(command: str) -> str:
+        """把内部命令名转换为企业微信菜单按钮的 key。
+
+        why：MENU_COMMANDS 的键带 "/" 前缀（如 /help），但企业微信菜单 key 只接受
+        字母数字下划线。带 "/" 时菜单能建成、按钮也能显示，但点击回调的 EventKey
+        对不上命令表，表现为「点了没反应」。这里统一去掉前缀。
+        """
+        return command.lstrip("/")
 
     def process_webhook_update(self, update_data: dict) -> Any:
         """
@@ -485,11 +624,12 @@ class WeChatChannel(BaseNotificationChannel):
             self._button_mappings.pop(user_id, None)
 
         # 有图文 articles 时先发 news 卡片（仅有 picurl 的条目才有意义）
-        # 同时把文字正文只保留第一行（标题行），去掉重复列表，只保留操作提示
+        # why：交互卡片不走 send_rendered，发送前需显式复用统一外链处理。
         if result.articles:
-            has_image = any(a.get("picurl") for a in result.articles)
+            articles = await self.localize_articles(result.articles)
+            has_image = any(a.get("picurl") for a in articles)
             if has_image:
-                await self._send_news_to(user_id, result.articles)
+                await self._send_news_to(user_id, articles)
                 # 文字部分去掉结果列表，只保留第一行标题 + 操作选项
                 first_line = text.split("\n")[0]
                 ops_start = text.find("可用操作：")
@@ -522,74 +662,146 @@ class WeChatChannel(BaseNotificationChannel):
             {
                 "key": "corp_id",
                 "label": "企业 CorpID",
+                "label_en": "Corp ID",
+                "label_tw": "企業 CorpID",
                 "type": "string",
+                # rowGroup：与 agent_id 同组，并排在同一行
+                "rowGroup": "wecom_app_row1",
                 "description": "企业微信管理后台 → 我的企业 → 企业信息 → 企业ID",
+                "description_en": "WeCom Admin → My Company → Company Info → Corp ID",
+                "description_tw": "企業微信管理後台 → 我的企業 → 企業資訊 → 企業ID",
                 "placeholder": "ww1234567890abcdef",
                 "required": True,
             },
             {
                 "key": "corp_secret",
                 "label": "应用 Secret",
+                "label_en": "App Secret",
+                "label_tw": "應用 Secret",
                 "type": "password",
+                # rowGroup：与 to_user 同组，并排在同一行
+                "rowGroup": "wecom_secret_row",
                 "description": "企业微信管理后台 → 应用管理 → 自建应用 → 详情 → Secret",
+                "description_en": "WeCom Admin → App Management → Custom App → Details → Secret",
+                "description_tw": "企業微信管理後台 → 應用管理 → 自建應用 → 詳情 → Secret",
                 "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                 "required": True,
             },
             {
                 "key": "agent_id",
                 "label": "应用 AgentID",
+                "label_en": "App AgentID",
+                "label_tw": "應用 AgentID",
                 "type": "string",
+                # rowGroup：与 corp_id 同组，并排在同一行
+                "rowGroup": "wecom_app_row1",
                 "description": "企业微信管理后台 → 应用管理 → 自建应用 → 详情 → AgentId",
+                "description_en": "WeCom Admin → App Management → Custom App → Details → AgentId",
+                "description_tw": "企業微信管理後台 → 應用管理 → 自建應用 → 詳情 → AgentId",
                 "placeholder": "1000001",
                 "required": True,
             },
             {
                 "key": "to_user",
                 "label": "接收者",
+                "label_en": "Receiver",
+                "label_tw": "接收者",
                 "type": "string",
+                # rowGroup：与 corp_secret 同组，并排在同一行
+                "rowGroup": "wecom_secret_row",
                 "description": "接收消息的用户ID，多个用 | 分隔。@all 表示全体成员",
+                "description_en": "User IDs to receive messages, separated by |. @all means all members.",
+                "description_tw": "接收訊息的使用者ID，多個用 | 分隔。@all 表示全體成員",
                 "placeholder": "@all",
             },
             {
                 "key": "msg_token",
                 "label": "消息 Token",
+                "label_en": "Message Token",
+                "label_tw": "訊息 Token",
                 "type": "string",
+                # rowGroup：与 encoding_aes_key 同组，并排在同一行
+                "rowGroup": "wecom_webhook_row",
                 "description": "企业微信后台 → 应用 → 接收消息 → Token（启用双向交互时必填）",
+                "description_en": "WeCom Admin → App → Receive Messages → Token (required for two-way interaction)",
+                "description_tw": "企業微信後台 → 應用 → 接收訊息 → Token（啟用雙向互動時必填）",
                 "placeholder": "随机字符串",
+                "placeholder_en": "Random string",
+                "placeholder_tw": "隨機字串",
             },
             {
                 "key": "encoding_aes_key",
                 "label": "消息 EncodingAESKey",
+                "label_en": "Message EncodingAESKey",
+                "label_tw": "訊息 EncodingAESKey",
                 "type": "password",
+                # rowGroup：与 msg_token 同组，并排在同一行
+                "rowGroup": "wecom_webhook_row",
                 "description": "企业微信后台 → 应用 → 接收消息 → EncodingAESKey（43位，启用双向交互时必填）",
+                "description_en": "WeCom Admin → App → Receive Messages → EncodingAESKey (43 chars, required for two-way interaction)",
+                "description_tw": "企業微信後台 → 應用 → 接收訊息 → EncodingAESKey（43位，啟用雙向互動時必填）",
                 "placeholder": "43位随机字符串",
+                "placeholder_en": "43-char random string",
+                "placeholder_tw": "43位隨機字串",
             },
             {
                 "key": "wecom_proxy",
                 "label": "API 反向代理地址",
+                "label_en": "API Reverse Proxy",
+                "label_tw": "API 反向代理位址",
                 "type": "string",
-                "description": "企业微信 API 反向代理地址（对齐 MP 的 WECHAT_PROXY 设计）。留空则直连官方地址 代理搭建：https://t.me/areyouok32/90 ",
-                "placeholder": "https://qyapi.weixin.qq.com",
+                # rowGroup：与 server_url 同组，并排在同一行
+                "rowGroup": "wecom_proxy_row",
+                "description": "企业微信 API 反向代理地址。支持多种格式：① 简单反代（如 http://192.168.1.5:9034，自动拼接 /cgi-bin）② MP 通用出网代理（如 https://vps.com/out）③ 完整路径（如 http://host:port/cgi-bin）。留空则直连官方地址。",
+                "description_en": "WeCom API reverse proxy URL. Supports: ① Simple proxy (e.g. http://192.168.1.5:9034, auto-appends /cgi-bin) ② MP outbound proxy (e.g. https://vps.com/out) ③ Full path (e.g. http://host:port/cgi-bin). Leave empty for direct connection.",
+                "description_tw": "企業微信 API 反向代理位址。支援多種格式：① 簡單反代（如 http://192.168.1.5:9034，自動拼接 /cgi-bin）② MP 通用出網代理（如 https://vps.com/out）③ 完整路徑（如 http://host:port/cgi-bin）。留空則直連官方位址。",
+                "placeholder": "http://192.168.1.5:9034",
             },
             {
                 "key": "tunnel_enabled",
                 "label": "启用 VPS 隧道连接",
+                "label_en": "Enable VPS Tunnel",
+                "label_tw": "啟用 VPS 隧道連接",
                 "type": "boolean",
                 "description": "启用后，弹幕库将使用上方「API 反向代理地址」作为 VPS 目标，通过 wstunnel 建立反向隧道，使 VPS 收到的回调自动转发到本地弹幕库。认证密钥使用系统设置 → Webhook API Key。",
+                "description_en": "When enabled, uses the API proxy URL above as VPS target via wstunnel reverse tunnel. VPS callbacks are forwarded to local instance. Auth key uses System Settings → Webhook API Key.",
+                "description_tw": "啟用後，彈幕庫將使用上方「API 反向代理位址」作為 VPS 目標，透過 wstunnel 建立反向隧道，使 VPS 收到的回呼自動轉發到本地彈幕庫。認證金鑰使用系統設定 → Webhook API Key。",
+                "default": False,
+            },
+            {
+                "key": "wecom_proxy_relay_auth",
+                "label": "代理鉴权请求头",
+                "label_en": "Proxy Auth Header",
+                "label_tw": "代理鑑權請求頭",
+                "type": "boolean",
+                "description": "启用后，请求企业微信 API 时附带 X-Relay-Key 鉴权头（值取系统设置 → Webhook API Key），用于 misaka-relay 这类需鉴权的代理。使用不校验该头的第三方代理时请关闭。",
+                "description_en": "When enabled, attaches X-Relay-Key auth header (value from System Settings → Webhook API Key) to WeCom API requests, for proxies like misaka-relay that require it. Disable when using third-party proxies that don't validate this header.",
+                "description_tw": "啟用後，請求企業微信 API 時附帶 X-Relay-Key 鑑權頭（值取系統設定 → Webhook API Key），用於 misaka-relay 這類需鑑權的代理。使用不校驗該頭的第三方代理時請關閉。",
                 "default": False,
             },
             {
                 "key": "server_url",
                 "label": "外网访问地址",
+                "label_en": "Public Access URL",
+                "label_tw": "外網存取位址",
                 "type": "string",
+                # rowGroup：与 wecom_proxy 同组，并排在同一行
+                "rowGroup": "wecom_proxy_row",
                 "description": "服务器外网地址，用于生成企业微信回调 URL（如 https://example.com）",
+                "description_en": "Server public URL for generating WeCom callback URL (e.g. https://example.com)",
+                "description_tw": "伺服器外網位址，用於產生企業微信回呼 URL（如 https://example.com）",
                 "placeholder": "https://example.com",
             },
             {
                 "key": "log_raw",
                 "label": "记录原始交互",
+                "label_en": "Log Raw Interactions",
+                "label_tw": "記錄原始互動",
                 "type": "boolean",
                 "description": "启用后，Bot 的所有收发消息将记录到 config/logs/bot_raw.log 文件中，用于调试",
+                "description_en": "When enabled, all Bot messages will be logged to config/logs/bot_raw.log for debugging.",
+                "description_tw": "啟用後，Bot 的所有收發訊息將記錄到 config/logs/bot_raw.log 檔案中，用於除錯",
                 "default": False,
             },
+            IMAGE_MODE_FIELD,
         ]

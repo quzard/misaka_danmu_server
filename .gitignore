@@ -6,6 +6,7 @@ src/**/.DS_Store
 
 .vscode
 config/
+!config/config.example.yml
 
 .augment/rules/rules.md
 .cunzhi-memory/metadata.json
@@ -22,8 +23,10 @@ src/scrapers/*
 !src/scrapers/__init__.py
 !src/scrapers/base.py
 .augment/rules/rule-name.md
-
+tests/*
 .pids/
 
 # 嵌套git仓库
 misaka-relay/
+FEATURE_IDEAS.md
+.sanshu-memory/memories.json

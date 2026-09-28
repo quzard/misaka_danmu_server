@@ -64,7 +64,8 @@ class AIMatcherManager:
             "ai_log_raw_response": (await self.config_manager.get("aiLogRawResponse", "false")).lower() == "true",
             "ai_thinking_enabled": (await self.config_manager.get("aiThinkingEnabled", "false")).lower() == "true",
             "ai_cache_enabled": (await self.config_manager.get("aiCacheEnabled", "true")).lower() == "true",
-            "ai_cache_ttl": int(await self.config_manager.get("aiCacheTtl", "3600"))
+            "ai_cache_ttl": int(await self.config_manager.get("aiCacheTtl", "3600")),
+            "ai_call_timeout": int(await self.config_manager.get("aiCallTimeout", "60")),
         }
 
     def _get_core_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
@@ -181,7 +182,9 @@ class AIMatcherManager:
         self,
         query_info: Dict[str, Any],
         sorted_results: List[Any],
-        favorited_info: Dict[str, bool]
+        favorited_info: Dict[str, bool],
+        existing_info: Optional[Dict[str, bool]] = None,
+        recognition_info: Optional[Dict[str, bool]] = None
     ) -> Optional[int]:
         """
         使用AI选择最佳匹配结果
@@ -190,6 +193,8 @@ class AIMatcherManager:
             query_info: 查询信息 {"title", "season", "episode", "year", "type"}
             sorted_results: 排序后的搜索结果列表
             favorited_info: 收藏信息
+            existing_info: 库内已有源信息 {provider:mediaId -> inLibrary}
+            recognition_info: 识别词命中信息 {provider:mediaId -> matchesRecognitionRule}
 
         Returns:
             选中的结果索引,如果AI匹配失败或未找到合适结果则返回None
@@ -200,7 +205,7 @@ class AIMatcherManager:
                 return None
 
             ai_selected_index = await matcher.select_best_match(
-                query_info, sorted_results, favorited_info
+                query_info, sorted_results, favorited_info, existing_info, recognition_info
             )
 
             if ai_selected_index is not None:

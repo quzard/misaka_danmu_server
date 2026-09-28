@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import logging
-from typing import Any, Dict, List, Optional, Set, Type,Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker # type: ignore
 from fastapi import Request
@@ -14,8 +14,13 @@ class BaseMetadataSource(ABC):
 
     # 每个子类必须定义自己的提供商名称
     provider_name: str
-    # 新增：声明可配置字段 { "db_key": ("UI标签", "类型", "提示") }
-    configurable_fields: Dict[str, Tuple[str, str, str]] = {}
+    # 用户可配置的 config key 列表，子类自行声明
+    # API 层的 GET/PUT 配置接口会自动读写这些 key，无需在 API 层硬编码
+    config_keys: List[str] = []
+    # 布尔类型的 config key（存储为字符串 "true"/"false"，读取时自动转换）
+    bool_config_keys: List[str] = []
+    # 声明可配置字段；兼容旧元组格式与包含 label/type/tooltip/default 等属性的字典格式。
+    configurable_fields: Dict[str, Any] = {}
     # 新增：是否支持获取分集URL (用于补充源功能)
     supports_episode_urls: bool = False
     # 新增：是否为搜索补充源（当弹幕源搜索无结果时，可为对应平台提供兜底数据）
@@ -24,6 +29,45 @@ class BaseMetadataSource(ABC):
     # 子类覆盖此字典即可声明支持哪些平台的补充
     # 例如: {"qq": "tencent", "bilibili1": "bilibili", "qiyi": "iqiyi"}
     PLATFORM_TO_PROVIDER: Dict[str, str] = {}
+
+    # ============ 订阅助手能力（与 BaseScraper 同款契约） ============
+    # 默认 supports_subscription=False，不影响现有元数据源；声明 True 的源（如 Trakt/Bangumi）
+    # 在订阅页搜索栏可被搜到并创建订阅目标，由 IncrementalRefreshJob 走 auto_import 整体导入。
+    supports_subscription: bool = False
+
+    # 该源支持的订阅类型（例如 [{"type": "trakt_show", "label": "影视剧", ...}]）
+    subscription_types: List[Dict[str, Any]] = []
+
+    # URL 域名列表（前端 URL 订阅按钮按域名定位 provider）
+    handled_domains: List[str] = []
+
+    async def check_subscription_capability(self, user=None) -> Dict[str, Any]:
+        """返回该源订阅能力状态。子类按需覆盖。默认不支持。
+
+        :param user: 可选用户对象（OAuth 类源用它判断授权状态）。
+        """
+        return {
+            "available": False,
+            "authRequired": False,
+            "authStatus": "none",
+            "reason": "该源未实现订阅能力",
+            "subscriptionTypes": [],
+        }
+
+    async def discover_subscription_targets(self, query: str, subscription_type: str = "", user=None) -> List[Dict[str, Any]]:
+        """按 query 发现可订阅候选；子类在支持订阅时覆盖。
+
+        :param user: 可选用户对象（OAuth 类源用它取 token/api-key）。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 discover_subscription_targets")
+
+    async def validate_subscription_payload(self, subscription_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """校验并标准化订阅 payload，返回 {provider, externalId, title, animeType, subscriptionType, extraData}。"""
+        raise NotImplementedError(f"{self.provider_name} 未实现 validate_subscription_payload")
+
+    async def scan_subscription_target(self, target: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """扫描订阅目标。元数据源订阅(整剧导入)默认返回空列表，由 IncrementalRefreshJob 处理。"""
+        return []
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession], config_manager: ConfigManager, scraper_manager: ScraperManager, cache_manager: CacheManager):
         self._session_factory = session_factory
@@ -173,6 +217,18 @@ class BaseMetadataSource(ABC):
 
         Returns:
             匹配到的 ProviderSearchInfo 列表（无需去重，基类会处理）
+        """
+        return []
+
+    async def get_calendar(self, user: models.User) -> List[Dict[str, Any]]:
+        """获取该元数据源的日历/日程数据。
+
+        返回条目列表，每个条目至少包含：
+        - title: 标题
+        - airWeekday: 播出星期 (1=周一 ... 7=周日)
+        - origin: 来源标识 (= provider_name)
+        - isLocal: False
+        以及其他可选字段（imageUrl, rating, bangumiId, traktId 等）
         """
         return []
 

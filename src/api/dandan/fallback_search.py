@@ -5,20 +5,27 @@
 """
 
 import asyncio
+import json
 import logging
 import time
 from typing import Dict, Optional
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from src.db import crud, ConfigManager
-from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search
+from src.db import crud, models, ConfigManager
+from src.db.crud.cache import get_cache as get_raw_cache
+from src.db.orm_models import AnimeSource, Episode, Anime
+from src.services import ScraperManager, TaskManager, MetadataSourceManager, unified_search, convert_to_chinese_title
 from src.utils import (
     parse_search_keyword,
     ai_type_and_season_mapping_and_correction,
-    SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH
+    SearchTimer, SEARCH_TYPE_FALLBACK_SEARCH,
+    is_movie_by_title,
 )
+from src.utils.image_utils import get_custom_domain, save_public_thumbnail
+from src.utils.search_timer import SubStepTiming
 from src.rate_limiter import RateLimiter
 from src.ai import AIMatcherManager
 
@@ -54,8 +61,8 @@ async def handle_fallback_search(
 ) -> DandanSearchAnimeResponse:
     """处理后备搜索逻辑"""
     search_key = f"search_{hash(search_term + token)}"
-    custom_domain = await config_manager.get("customApiDomain", "")
-    image_url = f"{custom_domain}/static/logo.png" if custom_domain else "/static/logo.png"
+    _logo_domain = await get_custom_domain(config_manager)
+    image_url = f"{_logo_domain}/static/logo.png" if _logo_domain else "/static/logo.png"
 
     # 读取可配置的最大等待时间（默认30秒）。-1 表示无限等待直到出结果
     timeout_str = await config_manager.get("searchFallbackTimeout", "30")
@@ -127,6 +134,10 @@ async def handle_fallback_search(
     await set_db_cache(session, TOKEN_SEARCH_TASKS_PREFIX, token, search_key, TOKEN_SEARCH_TASKS_TTL)
 
     # 通过任务管理器提交后备搜索任务
+    # task_id_ref：submit_task 返回后才有 task_id，用可变容器在闭包里回填，
+    # 供任务完成后 update_task_parameters 写入海报URL（事件循环单线程，无竞态）。
+    task_id_ref: dict = {}
+
     async def fallback_search_coro_factory(session_inner: AsyncSession, progress_callback):
         try:
             ai_matcher_manager_local = AIMatcherManager(config_manager=config_manager)
@@ -135,6 +146,10 @@ async def handle_fallback_search(
                 scraper_manager, metadata_manager, config_manager,
                 rate_limiter, title_recognition_manager, ai_matcher_manager_local
             )
+            # 任务成功完成后，从缓存结果提取前若干个海报URL写入 task_parameters，
+            # 供完成通知（FallbackSearchMessage）聚合九宫格海报。
+            # why：海报聚合放在通知链路异步执行，不阻塞搜索返回；此处仅做轻量URL提取。
+            await _attach_poster_urls_to_task(session_inner, search_key, task_id_ref.get("id"))
         except Exception as e:
             logger.error(f"后备搜索任务执行失败: {e}", exc_info=True)
             search_info_failed = await get_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
@@ -145,6 +160,26 @@ async def handle_fallback_search(
             existing_token_key = await get_db_cache(session_inner, TOKEN_SEARCH_TASKS_PREFIX, token)
             if existing_token_key == search_key:
                 await delete_db_cache(session_inner, TOKEN_SEARCH_TASKS_PREFIX, token)
+
+    # 海报URL提取器：从后备搜索缓存结果取前 9 个非空 imageUrl，写进 task_parameters
+    async def _attach_poster_urls_to_task(session_inner: AsyncSession, s_key: str, t_id):
+        if not t_id:
+            return
+        try:
+            info = await get_db_cache(session_inner, FALLBACK_SEARCH_CACHE_PREFIX, s_key)
+            results = (info or {}).get("results") or []
+            poster_urls = []
+            for r in results:
+                url = (r or {}).get("imageUrl") or ""
+                if url:
+                    poster_urls.append(url)
+                if len(poster_urls) >= 9:  # 九宫格上限
+                    break
+            if poster_urls:
+                task_manager.update_task_parameters(t_id, {"poster_urls": poster_urls})
+        except Exception as e:
+            # 海报URL提取失败不影响任务完成与通知发出
+            logger.debug(f"提取后备搜索海报URL失败（忽略）: {e}")
 
     # 提交后备搜索任务
     try:
@@ -159,6 +194,7 @@ async def handle_fallback_search(
             fallback_search_coro_factory, task_title, run_immediately=True, queue_type="fallback",
             task_parameters={"token_name": token_name, "search_term": search_term}
         )
+        task_id_ref["id"] = task_id  # 回填，供 coro_factory 完成后写海报URL
         logger.info(f"后备搜索任务已提交: {task_id}")
     except Exception as e:
         logger.error(f"提交后备搜索任务失败: {e}", exc_info=True)
@@ -204,10 +240,61 @@ async def execute_fallback_search_task(
         original_title = parsed_info["title"]
         season_to_filter = parsed_info.get("season")
         episode_to_filter = parsed_info.get("episode")
+        # 原始完整关键词（未拆解），供识别词反向映射使用
+        original_keyword = parsed_info.get("original_keyword") or search_term.strip()
 
-        # 2. 应用标题预处理规则
-        search_title = original_title
+        # 🚀 识别词反向映射（最高优先级）：用户用"入库名"搜索时，自动改用源站真实名去搜
+        recognition_title = None  # 识别词指定的入库正确名，命中后写入每条结果
+        # why：规则形如 source=iqiyi 表示该识别词仅对爱奇艺源生效，记录源限定，
+        # 写 recognitionTitle 时仅打给匹配源结果，避免 renren 等无关源被误标。
+        recognition_source_restriction = "all"
+        recognition_rule_source = None  # 规则左侧源站标题，用于标题精确校验
+        recognition_mapping_applied = False
         if title_recognition_manager:
+            try:
+                mapping = await title_recognition_manager.apply_search_title_mapping(original_keyword)
+                if mapping:
+                    recognition_title = mapping["recognition_title"]
+                    recognition_source_restriction = mapping.get("rule_source_restriction", "all") or "all"
+                    recognition_rule_source = mapping.get("search_title")  # 规则 source 值
+                    recognition_mapping_applied = True
+                    # why：反向映射把搜索词换成源站真实名，但 season_to_filter 仍是用户输入
+                    # "入库名"解析出的目标季。源站结果是源季，若不修正会被 line 358 季度过滤删光。
+                    # 用规则 season_offset 解析出的"源站季度"覆盖过滤季度（通配/无法解析则不按季过滤）。
+                    mapped_source_season = mapping.get("search_season")
+                    if mapped_source_season is not None:
+                        if season_to_filter != mapped_source_season:
+                            logger.info(
+                                f"✓ 后备搜索反向映射季度修正: 过滤季度 {season_to_filter} → "
+                                f"源站季度 {mapped_source_season}"
+                            )
+                        season_to_filter = mapped_source_season
+                    else:
+                        season_to_filter = None
+                    logger.info(
+                        f"✓ 后备搜索识别词反向映射: '{search_term}' → 实际搜索 "
+                        f"'{mapping['search_title']}'，入库名标记为 '{recognition_title}'"
+                    )
+            except Exception as e:
+                logger.warning(f"后备搜索识别词反向映射失败: {e}")
+
+        # 2. 名称转换（非中文→中文，与 Webhook 搜索一致）
+        # 识别词反向映射命中时跳过（用户已显式指定真实搜索词）
+        fallback_user = models.User(id=0, username="fallback_search")
+        if recognition_mapping_applied:
+            original_title = mapping["search_title"]
+        else:
+            converted_title, conversion_applied = await convert_to_chinese_title(
+                original_title, config_manager, metadata_manager,
+                ai_matcher_manager, fallback_user
+            )
+            if conversion_applied:
+                logger.info(f"✓ 后备搜索名称转换: '{original_title}' → '{converted_title}'")
+                original_title = converted_title
+
+        # 3. 应用标题预处理规则（识别词反向映射命中时跳过，避免二次改写真实搜索词）
+        search_title = original_title
+        if title_recognition_manager and not recognition_mapping_applied:
             (processed_title, processed_episode, processed_season, preprocessing_applied) = \
                 await title_recognition_manager.apply_search_preprocessing(
                     original_title, episode_to_filter, season_to_filter
@@ -226,7 +313,7 @@ async def execute_fallback_search_task(
         else:
             logger.info("○ 未配置标题识别管理器，跳过后备搜索预处理。")
 
-        # 3. 同步更新缓存中的 parsed_info
+        # 4. 同步更新缓存中的 parsed_info
         search_info = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
         if search_info:
             cached_parsed = search_info.get("parsed_info") or {}
@@ -236,7 +323,7 @@ async def execute_fallback_search_task(
             search_info["parsed_info"] = cached_parsed
             await set_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key, search_info, FALLBACK_SEARCH_CACHE_TTL)
 
-        # 4. 构造 episode_info
+        # 5. 构造 episode_info
         episode_info = (
             {"season": season_to_filter, "episode": episode_to_filter}
             if episode_to_filter is not None else None
@@ -251,7 +338,6 @@ async def execute_fallback_search_task(
         await progress_callback(10, "开始搜索...")
 
         # 检查是否有同标题的搜索结果缓存（不含集数，10分钟内复用）
-        from src.db.crud.cache import get_cache as get_raw_cache
         fallback_result_cache_key = f"fallback_result_{search_title}"
         cached_fallback_result = await get_raw_cache(session, fallback_result_cache_key)
         if cached_fallback_result and isinstance(cached_fallback_result, dict):
@@ -279,7 +365,9 @@ async def execute_fallback_search_task(
                 scraper_manager=scraper_manager,
                 metadata_manager=metadata_manager,
                 use_alias_expansion=True,
-                use_alias_filtering=True,
+                # 对齐主页搜索：信任元数据源别名，不做相似度预筛，
+                # 避免误删港澳台/日文等低相似度但正确的别名（如 B 站港澳台番剧）。
+                use_alias_filtering=False,
                 use_title_filtering=True,
                 use_source_priority_sorting=True,
                 progress_callback=progress_callback,
@@ -287,7 +375,6 @@ async def execute_fallback_search_task(
                 alias_similarity_threshold=70,
             )
             # 收集单源搜索耗时信息（分组显示，与主页搜索一致）
-            from src.utils.search_timer import SubStepTiming
             source_timing_sub_steps = []
 
             # 弹幕源 + 补充源分组
@@ -310,20 +397,16 @@ async def execute_fallback_search_task(
 
             timer.step_end(details=f"{len(sorted_results)}个结果", sub_steps=source_timing_sub_steps)
 
-        # 5. 根据标题关键词修正媒体类型
-        def is_movie_by_title(title: str) -> bool:
-            if not title:
-                return False
-            movie_keywords = ["剧场版", "劇場版", "movie", "映画"]
-            title_lower = title.lower()
-            return any(keyword in title_lower for keyword in movie_keywords)
+        # 注：dandanplay 的 bgmtv 软429兜底已内聚到源内部 search()（对上层透明），
+        # unified_search 会自动拿到兜底结果，此处无需再单独编排。
 
+        # 6. 根据标题关键词修正媒体类型（复用统一的 is_movie_by_title）
         for item in sorted_results:
             if item.type == "tv_series" and is_movie_by_title(item.title):
                 logger.info(f"标题 '{item.title}' 包含电影关键词，类型从 'tv_series' 修正为 'movie'。")
                 item.type = "movie"
 
-        # 6. 如果搜索词中明确指定了季度，对结果进行过滤
+        # 7. 如果搜索词中明确指定了季度，对结果进行过滤
         if season_to_filter:
             original_count = len(sorted_results)
             filtered_by_type = [item for item in sorted_results if item.type == "tv_series"]
@@ -375,8 +458,23 @@ async def execute_fallback_search_task(
         # 获取下一个虚拟animeId
         next_virtual_anime_id = await get_next_virtual_anime_id(session)
 
-        # 获取自定义域名
-        custom_domain = await config_manager.get("customApiDomain", "")
+        # 获取自定义域名（统一通过 get_custom_domain 读取，http/https 均支持）
+        custom_domain = await get_custom_domain(config_manager) or ""
+
+        # 判断当前 token 是否在外联海报模式授权列表中
+        # why：posterProxyTokens 为空列表时所有 token 均不启用外联海报（需显式授权）；
+        # 列表中有当前 token 时才下载海报到本地并返回外联地址，否则透传源站原始 imageUrl。
+        poster_proxy_enabled = False
+        try:
+            poster_proxy_tokens_str = await config_manager.get("posterProxyTokens", "[]")
+            poster_proxy_token_ids = json.loads(poster_proxy_tokens_str)
+            if poster_proxy_token_ids and token:
+                # token 是字符串（Token 值），需要查 DB 获取对应 token id 再比对
+                token_obj = await crud.get_api_token_by_token_str(session, token)
+                if token_obj and token_obj["id"] in poster_proxy_token_ids:
+                    poster_proxy_enabled = True
+        except Exception as e:
+            logger.debug(f"外联海报Token授权检查失败（忽略）: {e}")
 
         # 【性能优化①】循环前一次性读取缓存，循环中只修改内存，循环后一次性写回
         search_info_mapping = await get_db_cache(session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
@@ -396,14 +494,34 @@ async def execute_fallback_search_task(
             year_info = f" 年份：{result.year}" if result.year else ""
             title_with_source = f"{result.title} （来源：{result.provider}{year_info}）"
 
+            # 外联海报模式：把源站海报下载到本地并拼接外联地址。
+            # why：dandanplay 等客户端可能无法直接访问源站图片（防盗链/地区限制），
+            # 本地缓存后通过 customApiDomain 返回公网可访问的外联地址。
+            # 使用 save_public_thumbnail：内容 sha256 去重，不重复下载同一张海报。
+            effective_image_url = result.imageUrl or ""
+            if poster_proxy_enabled and effective_image_url:
+                try:
+                    local_path = await save_public_thumbnail(effective_image_url)
+                    if local_path:
+                        # 拼成完整外联地址；custom_domain 未配置时降级为相对路径
+                        effective_image_url = f"{custom_domain}{local_path}" if custom_domain else local_path
+                        logger.debug(f"后备搜索海报外联: {result.imageUrl} → {effective_image_url}")
+                except Exception as e:
+                    # 下载失败不影响搜索结果，降级为原 URL
+                    logger.debug(f"后备搜索海报外联下载失败（忽略）: {e}")
+
             # 存储bangumiId到原始信息的映射（仅修改内存中的dict）
+            # why：同时把处理后的 imageUrl 存入映射，供 /bangumi/{animeId} 详情接口使用；
+            # 若是外联地址则详情接口可直接使用无需再次下载。
             if search_info_mapping:
                 search_info_mapping["bangumi_mapping"][unique_bangumi_id] = {
                     "provider": result.provider,
                     "media_id": result.mediaId,
                     "original_title": result.title,
                     "type": result.type,
+                    "season": result.season,
                     "anime_id": current_virtual_anime_id,
+                    "image_url": effective_image_url,
                 }
 
             # 检查库内是否已有该精确源(provider+mediaId)的分集，写入 typeDescription
@@ -416,6 +534,18 @@ async def execute_fallback_search_task(
                 episode_ranges = format_episode_ranges(existing_episodes)
                 type_description = f"{base_type_desc}（库内：{episode_ranges}）"
 
+            # why：识别词带 source=xxx 时仅标记该源结果；且标题需精确匹配规则 source，
+            # 避免同源下无关结果（如 iqiyi 的"中国说唱巅峰对决2022"）被误标识别词。
+            item_recognition_title = recognition_title
+            if recognition_title:
+                # 源限定校验
+                if recognition_source_restriction != "all" and result.provider != recognition_source_restriction:
+                    item_recognition_title = None
+                # 标题精确校验（复用识别词管理器 _exact_match，与命中判定一致）
+                elif recognition_rule_source and title_recognition_manager:
+                    if not title_recognition_manager._exact_match(result.title or "", recognition_rule_source):
+                        item_recognition_title = None
+
             search_results.append(
                 DandanSearchAnimeItem(
                     animeId=current_virtual_anime_id,
@@ -423,12 +553,13 @@ async def execute_fallback_search_task(
                     animeTitle=title_with_source,
                     type=DANDAN_TYPE_MAPPING.get(result.type, "other"),
                     typeDescription=type_description,
-                    imageUrl=result.imageUrl,
+                    imageUrl=effective_image_url,  # 外联模式时为本地缓存地址，否则为源站原始URL
                     startDate=f"{result.year}-01-01T00:00:00+08:00" if result.year else None,
                     year=result.year,
                     episodeCount=result.episodeCount or 0,
                     rating=0.0,
                     isFavorited=False,
+                    recognitionTitle=item_recognition_title,  # 识别词反向映射命中且源匹配时的入库正确名
                 )
             )
 
@@ -613,9 +744,6 @@ async def _merge_source_episodes(
     3. 缺失的分集用虚拟 episodeId 补充
     4. 创建映射缓存，让 /comment/{虚拟id} 能找到正确的源
     """
-    from sqlalchemy import select
-    from src.db.orm_models import AnimeSource, Episode, Anime
-    from src.core.cache import get_cache_backend
 
     for anime_id, anime_info in list(grouped_animes.items()):
         try:
@@ -737,12 +865,9 @@ async def _merge_source_episodes(
                     "year": anime_obj.year,
                 }
 
-                # 写入缓存（先内存缓存，再数据库缓存）
+                # 写入缓存
                 try:
-                    _backend = get_cache_backend()
-                    if _backend is not None:
-                        await _backend.set(fallback_series_key, cache_data, ttl=10800, region="default")
-                    await crud.set_cache(session, fallback_series_key, cache_data, ttl=10800)
+                    await set_db_cache(session, "", fallback_series_key, cache_data, 10800)
                     logger.debug(f"[并行搜索] 已创建映射缓存: {fallback_series_key}")
                 except Exception as e:
                     logger.warning(f"[并行搜索] 创建映射缓存失败: {e}")

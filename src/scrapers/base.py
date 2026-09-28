@@ -358,6 +358,38 @@ class BaseScraper(ABC):
             return is_enabled_str
         return str(is_enabled_str).lower() == 'true'
 
+    async def _log_raw_response(self, response_or_text, operation: str, **context):
+        """
+        统一的原始响应日志记录方法
+
+        Args:
+            response_or_text: httpx.Response 对象或原始响应文本
+            operation: 操作描述，如 "Search"、"Episodes"、"Danmaku"
+            **context: 额外的上下文信息，如 keyword、media_id、episode_id 等
+        """
+        if not await self._should_log_responses():
+            return
+
+        # 提取响应文本
+        if isinstance(response_or_text, str):
+            response_text = response_or_text
+        elif isinstance(response_or_text, bytes):
+            response_text = response_or_text.decode('utf-8', errors='ignore')
+        else:
+            # httpx.Response 对象
+            response_text = response_or_text.text
+
+        # 构建上下文信息字符串
+        context_parts = [f"{k}={v}" for k, v in context.items() if v is not None]
+        context_str = ", ".join(context_parts) if context_parts else ""
+
+        # 记录完整日志，不截断
+        logger = logging.getLogger("scraper_responses")
+        logger.debug(
+            f"{self.provider_name.upper()} {operation} Response "
+            f"({context_str}): {response_text}"
+        )
+
     async def get_episode_blacklist_pattern(self) -> Optional[re.Pattern]:
         """
         获取用于过滤分集标题的正则表达式对象。
@@ -400,6 +432,15 @@ class BaseScraper(ABC):
         episode_info: 可选字典，包含 'season' 和 'episode'。
         """
         raise NotImplementedError
+
+    def select_search_keywords(self, keywords: List[str]) -> List[str]:
+        """从候选关键词列表中挑选本源实际要搜索的关键词。
+
+        keywords 约定 keywords[0] 为主搜索词，其后为别名增强追加的多语言译名。
+        默认策略：只用主搜索词（避免用全量别名对每个源逐个网络搜索，既慢又易 0 结果）。
+        需要按语言挑别名的源（如 gamer 繁中站）覆写本方法叠加自身偏好。
+        """
+        return [keywords[0]] if keywords else []
 
     @abstractmethod
     async def get_info_from_url(self, url: str) -> Optional[models.ProviderSearchInfo]:
@@ -516,8 +557,110 @@ class BaseScraper(ABC):
             for ep, rule in filtered_out:
                 log_lines.append(f"    ✗ {ep.title} （黑名单正则匹配：{rule}）")
 
+        # 保留本次过滤明细，供编辑导入接口展示“不导入”列表；普通导入仍只使用 kept_episodes。
+        self._last_logged_filtered_out = list(filtered_out)
+
         log_lines.append(f"└─── {self.provider_name} ───")
         self.logger.info("\n".join(log_lines))
+
+    # ============ 可选订阅能力（订阅助手） ============
+    # 说明：以下属性/方法为「订阅助手」功能的可选扩展能力。
+    # 默认 supports_subscription=False，现有所有弹幕源无需改动即可保持原行为；
+    # 只有声明支持订阅的源（如 Bilibili）才覆盖这些属性/方法。
+    # 设计依据：docs/subscription_page_implementation_plan.md 第 5.4/5.5 节。
+    #
+    # 设计原则（与 search/get_episodes/get_comments 同款）：基类只定义统一的抽象方法签名，
+    # 源内部按 subscription_type 自行区分（如 Bilibili 的 UP主/系列/番剧）。
+
+    # 是否支持订阅助手；默认 False，避免影响现有源。
+    supports_subscription: bool = False
+
+    # 声明该源支持的订阅类型，由 /available-sources 读取。
+    # 每项形如：{"type": "bilibili_up", "label": "UP 主", "description": "...", "payloadSchema": {...}}
+    subscription_types: List[Dict[str, Any]] = []
+
+    async def check_subscription_capability(self, user=None) -> Dict[str, Any]:
+        """返回该源的订阅能力状态。
+
+        子类应覆盖此方法，返回是否可用、是否需要认证、认证状态、原因及支持的订阅类型。
+        默认实现表示「未实现订阅能力」，订阅助手不会展示该源。
+
+        :param user: 可选用户对象（OAuth 类源用它判断授权状态）。
+        """
+        return {
+            "available": False,
+            "authRequired": False,
+            "authStatus": "none",
+            "reason": "该源未实现订阅能力",
+            "subscriptionTypes": [],
+        }
+
+    async def discover_subscription_targets(self, query: str, subscription_type: str = "", user=None) -> List[Dict[str, Any]]:
+        """根据 query（关键词或 URL）发现可订阅目标候选，供前端列表挑选。
+
+        子类按 subscription_type 或 query 形态（关键词/URL）区分搜索逻辑。
+        返回统一结构列表，每项形如：
+        {type, title, cover, description, payload}
+        其中 payload 选中后直接喂给 validate_subscription_payload 创建订阅。
+
+        :param user: 可选用户对象（OAuth 类源用它取 token/api-key）。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 discover_subscription_targets")
+
+    async def fetch_subscription_calendar(self, category: str = "") -> List[Dict[str, Any]]:
+        """拉取该订阅源的「探索榜单」数据（如 Bilibili PGC 番剧/国创热门列表）。
+
+        与 discover 区别：discover 是「按用户输入搜」，本方法是「拉平台榜单」。
+        返回可写入 external_calendar_item 的标准条目列表（airWeekday 可为空 = 无播出日，
+        进探索发现海报网格而非日历）。子类在支持探索时覆盖。
+
+        :param category: 可选分类（如 'bangumi'/'guochuang'），空表示默认全部支持的分类。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 fetch_subscription_calendar")
+
+    async def validate_subscription_payload(self, subscription_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """校验并标准化订阅参数。
+
+        返回可写入 external_calendar_item 的标准结构：
+        {provider, externalId, title, animeType, subscriptionType, extraData}。
+        子类在支持订阅时覆盖此方法，并按 subscription_type 区分不同类型。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 validate_subscription_payload")
+
+    async def scan_subscription_target(self, target: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """扫描一个订阅目标，返回待写入 external_calendar_item 的候选项列表。
+
+        只负责发现候选项，不直接写库；写库由任务层统一调用 CRUD。
+        子类在支持订阅时覆盖此方法，并按 subscriptionType 区分不同类型。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 scan_subscription_target")
+
+    async def fetch_subscription_item_comments(self, item: Dict[str, Any]) -> List[dict]:
+        """对某个订阅候选项获取弹幕；默认委托给 get_comments。
+
+        item 至少包含定位弹幕所需的 episodeId/cid 等字段（存于 extraData）。
+        """
+        raise NotImplementedError(f"{self.provider_name} 未实现 fetch_subscription_item_comments")
+
+    async def resolve_url_structured(self, url: str, user: Optional[Any] = None) -> Optional[Dict[str, Any]]:
+        """结构化解析一个 URL，返回「当前视频/所属合集/合集内全部视频」三段数据。
+
+        与 discover 区别：discover 是按关键词搜索榜单，本方法是针对具体 URL 拆出
+        可订阅的层级结构，供前端独立的 URL 解析弹框展示与多选批量订阅。
+
+        返回结构（子类覆盖时遵循）：
+        {
+            "currentVideo": {...},          # 当前 URL 指向的视频（含展示参数）
+            "collection": {...} | None,     # 所属合集/系列（如有）
+            "collectionVideos": [{...}],    # 合集内全部视频，供多选
+        }
+        默认返回 None 表示该源不支持结构化解析，调用方应降级到 discover。
+
+        :param url: 待解析的完整 URL。
+        :param user: 可选用户对象（OAuth 类源用它取 token/api-key）。
+        """
+        return None
+
 
     @abstractmethod
     async def close(self):

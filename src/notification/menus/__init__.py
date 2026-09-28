@@ -12,7 +12,9 @@ from .url import UrlMenuMixin
 from .library import LibraryMenuMixin
 from .tokens import TokensMenuMixin
 from .tasks_menu import TasksMenuMixin
+from .task_manager_menu import TaskManagerMenuMixin
 from .cache import CacheMenuMixin
+from .status import StatusMenuMixin
 
 __all__ = [
     "ImportBaseMixin",
@@ -24,6 +26,8 @@ __all__ = [
     "LibraryMenuMixin",
     "TokensMenuMixin",
     "TasksMenuMixin",
+    "TaskManagerMenuMixin",
     "CacheMenuMixin",
+    "StatusMenuMixin",
 ]
 

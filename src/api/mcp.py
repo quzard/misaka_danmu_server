@@ -20,7 +20,6 @@ MCP (Model Context Protocol) Server 模块
 }
 """
 
-import json
 import logging
 import secrets
 import ipaddress
@@ -30,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import crud, get_db_session, ConfigManager
 from src.api.middleware import normalize_ip
+from src.utils.audit_logging import build_audit_request_headers, capture_audit_request_body
 
 logger = logging.getLogger(__name__)
 
@@ -80,33 +80,14 @@ async def _verify_mcp_api_key(
     client_ip_str = _resolve_client_ip(request, trusted_networks)
     endpoint = request.url.path
 
-    # --- 捕获请求头（过滤敏感信息）---
+    # 审计日志只读取小请求体，并按结构递归脱敏，避免泄密和内存放大。
     try:
-        filtered_headers = {
-            k: v for k, v in request.headers.items()
-            if k.lower() not in ('authorization', 'cookie', 'x-api-key')
-        }
-        query_str = str(request.url.query) if request.url.query else ""
-        if query_str:
-            import re
-            query_str = re.sub(r'apikey=[^&]*', 'apikey=***', query_str)
-            filtered_headers['_query'] = query_str
-        request_headers_str = json.dumps(filtered_headers, ensure_ascii=False, indent=2)
+        request_headers_str = build_audit_request_headers(request)
     except Exception:
         request_headers_str = None
 
-    # --- 捕获请求体 ---
     try:
-        raw_body = await request.body()
-        request_body_str = raw_body.decode(errors='ignore') if raw_body else None
-        # 截断过长的请求体
-        if request_body_str and len(request_body_str) > 10000:
-            request_body_str = request_body_str[:10000] + f"\n... (已截断，总长度: {len(raw_body)} 字节)"
-        # 将 body 放回请求流，确保后续处理能正常读取
-        if raw_body:
-            async def receive():
-                return {"type": "http.request", "body": raw_body}
-            request._receive = receive
+        request_body_str = await capture_audit_request_body(request)
     except Exception:
         request_body_str = None
 
@@ -161,12 +142,13 @@ def setup_mcp(app: FastAPI) -> None:
     """
     try:
         from fastapi_mcp import FastApiMCP, AuthConfig
-    except ImportError:
-        logger.warning(
-            "fastapi-mcp 库未安装，MCP Server 功能不可用。"
-            "请运行 `pip install fastapi-mcp` 安装。"
+    except Exception as e:
+        # why：MCP 是已声明的服务能力，初始化失败时禁止应用假装健康并让请求落到 SPA 405。
+        logger.error(
+            f"fastapi-mcp 导入失败，应用无法提供 MCP 服务: {e}",
+            exc_info=True,
         )
-        return
+        raise RuntimeError("MCP 依赖导入失败") from e
 
     try:
         mcp = FastApiMCP(
@@ -197,5 +179,6 @@ def setup_mcp(app: FastAPI) -> None:
         )
 
     except Exception as e:
-        logger.error(f"MCP Server 初始化失败: {e}")
-        logger.exception("MCP 初始化详细错误:")
+        # why：挂载失败也必须终止启动，不能让健康检查通过后由 SPA 返回误导性的 405。
+        logger.error(f"MCP Server 初始化失败: {e}", exc_info=True)
+        raise RuntimeError("MCP Server 初始化失败") from e

@@ -64,6 +64,58 @@ _CONTAINER_ID_CACHE_DURATION = 300  # 缓存 5 分钟（容器 ID 不会频繁�
 _docker_lock = threading.Lock()
 
 
+def is_running_in_docker() -> bool:
+    """
+    检测当前进程是否运行在 Docker 容器内（非 LXC / 非裸机）。
+
+    仅当确认是 Docker 容器环境时才允许使用 Docker API 重启自身。
+    LXC 容器内虽然可能存在 docker.sock（Docker-in-LXC 场景），
+    但用 Docker API 重启的是 LXC 内部的 Docker 容器，而非 LXC 本身，
+    会导致无限重启循环。
+
+    检测策略（按可靠性排序）：
+    1. /.dockerenv 文件存在 → Docker 容器标志
+    2. /proc/1/environ 包含 container=lxc → 排除 LXC
+    3. /proc/self/cgroup 或 /proc/self/mountinfo 包含 docker 字样 → Docker 容器
+    """
+    # 方法1: /.dockerenv 是 Docker 注入的标志文件，LXC 中不存在
+    if Path("/.dockerenv").exists():
+        # 进一步排除 LXC 嵌套 Docker 的情况：
+        # 如果 PID 1 的环境变量标记了 container=lxc，说明最外层是 LXC
+        try:
+            environ_data = Path("/proc/1/environ").read_bytes()
+            if b"container=lxc" in environ_data:
+                logger.debug("检测到 /.dockerenv 但 PID 1 标记为 LXC，判定为 LXC 嵌套 Docker")
+                return False
+        except (PermissionError, FileNotFoundError, OSError):
+            pass  # 读取失败时信任 /.dockerenv
+        return True
+
+    # 方法2: 通过 cgroup 信息判断（无 /.dockerenv 但有 docker cgroup）
+    try:
+        cgroup_path = Path("/proc/self/cgroup")
+        if cgroup_path.exists():
+            content = cgroup_path.read_text()
+            if "docker" in content or "containerd" in content:
+                logger.debug("通过 /proc/self/cgroup 检测到 Docker 容器环境")
+                return True
+    except (PermissionError, OSError):
+        pass
+
+    # 方法3: 通过 mountinfo 判断
+    try:
+        mountinfo = Path("/proc/self/mountinfo")
+        if mountinfo.exists():
+            content = mountinfo.read_text()
+            if "docker/containers/" in content or "/docker-" in content:
+                logger.debug("通过 /proc/self/mountinfo 检测到 Docker 容器环境")
+                return True
+    except (PermissionError, OSError):
+        pass
+
+    return False
+
+
 def is_docker_socket_available() -> bool:
     """
     检测 Docker socket 是否可用（带缓存）
@@ -298,9 +350,16 @@ def get_docker_status() -> Dict[str, Any]:
         client = docker.from_env()
         client.ping()
         status["socketAvailable"] = True
-        status["canRestart"] = True
-        status["canUpdate"] = True
-        status["message"] = "Docker 连接正常"
+        # 仅在确认运行于 Docker 容器内时才允许重启/更新
+        # LXC 环境下 socket 可用但不应自动重启
+        in_docker = is_running_in_docker()
+        status["isRunningInDocker"] = in_docker
+        status["canRestart"] = in_docker
+        status["canUpdate"] = in_docker
+        if in_docker:
+            status["message"] = "Docker 连接正常"
+        else:
+            status["message"] = "Docker socket 可用，但当前不在 Docker 容器内运行（可能为 LXC / 裸机环境），自动重启已禁用"
     except PermissionError as e:
         status["message"] = f"权限不足，无法访问 Docker socket。请确保容器有权限访问 /var/run/docker.sock (错误: {str(e)})"
     except Exception as e:
@@ -356,6 +415,9 @@ async def restart_container(fallback_container_name: str = "misaka_danmu_server"
     2. 无 restart policy → 用 container.restart() Docker API 重启
     3. 超时兜底 → 60秒后降级到 container.restart()
 
+    安全检查：仅当确认在 Docker 容器内运行时才执行重启。
+    LXC 环境下即使 docker.sock 可用也拒绝自动重启，避免无限重启循环。
+
     Args:
         fallback_container_name: 兜底容器名称（自动检测失败时使用）
 
@@ -366,6 +428,19 @@ async def restart_container(fallback_container_name: str = "misaka_danmu_server"
         return {
             "success": False,
             "message": "Docker socket 不可用，无法通过 Docker API 重启",
+            "fallback": True
+        }
+
+    # 关键安全检查：确认当前进程运行在 Docker 容器内
+    # LXC 容器内可能存在 docker.sock（Docker-in-LXC），但不应通过 Docker API 重启自身
+    if not is_running_in_docker():
+        logger.warning(
+            "检测到 Docker socket 可用，但当前进程不在 Docker 容器内运行"
+            "（可能为 LXC / 裸机 / Docker-in-LXC 环境），跳过自动重启"
+        )
+        return {
+            "success": False,
+            "message": "当前不在 Docker 容器中运行，无法通过 Docker API 重启。请手动重启服务。",
             "fallback": True
         }
 
@@ -840,21 +915,38 @@ def _recreate_via_compose(
                 compose_file_args += f' -f {shlex.quote(cf)}'
 
     # 构建 shell 脚本
+    # why: 不再把 new_image tag 成 container_image。
+    # 原逻辑会把 :latest tag 成 :test，导致容器标签永远不变，切换分支失效。
+    # 正确做法：直接把 new_image tag 成 compose 文件中定义的镜像名（container_image），
+    # 让 compose up 使用新内容的镜像，同时保持 compose 文件中的镜像引用不变。
+    # 若两者镜像名相同（均为 :latest）则无需 tag，直接重建即可。
     tag_cmd = ''
     if new_image != container_image and container_image:
-        # 拉取的镜像与 Compose 中定义的不一致，先 tag 对齐
+        # 将新镜像 tag 成 compose 文件里定义的名称，确保 compose up 能用上新内容
         tag_cmd = (
             f'echo "=== 标记镜像: {new_image} -> {container_image} ==="; '
             f'docker tag {shlex.quote(new_image)} {shlex.quote(container_image)}; '
         )
-        logger.info(f"镜像名不一致，将 tag: {new_image} -> {container_image}")
+        logger.info(f"将新镜像 tag 对齐 compose 定义: {new_image} -> {container_image}")
 
     script = (
         f'set -e; '
         f'echo "=== 等待主进程完成响应 ==="; sleep 3; '
         f'echo "=== Docker Compose 模式: 更新服务 {compose_service} ==="; '
+        # 先显式拉取目标镜像（new_image），确保本地有最新内容
+        # why: compose pull 只拉 compose 文件里定义的镜像名，若用户切换了标签
+        #      （如从 :test 切到 :latest），compose pull 拉的仍是旧标签，起不到更新作用。
+        f'echo "=== 步骤 1/4: 拉取目标镜像 {new_image} ==="; '
+        f'docker pull {shlex.quote(new_image)} || true; '
         f'{tag_cmd}'
         f'cd {shlex.quote(compose_working_dir)}; '
+        # 显式销毁旧容器，确保彻底替换（避免 compose up 跳过重建）
+        f'echo "=== 步骤 2/4: 停止旧容器 ==="; '
+        f'docker compose{compose_file_args} stop {shlex.quote(compose_service)} || true; '
+        f'echo "=== 步骤 3/4: 删除旧容器 ==="; '
+        f'docker compose{compose_file_args} rm -f {shlex.quote(compose_service)} || true; '
+        # 启动新容器（用最新镜像）
+        f'echo "=== 步骤 4/4: 启动新容器 ==="; '
         f'docker compose{compose_file_args} up -d --force-recreate {shlex.quote(compose_service)}; '
         f'echo "=== Compose 重建完成 ==="'
     )

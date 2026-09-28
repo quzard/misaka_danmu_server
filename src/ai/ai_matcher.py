@@ -20,17 +20,18 @@ logger = logging.getLogger(__name__)
 ai_responses_logger = logging.getLogger("ai_responses")
 
 
-def _get_max_tokens_param(model: str, n: int) -> dict:
-    """根据模型名返回正确的 token 限制参数名。
+def _get_max_tokens_param(model: str, n: int, provider: str = "") -> dict:
+    """根据提供商返回正确的 token 限制参数名。
 
-    OpenAI o1/o3/o4 系列及 gpt-4.1 系列已将 max_tokens 改为
-    max_completion_tokens，传旧参数名会触发 API 报错。
-    其他兼容接口（deepseek/siliconflow 等）仍使用 max_tokens。
+    deepseek/siliconflow 等第三方兼容接口保留旧版 max_tokens；
+    OpenAI 官方接口及未知接口统一使用 max_completion_tokens，
+    避免新模型（gpt-4o/o4-mini 等）因参数名错误触发 400 报错。
     """
-    new_series = ("o1", "o3", "o4", "gpt-4.1", "gpt-4o-2024")
-    if any(model.startswith(p) for p in new_series):
-        return {"max_completion_tokens": n}
-    return {"max_tokens": n}
+    # 已知使用旧版 max_tokens 的第三方兼容接口
+    third_party_providers = ("deepseek", "siliconflow")
+    if provider.lower() in third_party_providers:
+        return {"max_tokens": n}
+    return {"max_completion_tokens": n}
 
 # 从 ai_prompts 导入提示词
 from .ai_prompts import (
@@ -155,6 +156,8 @@ class AIMatcher:
         self.model = config.get("ai_match_model")
         self.log_raw_response = config.get("ai_log_raw_response", False)
         self.thinking_enabled = config.get("ai_thinking_enabled", False)
+        # AI API 单次请求超时时间（秒），默认60秒；慢速推理模型可调高
+        self.call_timeout: int = int(config.get("ai_call_timeout", 60))
 
         # 提示词配置: 直接使用传入的配置,不做任何兜底处理
         # 注意: 硬编码的DEFAULT_*_PROMPT只用于初始化数据库,不用于运行时兜底
@@ -177,6 +180,8 @@ class AIMatcher:
         self.cache = AIResponseCache(ttl_seconds=cache_ttl) if cache_enabled else None
 
         self.client = None
+        # 是否使用 Responses API（openai provider + openai-python SDK v2+）
+        self._use_responses_api: bool = False
         self._initialize_client()
 
     def update_prompts(self, prompt_config: Dict[str, str]):
@@ -327,6 +332,73 @@ class AIMatcher:
         except Exception:
             pass
 
+    async def _call_openai_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        method_name: str,
+        timeout: int = None,
+    ) -> tuple:
+        """统一封装 OpenAI JSON 调用，自动选择 Responses API 或 Chat Completions。
+
+        返回 (content: str | None, tokens_used: int)。
+        timeout 默认使用实例的 self.call_timeout（由配置项 aiCallTimeout 控制）。
+        - Responses API：使用 text.format=json_object + instructions/input，
+          通过 response.output_text 取回内容，不传已废弃的 max_tokens/max_completion_tokens。
+        - Chat Completions：保持原有逻辑，不传 max_tokens（由模型默认值控制）。
+        """
+        effective_timeout = timeout if timeout is not None else self.call_timeout
+        if self._use_responses_api:
+            # --- Responses API 路径 ---
+            response = await asyncio.to_thread(
+                self.client.responses.create,
+                model=self.model,
+                instructions=system_prompt,
+                input=user_prompt,
+                temperature=0.0,
+                text={"format": {"type": "json_object"}},
+                timeout=effective_timeout,
+                store=False,  # 不持久化，减少数据留存
+            )
+            self._log_reasoning_content_responses(response, method_name)
+            content = response.output_text if response.output_text else None
+            tokens = response.usage.total_tokens if response.usage else 0
+        else:
+            # --- Chat Completions 路径（兼容 deepseek/siliconflow 等第三方）---
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                timeout=effective_timeout,
+                **self._get_deepseek_thinking_extra()
+            )
+            self._log_reasoning_content(response, method_name)
+            content = _extract_openai_content(response)
+            tokens = response.usage.total_tokens if hasattr(response, "usage") and response.usage else 0
+
+        return content, tokens
+
+    def _log_reasoning_content_responses(self, response, method_name: str):
+        """记录 Responses API 响应中的推理内容（如 o 系列模型）。"""
+        if not self.log_raw_response:
+            return
+        try:
+            for item in response.output:
+                if getattr(item, "type", None) == "reasoning":
+                    for block in getattr(item, "summary", []):
+                        text = getattr(block, "text", None)
+                        if text:
+                            ai_responses_logger.info(
+                                f"[{method_name}] 推理内容 (reasoning):\n{text}\n{'='*80}"
+                            )
+        except Exception:
+            pass
+
     def _initialize_client(self):
         """根据提供商初始化客户端"""
         try:
@@ -364,6 +436,16 @@ class AIMatcher:
                 )
                 logger.info(f"AI匹配器初始化成功: {self.provider} ({self.model}) - {self.base_url}")
 
+                # 检测 SDK 是否支持 Responses API（openai provider 且未指定自定义 base_url）
+                # openai-python v2+ 会在 client 上暴露 .responses 属性
+                self._use_responses_api = (
+                    self.provider == "openai"
+                    and not self.base_url  # 自定义 base_url 说明是第三方兼容服务，不走 Responses API
+                    and hasattr(self.client, "responses")
+                )
+                if self._use_responses_api:
+                    logger.info("AI匹配器: 检测到 Responses API 支持，JSON 模式调用将使用新端点（/v1/responses）")
+
         except Exception as e:
             logger.error(f"AI匹配器初始化失败: {e}")
             raise
@@ -372,7 +454,9 @@ class AIMatcher:
         self,
         query: Dict[str, Any],
         results: List[ProviderSearchInfo],
-        favorited_info: Optional[Dict[str, bool]] = None
+        favorited_info: Optional[Dict[str, bool]] = None,
+        existing_info: Optional[Dict[str, bool]] = None,
+        recognition_info: Optional[Dict[str, bool]] = None
     ) -> Optional[int]:
         """
         使用AI从搜索结果中选择最佳匹配
@@ -381,6 +465,9 @@ class AIMatcher:
             query: 查询信息,包含 title, season, episode, year 等
             results: 搜索结果列表
             favorited_info: 精确标记信息 {provider:mediaId -> isFavorited}
+            existing_info: 库内已有源信息 {provider:mediaId -> inLibrary}
+            recognition_info: 识别词命中信息 {provider:mediaId -> matchesRecognitionRule}
+                （仅作认知校正，标记该结果经识别词规则转换后即用户目标作品，不改变排序优先级）
 
         Returns:
             最佳匹配结果的索引,如果没有合适的匹配则返回None
@@ -401,6 +488,18 @@ class AIMatcher:
                     key = f"{result.provider}:{result.mediaId}"
                     is_favorited = favorited_info.get(key, False)
 
+                # 检查是否已存在于库内（供 AI 优先复用库内源，避免同剧不同集换源）
+                in_library = False
+                if existing_info:
+                    key = f"{result.provider}:{result.mediaId}"
+                    in_library = existing_info.get(key, False)
+
+                # 检查是否命中识别词规则（认知校正：该结果经识别词转换后即用户目标作品）
+                matches_recognition = False
+                if recognition_info:
+                    key = f"{result.provider}:{result.mediaId}"
+                    matches_recognition = recognition_info.get(key, False)
+
                 results_data.append({
                     "index": idx,
                     "provider": result.provider,
@@ -409,7 +508,9 @@ class AIMatcher:
                     "season": result.season,
                     "year": result.year,
                     "episodeCount": result.episodeCount,
-                    "isFavorited": is_favorited
+                    "isFavorited": is_favorited,
+                    "inLibrary": in_library,
+                    "matchesRecognitionRule": matches_recognition
                 })
 
             # 尝试从缓存获取
@@ -453,6 +554,14 @@ class AIMatcher:
                     f"根据TMDB剧集组映射，S{cs}E{ce}(剧集组分季)等价于S{ts}E{te}(TMDB标准分季)，"
                     f"该季度共{total}集。请优先选择集数接近{total}集或标题包含第{cs}季相关信息的弹幕源。"
                 )
+
+            # 识别词认知校正提示：告诉 AI 哪些结果命中了用户的识别词规则及其真实身份。
+            # why：识别词把源站标题(如"说唱巅峰对决2026")映射为入库名(如"中国新说唱 第九季")，
+            # AI 若不知道这层映射，可能因标题字面差异误判 matchesRecognitionRule=true 的正确结果。
+            # 注意：此为身份理解辅助，不改变排序优先级（标记/库内/源顺序优先级不变）。
+            rec_hint = query.get("recognition_hint")
+            if rec_hint:
+                input_data["recognition_hint"] = rec_hint
 
             logger.info(f"AI匹配: 开始分析 {len(results)} 个搜索结果")
             logger.debug(f"查询信息: {query}")
@@ -523,7 +632,7 @@ class AIMatcher:
             return None
 
     async def _match_openai(self, input_data: Dict[str, Any]) -> Optional[Dict]:
-        """使用OpenAI兼容接口进行匹配"""
+        """使用 OpenAI 接口进行匹配（自动选择 Responses API / Chat Completions）"""
         if not self.client:
             return None
 
@@ -531,22 +640,12 @@ class AIMatcher:
 
         try:
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
-
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.match_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                timeout=30,
-                **self._get_deepseek_thinking_extra()
+            content, tokens = await self._call_openai_json(
+                system_prompt=self.match_prompt,
+                user_prompt=user_prompt,
+                method_name="select_best_match",
             )
 
-            self._log_reasoning_content(response, "select_best_match")
-            content = _extract_openai_content(response)
             if content is None:
                 return None
             logger.debug(f"AI原始响应: {content}")
@@ -562,7 +661,7 @@ class AIMatcher:
                 method="select_best_match",
                 success=True,
                 duration_ms=int(duration),
-                tokens_used=response.usage.total_tokens if hasattr(response, 'usage') else 0,
+                tokens_used=tokens,
                 model=self.model,
                 cache_hit=False
             ))
@@ -751,31 +850,20 @@ class AIMatcher:
             return None
 
     async def _recognize_openai(self, input_data: Dict[str, Any]) -> Optional[Dict]:
-        """使用OpenAI兼容接口进行识别"""
+        """使用 OpenAI 接口进行识别（自动选择 Responses API / Chat Completions）"""
         if not self.client:
             return None
 
         start_time = datetime.now()
 
         try:
-            import json
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
-
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.recognition_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                timeout=30,
-                **self._get_deepseek_thinking_extra()
+            content, tokens = await self._call_openai_json(
+                system_prompt=self.recognition_prompt,
+                user_prompt=user_prompt,
+                method_name="recognize_title",
             )
 
-            self._log_reasoning_content(response, "recognize_title")
-            content = _extract_openai_content(response)
             if content is None:
                 return None
             logger.debug(f"AI识别原始响应: {content}")
@@ -791,7 +879,7 @@ class AIMatcher:
                 method="recognize_title",
                 success=True,
                 duration_ms=int(duration),
-                tokens_used=response.usage.total_tokens if hasattr(response, 'usage') else 0,
+                tokens_used=tokens,
                 model=self.model,
                 cache_hit=False
             ))
@@ -941,35 +1029,23 @@ class AIMatcher:
             return None
 
     async def _expand_aliases_openai(self, input_data: Dict[str, Any]) -> Optional[Dict]:
-        """使用OpenAI兼容接口进行别名扩展"""
+        """使用 OpenAI 接口进行别名扩展（自动选择 Responses API / Chat Completions）"""
         if not self.client:
             return None
 
         try:
-            import json
-
             # 获取别名扩展提示词
             alias_expansion_prompt = self.config.get("ai_alias_expansion_prompt", "")
             if not alias_expansion_prompt:
                 alias_expansion_prompt = DEFAULT_AI_ALIAS_EXPANSION_PROMPT
 
             user_prompt = json.dumps(input_data, ensure_ascii=False, indent=2)
-
-            response = await asyncio.to_thread(
-                self.client.chat.completions.create,
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": alias_expansion_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-                timeout=30,
-                **self._get_deepseek_thinking_extra()
+            content, _ = await self._call_openai_json(
+                system_prompt=alias_expansion_prompt,
+                user_prompt=user_prompt,
+                method_name="expand_aliases",
             )
 
-            self._log_reasoning_content(response, "expand_aliases")
-            content = _extract_openai_content(response)
             if content is None:
                 return None
             logger.debug(f"AI别名扩展原始响应: {content}")
@@ -1089,21 +1165,12 @@ class AIMatcher:
                 )
                 content = response.text
             else:
-                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
-                response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": validation_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.0,
-                    response_format={"type": "json_object"},
-                    timeout=30,
-                    **self._get_deepseek_thinking_extra()
+                # OpenAI 接口（自动选择 Responses API / Chat Completions）
+                content, _ = await self._call_openai_json(
+                    system_prompt=validation_prompt,
+                    user_prompt=user_prompt,
+                    method_name="validate_aliases",
                 )
-                self._log_reasoning_content(response, "validate_aliases")
-                content = _extract_openai_content(response)
                 if content is None:
                     return None
 
@@ -1223,9 +1290,9 @@ class AIMatcher:
                 alias_text = f" (别名: {', '.join(season_aliases)})" if season_aliases else ""
                 options_text += f"{i+1}. 第{season_num}季: {season_name}{alias_text}\n"
 
-            # 使用公共AI季度匹配提示词
+            # 使用公共AI季度匹配提示词（仅用于 Gemini，OpenAI 路径通过 _season_match_universal 传 input_data 处理）
             from .ai_prompts import DEFAULT_AI_SEASON_MATCH_PROMPT
-            prompt = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
+            _ = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
                 title=title,
                 options_text=options_text
             )
@@ -1347,24 +1414,14 @@ class AIMatcher:
                 )
                 content = response.text
             else:
-                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
-                response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.0,
-                    response_format={"type": "json_object"},
-                    timeout=30,
-                    **self._get_deepseek_thinking_extra()
+                # OpenAI 接口（自动选择 Responses API / Chat Completions）
+                content, _ = await self._call_openai_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    method_name="metadata_match",
                 )
-                self._log_reasoning_content(response, "metadata_match")
-                content = _extract_openai_content(response)
-
-            if self.log_raw_response:
-                ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
+                if self.log_raw_response:
+                    ai_responses_logger.info(f"[元数据匹配] 原始响应: {content}")
 
             parsed_data = _safe_json_loads(content, log_raw_response=self.log_raw_response)
 
@@ -1409,7 +1466,7 @@ class AIMatcher:
 
             # 使用公共AI季度匹配提示词
             from .ai_prompts import DEFAULT_AI_SEASON_MATCH_PROMPT
-            prompt = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
+            season_match_prompt = DEFAULT_AI_SEASON_MATCH_PROMPT.format(
                 title=title,
                 options_text=options_text
             )
@@ -1419,20 +1476,21 @@ class AIMatcher:
                 response = await asyncio.to_thread(
                     self.client.models.generate_content,
                     model=self.model,
-                    contents=prompt
+                    contents=season_match_prompt
                 )
                 ai_response = response.text.strip()
             else:
-                # OpenAI 兼容接口 (deepseek, siliconflow, openai)
+                # OpenAI 接口：季度匹配返回纯文本数字，不需要 JSON 模式；
+                # 使用 Chat Completions（带 max_tokens 限制加速响应），按提供商选择参数名
                 response = await asyncio.to_thread(
                     self.client.chat.completions.create,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": "你是一个专业的季度识别助手，擅长分析动漫标题中的季度信息。"},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": season_match_prompt}
                     ],
                     temperature=0.1,
-                    **_get_max_tokens_param(self.model, 50),
+                    **_get_max_tokens_param(self.model, 50, provider=self.provider),
                     **self._get_deepseek_thinking_extra()
                 )
                 self._log_reasoning_content(response, "season_match")
@@ -1552,21 +1610,12 @@ class AIMatcher:
                 )
                 content = response.text
             else:
-                # OpenAI 兼容接口
-                response = await asyncio.to_thread(
-                    self.client.chat.completions.create,
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.0,
-                    response_format={"type": "json_object"},
-                    timeout=30,
-                    **self._get_deepseek_thinking_extra()
+                # OpenAI 接口（自动选择 Responses API / Chat Completions）
+                content, _ = await self._call_openai_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    method_name="episode_group_select",
                 )
-                self._log_reasoning_content(response, "episode_group_select")
-                content = _extract_openai_content(response)
                 if content is None:
                     logger.warning(f"剧集组选择(AI): '{title}' → AI返回空内容")
                     return None
@@ -1701,6 +1750,8 @@ class AIMatcher:
                 )
                 content = response.text.strip() if response.text else None
             else:
+                # OpenAI 接口：正则生成返回纯文本，不需要 JSON 模式；
+                # 按提供商选择正确的 token 参数名
                 response = await asyncio.to_thread(
                     self.client.chat.completions.create,
                     model=self.model,
@@ -1709,7 +1760,7 @@ class AIMatcher:
                         {"role": "user", "content": user_prompt}
                     ],
                     temperature=0.0,
-                    **_get_max_tokens_param(self.model, 4096),
+                    **_get_max_tokens_param(self.model, 4096, provider=self.provider),
                     **self._get_deepseek_thinking_extra()
                 )
                 self._log_reasoning_content(response, "generate_regex")

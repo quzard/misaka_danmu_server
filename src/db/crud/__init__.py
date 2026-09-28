@@ -7,7 +7,10 @@ CRUD模块
 from .config import (
     get_config_value,
     update_config_value,
+    update_config_values_atomic,
     initialize_configs,
+    allocate_next_counter_value,
+    LAST_ALLOCATED_ANIME_ID_KEY,
 )
 
 # User模块
@@ -24,6 +27,10 @@ from .user import (
     get_bangumi_auth,
     save_bangumi_auth,
     delete_bangumi_auth,
+    get_oauth_credential,
+    save_oauth_credential,
+    delete_oauth_credential,
+    get_oauth_credential_with_token,
 )
 
 # Task模块
@@ -56,6 +63,7 @@ from .task import (
     create_webhook_task,
     get_webhook_tasks,
     delete_webhook_tasks,
+    delete_all_webhook_tasks,
     get_due_webhook_tasks,
     update_webhook_task_status,
     save_task_state_cache,
@@ -63,6 +71,9 @@ from .task import (
     clear_task_state_cache,
     get_all_running_task_states,
     get_pending_recoverable_tasks,
+    save_perf_events,
+    get_perf_stats,
+    delete_old_perf_events,
 )
 
 # MediaServer模块
@@ -94,6 +105,8 @@ from .scraper import (
     update_scraper_proxy,
     update_scrapers_settings,
     remove_stale_scrapers,
+    save_scraper_order_snapshot,
+    apply_scraper_order_from_snapshot,
 )
 
 # MetadataSource模块
@@ -194,6 +207,9 @@ from .source import (
     reset_incremental_refresh_failures,
     disable_incremental_refresh,
     get_sources_with_incremental_refresh_enabled,
+    get_calendar_sources,
+    update_air_schedule,
+    update_metadata_ids,
     _assign_source_order_if_missing,
     get_incremental_refresh_sources_grouped,
     batch_toggle_incremental_refresh,
@@ -230,6 +246,8 @@ from .cache import (
     clear_all_cache,
     delete_cache,
     get_cache_keys_by_pattern,
+    count_cache_keys_by_pattern,
+    list_cache_keys_by_pattern,
 )
 
 # ApiToken模块
@@ -304,8 +322,6 @@ from .utility import (
     find_recent_task_by_unique_key,
     get_all_running_task_states,
     mark_interrupted_tasks_as_failed,
-    get_due_webhook_tasks,
-    delete_webhook_tasks,
     get_last_run_result_for_scheduled_task,
     get_execution_task_id_from_scheduler_task,
     force_delete_task_from_history,
@@ -326,7 +342,10 @@ __all__ = [
     # Config
     'get_config_value',
     'update_config_value',
+    'update_config_values_atomic',
     'initialize_configs',
+    'allocate_next_counter_value',
+    'LAST_ALLOCATED_ANIME_ID_KEY',
     # User
     'get_user_by_id',
     'get_user_by_username',
@@ -340,6 +359,10 @@ __all__ = [
     'get_bangumi_auth',
     'save_bangumi_auth',
     'delete_bangumi_auth',
+    'get_oauth_credential',
+    'save_oauth_credential',
+    'delete_oauth_credential',
+    'get_oauth_credential_with_token',
     # Task
     'is_system_task',
     'get_scheduled_tasks',
@@ -367,6 +390,7 @@ __all__ = [
     'create_webhook_task',
     'get_webhook_tasks',
     'delete_webhook_tasks',
+    'delete_all_webhook_tasks',
     'get_due_webhook_tasks',
     'update_webhook_task_status',
     'save_task_state_cache',
@@ -393,6 +417,8 @@ __all__ = [
     'update_scraper_proxy',
     'update_scrapers_settings',
     'remove_stale_scrapers',
+    'save_scraper_order_snapshot',
+    'apply_scraper_order_from_snapshot',
     # MetadataSource
     'sync_metadata_sources_to_db',
     'get_all_metadata_source_settings',
@@ -477,6 +503,9 @@ __all__ = [
     'reset_incremental_refresh_failures',
     'disable_incremental_refresh',
     'get_sources_with_incremental_refresh_enabled',
+    'get_calendar_sources',
+    'update_air_schedule',
+    'update_metadata_ids',
     '_assign_source_order_if_missing',
     'split_source_episodes',
     'get_source_episode_list',
@@ -497,6 +526,8 @@ __all__ = [
     'clear_all_cache',
     'delete_cache',
     'get_cache_keys_by_pattern',
+    'count_cache_keys_by_pattern',
+    'list_cache_keys_by_pattern',
     'clear_task_state_cache',
     # ApiToken
     'get_all_api_tokens',

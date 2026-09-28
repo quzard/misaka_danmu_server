@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from src.db import crud, ConfigManager
 from src.core import get_app_timezone
+from src.core.env import is_docker_environment
 from src.rate_limiter import RateLimiter
 from src.jobs import BaseJob, WebhookProcessorJob
 from src.ai import AIMatcherManager
@@ -66,21 +67,7 @@ class SchedulerManager:
         """
         动态发现并加载 'jobs' 目录下的所有任务类。
         """
-        def _is_docker_environment():
-            """检测是否在Docker容器中运行"""
-            import os
-            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-            if Path("/.dockerenv").exists():
-                return True
-            # 方法2: 检查环境变量
-            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-                return True
-            # 方法3: 检查当前工作目录是否为 /app
-            if Path.cwd() == Path("/app"):
-                return True
-            return False
-
-        if _is_docker_environment():
+        if is_docker_environment():
             jobs_package_path = [str(Path("/app/src/jobs"))]
         else:
             jobs_package_path = [str(Path("src/jobs"))]
@@ -112,7 +99,11 @@ class SchedulerManager:
             {
                 "jobType": job.job_type,
                 "name": job.job_name,
+                "name_en": getattr(job, 'job_name_en', ''),
+                "name_tw": getattr(job, 'job_name_tw', ''),
                 "description": getattr(job, 'description', ''),
+                "description_en": getattr(job, 'description_en', ''),
+                "description_tw": getattr(job, 'description_tw', ''),
                 "isSystemTask": getattr(job, 'is_system_task', False),
                 "configSchema": getattr(job, 'config_schema', [])
             }
@@ -292,6 +283,26 @@ class SchedulerManager:
             await crud.update_scheduled_task(session, task_id, name, cron, is_enabled, task_config)
             await crud.update_scheduled_task_run_times(session, task_id, task_info['lastRunAt'], next_run_time)
             return await crud.get_scheduled_task(session, task_id)
+
+    async def sync_bangumi_data_schedule(self, enabled: bool, cron: str) -> None:
+        """方案甲：根据 Bangumi 源配置中的「开关 + cron」，自动维护 bangumiDataSync 调度任务。
+
+        - enabled=True：不存在则创建，存在则更新 cron 并启用
+        - enabled=False：存在则禁用（保留记录，不删除），不存在则不处理
+        由 set_provider_settings 在保存 Bangumi 配置时调用。
+        """
+        job_type = "bangumiDataSync"
+        name = "bangumi-data 离线索引同步"
+        cron = (cron or "").strip() or "0 4 * * *"  # 默认每天 4:00
+        async with self._session_factory() as session:
+            existing_id = await crud.get_scheduled_task_id_by_type(session, job_type)
+
+        if existing_id:
+            await self.update_task(existing_id, name, cron, enabled)
+            logger.info(f"已更新 bangumi-data 同步调度任务: enabled={enabled}, cron='{cron}'")
+        elif enabled:
+            await self.add_task(name, job_type, cron, True)
+            logger.info(f"已创建 bangumi-data 同步调度任务: cron='{cron}'")
 
     async def delete_task(self, task_id: str) -> bool:
         async with self._session_factory() as session:

@@ -6,10 +6,13 @@ import logging
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
 from src.db import crud, models, get_db_session, ConfigManager
+from src.db.crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
+from src.db.orm_models import MediaItem
 from src import security, tasks
 from src.services import TaskManager, ScraperManager, MetadataSourceManager, get_media_server_manager
 from src.ai.ai_matcher_manager import AIMatcherManager
@@ -491,8 +494,6 @@ async def batch_delete_media_items(
     2. shows: [{"serverId": int, "title": str}]
     3. seasons: [{"serverId": int, "title": str, "season": int}]
     """
-    from src.db.crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
-
     all_item_ids: set[int] = set()
 
     # 收集直接指定的item IDs
@@ -568,8 +569,6 @@ async def import_media_items(
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
     """导入选中的媒体项(触发webhook式搜索和弹幕下载)"""
-    from src.db.crud.media_server import get_episode_ids_by_show, get_episode_ids_by_season
-
     all_item_ids = set()
 
     # 收集直接指定的item IDs
@@ -607,8 +606,6 @@ async def import_media_items(
     unique_key = f"media-import-{hash(tuple(sorted_ids))}"
 
     # 查询媒体项标题，用于生成可读的任务标题（分批查询，避免 asyncpg 的 32767 参数限制）
-    from src.db.orm_models import MediaItem
-    from sqlalchemy import select, func
     PG_BATCH = 30000
     title_groups = []
     for i in range(0, len(item_ids_list), PG_BATCH):
@@ -677,25 +674,28 @@ async def import_all_unimported_media_items(
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     title_recognition_manager = Depends(get_title_recognition_manager)
 ):
-    """一键导入指定服务器下所有未导入的媒体项"""
+    """一键导入指定服务器下所有未导入的媒体项。
+
+    why：原实现在此处同步调用 crud.get_unimported_item_ids 统计未导入清单，
+    该查询含三表 JOIN 关联子查询且标题比对无法命中索引，媒体库大时耗时数十秒，
+    接口长时间不返回导致用户误判功能失效（issue #441）。
+    现将统计过程下沉到任务内部，接口只做参数校验并立即返回 taskId。
+    """
     server_id = payload.get("serverId")
     media_type = payload.get("mediaType")
 
     if not server_id:
         raise HTTPException(status_code=400, detail="serverId 是必填参数")
 
-    # 获取所有未导入的 item IDs
-    item_ids_list = await crud.get_unimported_item_ids(session, server_id, media_type)
-
-    if not item_ids_list:
-        return {"message": "没有未导入的媒体项", "count": 0}
-
-    # 生成 unique_key
-    unique_key = f"media-import-all-{server_id}-{len(item_ids_list)}"
+    # why：unique_key 不再包含未导入数量（原先为 f"...-{len(item_ids)}"）。
+    # 数量此刻尚未统计，且以数量入 key 会导致"数量恰好相同的重复提交"被静默去重。
+    # 改为按 服务器+类型 维度去重，重复提交会明确返回 409。
+    unique_key = f"media-import-all-{server_id}-{media_type or 'all'}"
 
     task_id, _ = await task_manager.submit_task(
-        lambda session, progress_callback: tasks.import_media_items(
-            item_ids_list,
+        lambda session, progress_callback: tasks.import_all_unimported_media_items(
+            server_id,
+            media_type,
             session,
             task_manager,
             progress_callback,
@@ -706,15 +706,14 @@ async def import_all_unimported_media_items(
             rate_limiter=rate_limiter,
             title_recognition_manager=title_recognition_manager
         ),
-        title=f"一键导入全部未导入: 共{len(item_ids_list)}个",
+        title="一键导入全部未导入",
         queue_type="download",
         unique_key=unique_key,
-        task_type="import_media_items",
-        task_parameters={"itemIds": item_ids_list}
+        task_type="import_all_unimported",
+        task_parameters={"serverId": server_id, "mediaType": media_type}
     )
 
     return {
-        "message": f"已提交导入任务，共 {len(item_ids_list)} 个未导入媒体项",
-        "taskId": task_id,
-        "count": len(item_ids_list)
+        "message": "导入任务已提交，请在任务管理器查看进度",
+        "taskId": task_id
     }

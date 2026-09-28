@@ -11,8 +11,68 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fastapi import HTTPException, status
 
 from src.db import models, crud, ConfigManager
+# why：在每个任务启动前注入 session_factory，让 TaskProfiler.flush 能开独立 session
+# 写入 task_perf_events，避免外层 async with session 异常退出时 rollback 覆盖 perf 数据。
+from src.utils.task_profiler import set_task_session_factory
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_import_unique_key(key: str) -> Optional[Tuple[str, str, Optional[int]]]:
+    """从导入类 unique_key 解析出 (provider, media_id, season)。
+
+    支持的格式：
+      - import-{provider}-{mediaId}-S{season}-ep{ep}
+      - import-{provider}-{mediaId}-{8位hash}
+      - ui-import-{provider}-{mediaId}-season-{s}-episode-{e}-{type}
+      - url-import-{provider}-{mediaId}-{type}-season-{s} / url-import-{provider}-{mediaId}-{type}
+
+    why：mediaId 可能含连字符，故不能简单 split。先剥离已知前缀，再从尾部
+    剥离已知后缀标记（-S{n}-ep{m} / -season-{n}[-...] / 末尾8位hash），
+    剩余部分首段为 provider、其余为 mediaId。解析失败返回 None（调用方静默跳过）。
+    """
+    import re
+    if not key:
+        return None
+    # 剥离前缀
+    prefix = None
+    for p in ("ui-import-", "url-import-", "import-"):
+        if key.startswith(p):
+            prefix = p
+            break
+    if prefix is None:
+        return None
+    body = key[len(prefix):]
+
+    season: Optional[int] = None
+    # 剥离 -S{season}-ep{ep} 尾部（webhook 导入）
+    m = re.search(r"-S(\d+)-ep\d*$", body)
+    if m:
+        season = int(m.group(1))
+        body = body[:m.start()]
+    else:
+        # 剥离 -season-{s}[-episode-{e}][-{type}] 尾部（ui-import / url-import）
+        m2 = re.search(r"-season-(\d+)(?:-.*)?$", body)
+        if m2:
+            season = int(m2.group(1))
+            body = body[:m2.start()]
+        else:
+            # 剥离末尾 8 位 hash（编辑导入 import-{provider}-{mediaId}-{hash}）
+            m3 = re.search(r"-[0-9a-f]{8}$", body)
+            if m3:
+                body = body[:m3.start()]
+            else:
+                # url-import-{provider}-{mediaId}-{type}：剥离末尾已知类型
+                m4 = re.search(r"-(movie|tv_series|tv|other)$", body)
+                if m4:
+                    body = body[:m4.start()]
+
+    parts = body.split("-", 1)
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    provider, media_id = parts[0], parts[1]
+    return provider, media_id, season
+
 
 class TaskStatus(str, Enum):
     PENDING = "排队中"
@@ -21,16 +81,10 @@ class TaskStatus(str, Enum):
     FAILED = "失败"
     PAUSED = "已暂停"
 
-class TaskSuccess(Exception):
-    """自定义异常，用于表示任务成功完成并附带一条最终消息。"""
-    pass
+# why: 异常类已移至 src.utils.task_exceptions（零依赖），此处 re-export 保持对外接口不变。
+# 所有调用方（tasks/jobs/api 等）从 src.services 或 src.services.task_manager 导入均可正常工作。
+from src.utils.task_exceptions import TaskSuccess, TaskFailed, TaskPauseForRateLimit
 
-class TaskPauseForRateLimit(Exception):
-    """自定义异常，用于表示任务因速率限制需要暂停"""
-    def __init__(self, retry_after_seconds: float, message: str = ""):
-        self.retry_after_seconds = retry_after_seconds
-        self.message = message
-        super().__init__(message)
 
 class Task:
     def __init__(self, task_id: str, title: str, coro_factory: Callable[[Callable], Coroutine], scheduled_task_id: Optional[str] = None, unique_key: Optional[str] = None, task_type: Optional[str] = None, task_parameters: Optional[Dict] = None, queue_type: str = "download"):
@@ -108,8 +162,16 @@ class TaskManager:
         title = task.title or ""
         suffix = "_success" if is_success else "_failed"
 
-        # 删除任务不发通知
-        if key.startswith("delete-source-") or key.startswith("delete-bulk-sources-"):
+        # 删除任务不发通知（必须覆盖所有删除前缀，否则会掉到末尾兜底被误判为 import_success，
+        # 导致出现"✅ 导入成功 / 删除成功"这种标题与内容矛盾的通知）
+        if key.startswith((
+            "delete-source-",        # 删除单个数据源
+            "delete-bulk-sources-",  # 批量删除数据源
+            "delete-anime-",         # 删除作品
+            "delete-episode-",       # 删除单个分集
+            "delete-bulk-episodes-", # 批量删除分集
+            "modify-episodes-",      # 集数偏移（管理类操作，非导入，避免误判为"导入成功"）
+        )):
             return None
 
         # 定时任务（有 scheduled_task_id）
@@ -120,8 +182,9 @@ class TaskManager:
         if key.startswith("webhook-search-"):
             return f"webhook_import{suffix}"
 
-        # 数据源刷新
-        if key.startswith("refresh-episode-") or key.startswith("full-refresh-") or key.startswith("bulk-refresh-"):
+        # 数据源刷新（含定时"刷新最新集" refresh-latest- 前缀，否则会掉到末尾兜底被误判为导入）
+        if (key.startswith("refresh-episode-") or key.startswith("full-refresh-")
+                or key.startswith("bulk-refresh-") or key.startswith("refresh-latest-")):
             return f"refresh{suffix}"
 
         # 追更刷新（增量刷新 job 提交的导入任务，通过 title 识别）
@@ -173,26 +236,127 @@ class TaskManager:
         # 1. 优先从 task_parameters 取 imageUrl（import/auto_import 任务已有）
         image_url: str = (task.task_parameters or {}).get("imageUrl", "") or ""
 
-        # 2. 刷新任务 task_parameters 里没有 imageUrl，从数据库补查
-        if not image_url and task.unique_key:
+        # 2. 刷新类任务 task_parameters 通常缺标题/集数/年份/海报，从数据库补查。
+        #    db_extra 收集补查到的字段，稍后仅用于填补 payload 中为空的项（不覆盖已有值）。
+        db_extra: Dict[str, Any] = {}
+        if task.unique_key:
             key = task.unique_key
             try:
                 async with self._session_factory() as session:
-                    if key.startswith("refresh-episode-") or key.startswith("full-refresh-"):
-                        # key 格式: refresh-episode-{source_id}-xxx 或 full-refresh-{anime_id}-xxx
-                        parts = key.split("-")
-                        id_val = int(parts[2])
-                        if key.startswith("refresh-episode-"):
-                            info = await crud.get_anime_source_info(session, id_val)
-                            image_url = (info or {}).get("imageUrl", "") or ""
-                        else:
-                            # full-refresh: 直接查 Anime
-                            from src.db.orm_models import Anime as AnimeORM
-                            from sqlalchemy import select as sa_select
-                            row = await session.get(AnimeORM, id_val)
-                            image_url = (row.imageUrl if row else "") or ""
+                    if key.startswith("refresh-episode-"):
+                        # refresh-episode-{episodeId}：第三段是 episodeId
+                        try:
+                            episode_id = int(key.split("-")[2])
+                        except (ValueError, IndexError):
+                            episode_id = None
+                        if episode_id is not None:
+                            ep_info = await crud.get_episode_provider_info(session, episode_id)
+                            if ep_info:
+                                db_extra["episode"] = ep_info.get("episodeIndex")
+                                # 通过 animeId 反查 Anime 标题/年份/季/海报
+                                from src.db.orm_models import Anime as AnimeORM
+                                anime_row = await session.get(AnimeORM, ep_info.get("animeId"))
+                                if anime_row:
+                                    db_extra["anime_title"] = anime_row.title
+                                    db_extra["season"] = anime_row.season
+                                    db_extra["year"] = anime_row.year
+                                    db_extra["image_url"] = (anime_row.imageUrl or "")
+                                db_extra["source"] = ep_info.get("providerName", "")
+                    elif key.startswith("refresh-latest-"):
+                        # refresh-latest-{sourceId}-ep{n}：第三段是 sourceId，ep 后是集号（非 episodeId）。
+                        # 按 sourceId 反查作品/源信息，集号从 -ep 后解析。
+                        source_id = None
+                        ep_index = None
+                        try:
+                            rest = key[len("refresh-latest-"):]
+                            sid_part, _, ep_part = rest.partition("-ep")
+                            source_id = int(sid_part)
+                            if ep_part:
+                                ep_index = int(ep_part)
+                        except (ValueError, IndexError):
+                            pass
+                        if source_id is not None:
+                            info = await crud.get_anime_source_info(session, source_id)
+                            if info:
+                                db_extra["anime_title"] = info.get("title", "")
+                                db_extra["season"] = info.get("season")
+                                db_extra["year"] = info.get("year")
+                                db_extra["source"] = info.get("providerName", "")
+                                db_extra["image_url"] = info.get("imageUrl", "") or ""
+                                if ep_index is not None:
+                                    db_extra["episode"] = ep_index
+                    elif key.startswith("full-refresh-") or key.startswith("bulk-refresh-"):
+                        # full-refresh-{anime_id}-xxx：直接查 Anime
+                        from src.db.orm_models import Anime as AnimeORM
+                        try:
+                            anime_id = int(key.split("-")[2])
+                        except (ValueError, IndexError):
+                            anime_id = None
+                        if anime_id is not None:
+                            anime_row = await session.get(AnimeORM, anime_id)
+                            if anime_row:
+                                db_extra["anime_title"] = anime_row.title
+                                db_extra["season"] = anime_row.season
+                                db_extra["year"] = anime_row.year
+                                db_extra["image_url"] = (anime_row.imageUrl or "")
             except Exception:
-                pass  # imageUrl 获取失败不影响通知发出
+                pass  # 补查失败不影响通知发出
+
+        # 3. 兜底：task_parameters 带 sourceId 的刷新类任务（如 TG 刷新 tg_refresh、指令刷新），
+        #    其 unique_key 无 refresh 前缀，上面补不到，这里按 sourceId 反查作品/源信息。
+        if not db_extra.get("anime_title"):
+            source_id = (task.task_parameters or {}).get("sourceId")
+            if source_id is not None:
+                try:
+                    async with self._session_factory() as session:
+                        info = await crud.get_anime_source_info(session, int(source_id))
+                        if info:
+                            db_extra["anime_title"] = info.get("title", "")
+                            db_extra["season"] = info.get("season")
+                            db_extra["year"] = info.get("year")
+                            db_extra["source"] = info.get("providerName", "")
+                            db_extra["tmdb_id"] = info.get("tmdbId", "") or ""
+                            if not db_extra.get("image_url"):
+                                db_extra["image_url"] = info.get("imageUrl", "") or ""
+                except Exception:
+                    pass  # 补查失败不影响通知发出
+
+        # 4. 兜底：导入类任务（import-/ui-import-/url-import- 前缀）若 task_parameters
+        #    未带 animeTitle（如 direct_import / URL导入 / 旧路径），从 unique_key 解析
+        #    provider+mediaId 反查 DB 补齐作品名/季/来源。why：媒体库逐集导入等路径
+        #    的微信通知只剩弹幕数，看不出是哪部作品。
+        if not db_extra.get("anime_title") and not (task.task_parameters or {}).get("animeTitle"):
+            key = task.unique_key or ""
+            parsed = _parse_import_unique_key(key)
+            if parsed:
+                provider, media_id, season_hint = parsed
+                try:
+                    async with self._session_factory() as session:
+                        anime_id = await crud.get_anime_id_by_source_media_id(
+                            session, provider, media_id, season=season_hint
+                        )
+                        # season 提示查不到时退化为不带 season 再查一次
+                        if anime_id is None and season_hint is not None:
+                            anime_id = await crud.get_anime_id_by_source_media_id(
+                                session, provider, media_id
+                            )
+                        if anime_id is not None:
+                            from src.db.orm_models import Anime as AnimeORM
+                            anime_row = await session.get(AnimeORM, anime_id)
+                            if anime_row:
+                                db_extra["anime_title"] = anime_row.title
+                                db_extra["season"] = anime_row.season
+                                db_extra["year"] = anime_row.year
+                                db_extra["media_type"] = anime_row.type
+                                if not db_extra.get("image_url"):
+                                    db_extra["image_url"] = (anime_row.imageUrl or "")
+                            db_extra["source"] = provider
+                except Exception:
+                    pass  # 补查失败不影响通知发出
+
+        # image_url 优先用任务参数里的，没有再用补查结果
+        if not image_url:
+            image_url = db_extra.get("image_url", "") or ""
 
         try:
             import datetime
@@ -207,11 +371,21 @@ class TaskManager:
                 "episode_count": params.get("episodeCount"),
                 "webhook_source": params.get("webhookSource", ""),
                 "provider": params.get("provider", "") or params.get("providerName", ""),
+                # source 字段：新消息类导入模板读取 source 展示"来源/弹幕源"，映射自 provider
+                "source": params.get("provider", "") or params.get("providerName", ""),
                 "media_id": params.get("mediaId", "") or params.get("media_id", ""),
                 "tmdb_id": params.get("tmdbId", ""),
                 "media_type": params.get("type", "") or params.get("mediaType", ""),
+                "year": params.get("year"),
                 "finished_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
+            # 用数据库补查结果填补 extra 中为空的字段（不覆盖任务参数已有的值）。
+            # 这样刷新类任务也能在通知里显示标题/集数/年份/季/海报。
+            for _k, _v in db_extra.items():
+                if _v in (None, "") :
+                    continue
+                if extra.get(_k) in (None, "", 0):
+                    extra[_k] = _v
             await self._notification_service.emit_event(event_type, {
                 "task_title": task.title,
                 "message": message,
@@ -320,17 +494,28 @@ class TaskManager:
                     )
 
                 progress_callback = self._get_progress_callback(task)
+                # why：在协程启动前注入 session_factory 到 ContextVar，让任务内所有
+                # TaskProfiler.flush 调用自动使用独立 session 写入 task_perf_events，
+                # 避免外层 async with session 遇异常（TaskSuccess 等）退出时的 rollback
+                # 把已 commit 的 perf 数据一并清掉。
+                set_task_session_factory(self._session_factory)
                 actual_coroutine = task.coro_factory(session, progress_callback)
 
                 running_task = asyncio.create_task(actual_coroutine)
                 task.running_coro_task = running_task
-                await running_task
+                task_result = await running_task
 
+                # why：允许任务以非空字符串返回业务完成消息，避免正常返回路径把
+                # “新增 N 条弹幕”等结果覆盖成笼统的“任务成功完成”。
+                final_message = task_result if isinstance(task_result, str) and task_result.strip() else "任务成功完成"
                 await crud.finalize_task_in_history(
-                    session, task.task_id, TaskStatus.COMPLETED, "任务成功完成"
+                    session, task.task_id, TaskStatus.COMPLETED, final_message
                 )
-                self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成 [队列: {queue_type}]。")
-                await self._emit_task_event(task, True, "任务成功完成")
+                self.logger.info(
+                    f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message} "
+                    f"[队列: {queue_type}]。"
+                )
+                await self._emit_task_event(task, True, final_message)
         except TaskPauseForRateLimit as e:
             # 任务因速率限制需要暂停
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 因速率限制暂停 {e.retry_after_seconds:.0f} 秒")
@@ -362,6 +547,12 @@ class TaskManager:
             await self._safe_finalize_task(task.task_id, TaskStatus.COMPLETED, final_message)
             self.logger.info(f"任务 '{task.title}' (ID: {task.task_id}) 已成功完成，消息: {final_message}")
             await self._emit_task_event(task, True, final_message)
+        except TaskFailed as e:
+            # 业务失败：标记 FAILED 并发"失败"通知，但不打印 traceback（失败原因已在消息中）
+            final_message = str(e) if str(e) else "任务失败"
+            await self._safe_finalize_task(task.task_id, TaskStatus.FAILED, final_message)
+            self.logger.warning(f"任务 '{task.title}' (ID: {task.task_id}) 业务失败，消息: {final_message}")
+            await self._emit_task_event(task, False, final_message)
         except asyncio.CancelledError:
             if self._is_shutting_down:
                 # 程序优雅关闭导致的取消，不修改数据库状态
@@ -616,6 +807,18 @@ class TaskManager:
         Args:
             queue_type: 队列类型，"download" (下载队列)、"management" (管理队列) 或 "fallback" (后备队列)
         """
+        # why: 所有可能失败的纯校验必须在占用去重标记前完成，避免无效请求留下永久锁。
+        queue_map = {
+            "download": self._download_queue,
+            "management": self._management_queue,
+            "fallback": self._fallback_queue,
+        }
+        if queue_type not in queue_map:
+            raise ValueError(f"无效的队列类型: {queue_type}")
+
+        # 提前验证任务参数可序列化；否则 json.dumps 异常会发生在去重标记占用之后。
+        task_parameters_json = json.dumps(task_parameters, ensure_ascii=False) if task_parameters else None
+
         async with self._lock:
             # 新增：检查唯一键，防止同一资源的多个任务同时进行
             # unique_key 是精确的去重机制，优先于 title 去重
@@ -650,60 +853,76 @@ class TaskManager:
 
         task_id = str(uuid4())
         task = Task(task_id, title, coro_factory, scheduled_task_id=scheduled_task_id, unique_key=unique_key, task_type=task_type, task_parameters=task_parameters, queue_type=queue_type)
+        history_created = False
+        accepted = False
 
-        # 将任务参数序列化为JSON字符串，用于重启后恢复任务
-        task_parameters_json = json.dumps(task_parameters, ensure_ascii=False) if task_parameters else None
+        try:
+            async with self._session_factory() as session:
+                # 标记为“可能已落库”，即使取消恰好发生在数据库提交返回边界，
+                # 补偿逻辑也会尝试把该记录置为失败；记录不存在时更新是安全空操作。
+                history_created = True
+                await crud.create_task_in_history(
+                    session, task_id, title, TaskStatus.PENDING, "等待执行...",
+                    scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type,
+                    task_type=task_type, task_parameters=task_parameters_json
+                )
 
-        async with self._session_factory() as session:
-            await crud.create_task_in_history(
-                session, task_id, title, TaskStatus.PENDING, "等待执行...",
-                scheduled_task_id=scheduled_task_id, unique_key=unique_key, queue_type=queue_type,
-                task_type=task_type, task_parameters=task_parameters_json
-            )
+            if run_immediately:
+                self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过队列 [{queue_type}]。")
+                # 注册到 _immediate_tasks，使 pause/abort/resume 能找到该任务
+                async with self._lock:
+                    self._immediate_tasks[task_id] = task
 
-        if run_immediately:
-            self.logger.info(f"立即执行任务 '{title}' (ID: {task_id})，绕过队列 [{queue_type}]。")
-            # 注册到 _immediate_tasks，使 pause/abort/resume 能找到该任务
-            async with self._lock:
-                self._immediate_tasks[task_id] = task
+                # 定时任务超时保护：管理队列任务 15 分钟，下载队列任务 30 分钟
+                immediate_timeout = 900 if queue_type == "management" else 1800
 
-            # 定时任务超时保护：管理队列任务 15 分钟，下载队列任务 30 分钟
-            immediate_timeout = 900 if queue_type == "management" else 1800
+                async def _run_and_cleanup():
+                    try:
+                        await asyncio.wait_for(
+                            self._run_task_wrapper(task, queue_type=queue_type),
+                            timeout=immediate_timeout
+                        )
+                    except asyncio.TimeoutError:
+                        self.logger.error(f"立即执行任务 '{title}' (ID: {task_id}) 超时（{immediate_timeout}秒），强制终止")
+                        # 确保内部 running_coro_task 被取消
+                        if task.running_coro_task and not task.running_coro_task.done():
+                            task.running_coro_task.cancel()
+                        await self._safe_finalize_task(
+                            task_id, TaskStatus.FAILED, f"任务执行超时（{immediate_timeout // 60}分钟），已强制终止"
+                        )
+                        task.done_event.set()
+                    finally:
+                        async with self._lock:
+                            self._immediate_tasks.pop(task_id, None)
 
-            async def _run_and_cleanup():
-                try:
-                    await asyncio.wait_for(
-                        self._run_task_wrapper(task, queue_type=queue_type),
-                        timeout=immediate_timeout
-                    )
-                except asyncio.TimeoutError:
-                    self.logger.error(f"立即执行任务 '{title}' (ID: {task_id}) 超时（{immediate_timeout}秒），强制终止")
-                    # 确保内部 running_coro_task 被取消
-                    if task.running_coro_task and not task.running_coro_task.done():
-                        task.running_coro_task.cancel()
-                    await self._safe_finalize_task(
-                        task_id, TaskStatus.FAILED, f"任务执行超时（{immediate_timeout // 60}分钟），已强制终止"
-                    )
-                    task.done_event.set()
-                finally:
-                    async with self._lock:
-                        self._immediate_tasks.pop(task_id, None)
-
-            asyncio.create_task(_run_and_cleanup())
-        else:
-            # 根据队列类型选择队列
-            if queue_type == "download":
-                target_queue = self._download_queue
-            elif queue_type == "management":
-                target_queue = self._management_queue
-            elif queue_type == "fallback":
-                target_queue = self._fallback_queue
+                asyncio.create_task(_run_and_cleanup())
+                accepted = True
             else:
-                raise ValueError(f"无效的队列类型: {queue_type}")
+                # why: 三个任务队列均为无界 asyncio.Queue；同步入队可消除取消发生在
+                # “put 已完成、accepted 尚未赋值”之间而错误释放去重标记的窗口。
+                queue_map[queue_type].put_nowait(task)
+                accepted = True
+                self.logger.info(f"任务 '{title}' 已提交到 {queue_type} 队列，ID: {task_id}")
+            return task_id, task.done_event
+        except BaseException as exc:
+            if not accepted:
+                # why: 历史写入、立即任务注册或入队失败时，必须释放提交阶段占用的去重标记。
+                async with self._lock:
+                    if unique_key:
+                        self._active_unique_keys.discard(unique_key)
+                    else:
+                        self._pending_titles.discard(title)
+                    self._immediate_tasks.pop(task_id, None)
+                task.done_event.set()
 
-            await target_queue.put(task)
-            self.logger.info(f"任务 '{title}' 已提交到 {queue_type} 队列，ID: {task_id}")
-        return task_id, task.done_event
+                if history_created:
+                    try:
+                        await self._safe_finalize_task(
+                            task_id, TaskStatus.FAILED, f"任务提交失败: {type(exc).__name__}"
+                        )
+                    except Exception as finalize_error:
+                        self.logger.warning(f"标记提交失败任务 '{task_id}' 失败: {finalize_error}")
+            raise
 
     def _get_progress_callback(self, task: Task) -> Callable:
         """为特定任务创建一个可暂停的回调闭包。"""
@@ -1262,6 +1481,27 @@ class TaskManager:
                     payload, callback, session,
                     self.config_manager, scraper_manager,
                     metadata_manager, self,
+                    ai_matcher_manager=ai_matcher_manager,
+                    rate_limiter=rate_limiter,
+                    title_recognition_manager=title_recognition_manager,
+                )
+
+            elif task_type == "import_all_unimported":
+                # why：一键导入全部未导入的清单是在任务内部实时统计的，
+                # 重启后只需 serverId/mediaType 即可重新计算，无需持久化 itemIds。
+                from src import tasks as all_tasks
+                server_id = task_parameters.get("serverId")
+                if not server_id:
+                    return None
+                return lambda session, callback: all_tasks.import_all_unimported_media_items(
+                    server_id,
+                    task_parameters.get("mediaType"),
+                    session,
+                    self,
+                    callback,
+                    scraper_manager=scraper_manager,
+                    metadata_manager=metadata_manager,
+                    config_manager=self.config_manager,
                     ai_matcher_manager=ai_matcher_manager,
                     rate_limiter=rate_limiter,
                     title_recognition_manager=title_recognition_manager,

@@ -14,8 +14,19 @@ import httpx
 from src.db import crud, models, orm_models, ConfigManager, CacheManager
 from .scraper_manager import ScraperManager
 from src.metadata_sources.base import BaseMetadataSource
+from src.core.env import is_docker_environment
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_name(value: str) -> str:
+    """清除名称中的控制字符（\\r、\\n、\\t 等）并去掉首尾空白。
+
+    why：这些名称会被拼进多行汇总日志。名字里只要混入 \\r，终端渲染时光标
+    会退回行首覆盖已输出内容，导致日志出现残缺的孤立字符与空行。
+    """
+    return "".join(ch for ch in value if ch.isprintable()).strip()
+
 
 class MetadataSourceManager:
     """
@@ -124,21 +135,7 @@ class MetadataSourceManager:
         discovered_providers = []
 
         # 检测环境并使用正确的路径
-        def _is_docker_environment():
-            """检测是否在Docker容器中运行"""
-            import os
-            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-            if Path("/.dockerenv").exists():
-                return True
-            # 方法2: 检查环境变量
-            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-                return True
-            # 方法3: 检查当前工作目录是否为 /app
-            if Path.cwd() == Path("/app"):
-                return True
-            return False
-
-        if _is_docker_environment():
+        if is_docker_environment():
             sources_package_path = [str(Path("/app/src/metadata_sources"))]
         else:
             # 源码运行环境：__file__ 在 src/services/ 下，需要往上一级到 src/，再拼 metadata_sources
@@ -155,7 +152,28 @@ class MetadataSourceManager:
                     if (issubclass(obj, BaseMetadataSource) and
                         obj is not BaseMetadataSource and
                         obj.__module__ == module_name):
-                        provider_name = obj.provider_name
+                        # provider_name 必须是非空字符串，且清掉首尾空白与控制字符。
+                        # why：它会作为 dict key、数据库主键与日志内容使用；名字里混入
+                        # \r 会让多行汇总日志出现光标回退、显示被覆盖的错乱输出。
+                        raw_provider_name = getattr(obj, 'provider_name', None)
+                        if not raw_provider_name or not isinstance(raw_provider_name, str):
+                            self.logger.warning(
+                                f"跳过 {name} 中的类 {class_name}："
+                                f"provider_name 缺失或非字符串（值={raw_provider_name!r}）"
+                            )
+                            continue
+                        provider_name = _sanitize_name(raw_provider_name)
+                        if not provider_name:
+                            self.logger.warning(
+                                f"跳过 {name} 中的类 {class_name}："
+                                f"provider_name 仅含空白或控制字符（值={raw_provider_name!r}）"
+                            )
+                            continue
+                        if provider_name != raw_provider_name:
+                            self.logger.warning(
+                                f"{name}.provider_name 含空白或控制字符，已规范化为 "
+                                f"{provider_name!r}（原值={raw_provider_name!r}）"
+                            )
                         if provider_name in self._source_classes:
                             self.logger.warning(f"发现重复的元数据源 '{provider_name}'。将被覆盖。")
 
@@ -170,29 +188,43 @@ class MetadataSourceManager:
 
         self.source_settings = {s['providerName']: s for s in settings_list}
 
-        for provider_name, source_class in self._source_classes.items():
-            self.sources[provider_name] = source_class(self._session_factory, self._config_manager, self.scraper_manager, self.cache_manager)
+        # why：__init__ 是各元数据源自己的代码，可能因内部错误抛异常。原实现无保护，
+        # 一个源构造失败会中断整个循环，后续源全部不会被实例化，直接拖垮启动。
+        # 改为逐源隔离：坏源跳过并记录，其余源照常可用。
+        for provider_name, source_class in list(self._source_classes.items()):
+            try:
+                self.sources[provider_name] = source_class(
+                    self._session_factory, self._config_manager,
+                    self.scraper_manager, self.cache_manager,
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"实例化元数据源 '{provider_name}' 失败，已跳过该源: {e}", exc_info=True
+                )
+                self._source_classes.pop(provider_name, None)
 
-        # 汇总输出
+        # 汇总输出（名称再过一遍控制字符清理，避免单个源污染整段多行日志）
         _P = "  - "
         log_lines = [f"已加载 {len(self.sources)} 个元数据源"]
         for pn in sorted(self.sources.keys()):
-            log_lines.append(f"{_P}{pn}")
+            log_lines.append(f"{_P}{_sanitize_name(pn)}")
         self.logger.info("\n".join(log_lines))
 
     async def search_aliases_from_enabled_sources(self, keyword: str, user: models.User) -> Set[str]:
         """从所有已启用的辅助元数据源并发获取别名。"""
         # 修正：调用新的、更通用的方法，并只返回别名部分
-        aliases, _, _ = await self.search_supplemental_sources(keyword, user)
+        aliases, _, _, _ = await self.search_supplemental_sources(keyword, user)
         return aliases
 
-    async def search_supplemental_sources(self, keyword: str, user: models.User) -> Tuple[Set[str], List[models.ProviderSearchInfo], Dict[str, str]]:
+    async def search_supplemental_sources(self, keyword: str, user: models.User) -> Tuple[Set[str], List[models.ProviderSearchInfo], Dict[str, str], Dict[str, List[str]]]:
         """
         从所有启用的辅助源（包括强制启用的）进行搜索。
-        返回一个元组：(别名集合, 补充搜索结果列表, 标题→类型映射)
+        返回一个元组：(别名集合, 补充搜索结果列表, 标题→类型映射, 别名来源映射)
 
         优化：对于 TMDB/Bangumi 等源，搜索结果不包含完整别名，
         需要对前几个结果调用 get_details 获取完整别名（包括中文别名）。
+
+        别名来源映射格式：{"TMDB": ["别名1", "别名2"], "Bangumi": ["别名3"], ...}
         """
         import time as _time
 
@@ -291,8 +323,20 @@ class MetadataSourceManager:
 
         all_aliases: Set[str] = set()
         supplemental_results: List[models.ProviderSearchInfo] = []
-        # 标题→类型映射：用于帮助弹幕源修正媒体类型
+        # 标题→类型映射：同一标题出现类型冲突时标记为 ambiguous，禁止自动覆盖。
         title_type_map: Dict[str, str] = {}
+        # 别名来源映射：记录每个别名来自哪个元数据源
+        alias_sources: Dict[str, List[str]] = {}
+
+        def _record_title_type(title: Optional[str], media_type: Optional[str]) -> None:
+            if not title or not media_type:
+                return
+            previous = title_type_map.get(title)
+            if previous and previous != media_type:
+                # why：多个元数据候选对同一标题给出不同类型时，不能把任一结果当成高置信度。
+                title_type_map[title] = "ambiguous"
+            else:
+                title_type_map[title] = media_type
         self.last_aux_search_timing = []
 
         for provider_name, res, search_dur, detail_info, error in pipeline_results:
@@ -322,7 +366,7 @@ class MetadataSourceManager:
             self.last_aux_search_timing.append((provider_name, total_provider_dur, len(res)))
             self.logger.info(f"辅助源 '{provider_name}' 为关键词 '{keyword}' 找到了 {len(res)} 个结果, {detail_alias_count} 个别名。({total_provider_dur:.0f}ms)")
 
-            # 收集别名 + 构建标题→类型映射
+            # 收集别名 + 构建标题→类型映射 + 记录别名来源
             for item in res:
                 # 标准化 type：TMDB 返回 "tv"，统一为 "tv_series"
                 item_type = item.type if hasattr(item, 'type') and item.type else None
@@ -330,21 +374,27 @@ class MetadataSourceManager:
                     item_type = 'tv_series'
 
                 all_aliases.add(item.title)
-                if item_type:
-                    title_type_map[item.title] = item_type
+                _record_title_type(item.title, item_type)
+                alias_sources.setdefault(provider_name, []).append(item.title)
+
                 if item.aliasesCn:
                     all_aliases.update(item.aliasesCn)
-                    if item_type:
-                        for alias in item.aliasesCn:
-                            title_type_map[alias] = item_type
+                    for alias in item.aliasesCn:
+                        _record_title_type(alias, item_type)
+                        alias_sources.setdefault(provider_name, []).append(alias)
                 if item.aliasesJp:
                     all_aliases.update(item.aliasesJp)
+                    for alias in item.aliasesJp:
+                        alias_sources.setdefault(provider_name, []).append(alias)
                 if item.nameJp:
                     all_aliases.add(item.nameJp)
+                    alias_sources.setdefault(provider_name, []).append(item.nameJp)
                 if item.nameEn:
                     all_aliases.add(item.nameEn)
+                    alias_sources.setdefault(provider_name, []).append(item.nameEn)
                 if item.nameRomaji:
                     all_aliases.add(item.nameRomaji)
+                    alias_sources.setdefault(provider_name, []).append(item.nameRomaji)
 
                 # 补充列表
                 if provider_name in ['douban', '360']:
@@ -364,7 +414,32 @@ class MetadataSourceManager:
                 if detail_aliases:
                     all_aliases.update(detail_aliases)
 
-        return {alias for alias in all_aliases if alias}, supplemental_results, title_type_map
+        # A2 匹配增强：用 bangumi-data 本地离线索引补充多语言别名（日↔中↔英），离线零网络成本
+        # 受 bangumiDataOfflineEnabled 开关控制：关闭时仅用在线 API，不走离线库
+        try:
+            offline_enabled = (await self._config_manager.get("bangumiDataOfflineEnabled", "true")).lower() == "true"
+            if offline_enabled:
+                from src.services.bangumi_data_manager import get_bangumi_data_manager
+                bgm_data = get_bangumi_data_manager()
+                if bgm_data is not None:
+                    local = await bgm_data.get_aliases_by_title(keyword)
+                    if local:
+                        bgm_aliases = []
+                        if local.get("name_jp"):
+                            all_aliases.add(local["name_jp"])
+                            bgm_aliases.append(local["name_jp"])
+                        if local.get("name_en"):
+                            all_aliases.add(local["name_en"])
+                            bgm_aliases.append(local["name_en"])
+                        for cn in (local.get("aliases_cn") or []):
+                            all_aliases.add(cn)
+                            bgm_aliases.append(cn)
+                        if bgm_aliases:
+                            alias_sources.setdefault("bangumi-data", []).extend(bgm_aliases)
+        except Exception as e:
+            self.logger.debug(f"bangumi-data 本地别名补充失败: {e}")
+
+        return {alias for alias in all_aliases if alias}, supplemental_results, title_type_map, alias_sources
 
     async def supplement_empty_search_results(
         self,
@@ -633,29 +708,41 @@ class MetadataSourceManager:
             return await source_instance.execute_action(action_name, payload, user, request=request)
         raise HTTPException(status_code=404, detail=f"未找到元数据源: {provider}")
 
+    def get_config_keys(self, providerName: str) -> list:
+        """从源类的 config_keys 属性获取用户可配置的 key 列表。
+
+        优先从元数据源类读取，如果不存在则检查 scraper 等其他注册源。
+        """
+        source_class = self._source_classes.get(providerName)
+        if source_class:
+            return list(getattr(source_class, 'config_keys', []))
+        # scraper 等非元数据源的兼容 fallback（如 gamer）
+        scraper_keys_map = {
+            "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
+        }
+        return scraper_keys_map.get(providerName, [])
+
+    def get_bool_config_keys(self, providerName: str) -> list:
+        """从源类的 bool_config_keys 属性获取需要布尔转换的 key 列表。"""
+        source_class = self._source_classes.get(providerName)
+        if source_class:
+            return list(getattr(source_class, 'bool_config_keys', []))
+        return []
+
     async def getProviderConfig(self, providerName: str) -> Dict[str, Any]:
         """
         获取特定提供商（元数据源或搜索源）的配置。
+        config keys 从源类的 config_keys 属性自动获取，无需在此硬编码。
         """
 
-        # 将提供商名称映射到其在数据库中的配置键
-        config_keys_map = {
-            # Metadata Sources
-            "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-            "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken", "authMode"],
-            "douban": ["doubanCookie"],
-            "tvdb": ["tvdbApiKey"],
-            "imdb": ["imdbUseApi", "imdbEnableFallback"],  # IMDb 配置
-            # Scrapers
-            "gamer": ["gamerCookie", "gamerUserAgent", "gamerEpisodeBlacklistRegex", "scraperGamerLogResponses"],
-        }
+        source_class = self._source_classes.get(providerName)
+        configurable_fields = getattr(source_class, 'configurable_fields', {}) if source_class else {}
+        keys_to_fetch = self.get_config_keys(providerName)
+        bool_keys = set(self.get_bool_config_keys(providerName))
 
-        keys_to_fetch = config_keys_map.get(providerName)
-
-        # 如果提供商没有特定的配置键，检查它是否是一个已知的提供商
-        if keys_to_fetch is None:
+        if not keys_to_fetch:
+            # 没有声明 config_keys，检查是否是已知的源
             is_known_metadata_source = providerName in self.sources
-            # 修正：即使没有特定配置键，只要是已知的元数据源，就继续执行
             if is_known_metadata_source:
                 config_values = {}
             else:
@@ -663,9 +750,11 @@ class MetadataSourceManager:
         else:
             config_values = {}
             for key in keys_to_fetch:
-                value_str = await self._config_manager.get(key, "")
-                # 对于IMDB的布尔值配置,转换为布尔类型
-                if key in ['imdbUseApi', 'imdbEnableFallback']:
+                field_info = configurable_fields.get(key, {})
+                default_value = field_info.get('default', '') if isinstance(field_info, dict) else ''
+                # why：首次读取即使用源声明的默认值，避免 ConfigManager 把空值缓存后覆盖运行时默认地址。
+                value_str = await self._config_manager.get(key, default_value)
+                if key in bool_keys:
                     config_values[key] = value_str.lower() == 'true' if value_str else True
                 else:
                     config_values[key] = value_str
@@ -687,22 +776,33 @@ class MetadataSourceManager:
         if source_class:
             config_values['isFailoverSource'] = getattr(source_class, 'is_failover_source', False)
 
-            # 返回 configurableFields 元数据，让前端动态渲染
+            # 返回 configurableFields 元数据，让前端动态渲染。
+            # why：config_keys 使用原始键名，旧动态字段使用 provider_ 前缀；这里统一兼容两种存储约定。
             cf = getattr(source_class, 'configurable_fields', {})
             if cf:
                 config_values['configurableFields'] = cf
-                # 动态读取每个 configurable_field 的当前值
-                for field_key in cf:
-                    camel_key = field_key
-                    stored_value = await self._config_manager.get(f"{providerName}_{field_key}", "")
-                    if stored_value:
-                        # 元组或字典格式，取 type
-                        field_info = cf[field_key]
-                        field_type = field_info[1] if isinstance(field_info, (list, tuple)) else field_info.get('type', 'string')
-                        if field_type == 'boolean':
-                            config_values[camel_key] = stored_value.lower() == 'true'
+                declared_config_keys = set(getattr(source_class, 'config_keys', []))
+                for field_key, field_info in cf.items():
+                    field_meta = field_info if isinstance(field_info, dict) else {}
+                    storage_key = field_meta.get('configKey') or (
+                        field_key if field_key in declared_config_keys else f"{providerName}_{field_key}"
+                    )
+                    default_value = field_meta.get('default', '')
+                    stored_value = config_values.get(field_key)
+                    if stored_value in (None, ''):
+                        stored_value = await self._config_manager.get(storage_key, default_value)
+
+                    field_type = (
+                        field_info[1] if isinstance(field_info, (list, tuple))
+                        else field_meta.get('type', 'string')
+                    )
+                    if field_type == 'boolean':
+                        if isinstance(stored_value, bool):
+                            config_values[field_key] = stored_value
                         else:
-                            config_values[camel_key] = stored_value
+                            config_values[field_key] = str(stored_value).lower() == 'true'
+                    else:
+                        config_values[field_key] = stored_value
 
 
         # 添加特殊逻辑：Bangumi 认证模式
@@ -740,58 +840,71 @@ class MetadataSourceManager:
             config_key = f"{providerName}_force_aux_search"
             config_fields_to_update[config_key] = force_enabled_value
 
-        # 动态处理 configurable_fields 中声明的字段，存储到 config 表
+        # 动态处理 configurable_fields 中声明的字段，存储到 config 表。
+        # why：config_keys 使用原始键名，旧动态字段使用 provider_ 前缀；保存时必须与读取规则一致。
         source_class = self._source_classes.get(providerName)
         cf = getattr(source_class, 'configurable_fields', {}) if source_class else {}
+        declared_config_keys = set(getattr(source_class, 'config_keys', [])) if source_class else set()
         self.logger.info(f"updateProviderConfig: provider={providerName}, source_class={'found' if source_class else 'NOT FOUND'}, cf_keys={list(cf.keys())}, remaining_payload={list(payload.keys())}")
-        for field_key in cf:
+        for field_key, field_info in cf.items():
             if field_key in payload:
                 value = payload.pop(field_key)
-                config_key = f"{providerName}_{field_key}"
+                field_meta = field_info if isinstance(field_info, dict) else {}
+                config_key = field_meta.get('configKey') or (
+                    field_key if field_key in declared_config_keys else f"{providerName}_{field_key}"
+                )
                 if isinstance(value, bool):
                     config_fields_to_update[config_key] = str(value).lower()
                 else:
                     config_fields_to_update[config_key] = str(value if value is not None else "")
 
-        # 2b. 识别属于 config 表的字段
-        allowed_keys_map = {
-            "tmdb": ["tmdbApiKey", "tmdbApiBaseUrl", "tmdbImageBaseUrl"],
-            "bangumi": ["bangumiClientId", "bangumiClientSecret", "bangumiToken"],
-            "douban": ["doubanCookie"],
-            "tvdb": ["tvdbApiKey"],
-            "imdb": ["imdbUseApi", "imdbEnableFallback"],
-        }
-        allowed_keys = allowed_keys_map.get(providerName)
-        if allowed_keys:
-            for key, value in payload.items():
-                if key in allowed_keys:
-                    # 对于布尔值,转换为字符串 "true" 或 "false"
-                    if isinstance(value, bool):
-                        config_fields_to_update[key] = str(value).lower()
-                    else:
-                        config_fields_to_update[key] = str(value if value is not None else "")
+        # 2b. 按源类声明的 config_keys 通用保存，避免新增元信息源时重复维护硬编码白名单。
+        allowed_keys = declared_config_keys
+        for key, value in payload.items():
+            if key not in allowed_keys:
+                continue
+            if isinstance(value, bool):
+                config_fields_to_update[key] = str(value).lower()
+            else:
+                config_fields_to_update[key] = str(value if value is not None else "")
 
         # 3. 检查是否有任何需要更新的内容
         if not db_fields_to_update and not config_fields_to_update:
             self.logger.info(f"为提供商 '{providerName}' 收到配置更新请求，但没有可识别的字段需要更新。")
             return {"message": "没有可更新的配置项。"}
 
-        # 4. 执行数据库操作
+        # 4. 在同一事务内写入源设置与关联配置。
         async with self._session_factory() as session:
             if db_fields_to_update:
                 await crud.update_metadata_source_specific_settings(session, providerName, db_fields_to_update)
-            
+
             if config_fields_to_update:
-                for key, value in config_fields_to_update.items():
-                    await crud.update_config_value(session, key, value)
-                    self._config_manager.invalidate(key)
-            
-            await session.commit()
+                # why: 提供商配置是一个整体；逐键提交会在中途失败时留下半套配置，
+                # 且会把上面的 MetadataSource 更新提前提交。
+                await crud.update_config_values_atomic(session, config_fields_to_update)
+            else:
+                await session.commit()
+
+        # 数据库全部提交成功后再失效缓存，避免失败事务对应的旧值被提前清除。
+        for key in config_fields_to_update:
+            self._config_manager.invalidate(key)
         
         # 如果是元数据源的配置更新，重新加载它们以使更改生效
         if providerName in self.sources:
             await self.load_and_sync_sources()
             self.logger.info(f"元数据源 '{providerName}' 的配置已更新并重新加载。")
+
+        # 通用钩子：源可在配置保存后据此同步订阅目标（如 AniBT 私有 RSS）。
+        # why：避免在此处针对具体 provider 硬编码；实现该钩子的源自行处理配置→订阅联动。
+        source = self.sources.get(providerName)
+        if source is not None and hasattr(source, "sync_config_subscriptions"):
+            try:
+                async with self._session_factory() as session:
+                    await source.sync_config_subscriptions(session)
+                    await session.commit()
+                self.logger.info(f"元数据源 '{providerName}' 已同步配置驱动的订阅目标。")
+            except Exception as e:
+                self.logger.error(f"元数据源 '{providerName}' 同步订阅目标失败: {e}", exc_info=True)
 
         return {"message": "配置已成功更新。"}
 
@@ -813,6 +926,141 @@ class MetadataSourceManager:
     async def get_seasons(self, *args, **kwargs):
         """委托给 SeasonMapper.get_seasons_from_source()"""
         return await self.season_mapper.get_seasons_from_source(*args, **kwargs)
+
+    async def get_all_calendars(self, user: models.User, force_refresh: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        """从所有已启用的元数据源获取日历数据（三层架构）。
+
+        架构说明：
+            Layer 1: 内存/Redis 缓存（region=external_calendar，TTL 2h）
+            Layer 2: 持久化表 external_calendar_item（24h 内有效）
+            Layer 3: 调用 metadata source 的 get_calendar()，结果双写表+缓存
+
+        :param force_refresh: 跳过 L1/L2 缓存，强制走外部源重新拉取（用于「同步日程」按钮）
+        :return: { "bangumi": [...], "trakt": [...] } 仅包含实际有数据的源
+        """
+        from src.db.crud import external_calendar as ec_crud
+
+        CACHE_REGION = "external_calendar"
+        CACHE_KEY = "weekly_all"
+        CACHE_TTL = 2 * 60 * 60   # 2 小时
+        TABLE_MAX_AGE_HOURS = 24  # 表数据 24h 内视为有效
+
+        # ---- Layer 1: 内存/Redis 缓存 ----
+        if not force_refresh:
+            try:
+                cached = await self.cache_manager.get(CACHE_REGION, CACHE_KEY)
+                if cached:
+                    self.logger.debug("get_all_calendars: cache HIT (L1)")
+                    return cached
+            except Exception as e:
+                self.logger.debug(f"L1 缓存读取失败（忽略）: {e}")
+
+        # ---- Layer 2: 数据库表 ----
+        if not force_refresh:
+            try:
+                async with self._session_factory() as session:
+                    grouped = await ec_crud.get_all_fresh(session, max_age_hours=TABLE_MAX_AGE_HOURS)
+                if grouped:
+                    self.logger.debug(f"get_all_calendars: table HIT (L2) providers={list(grouped.keys())}")
+                    # 回填 L1 缓存（不阻塞返回）
+                    try:
+                        await self.cache_manager.set(CACHE_REGION, CACHE_KEY, grouped, ttl_seconds=CACHE_TTL)
+                    except Exception as e:
+                        self.logger.debug(f"L1 缓存回填失败（忽略）: {e}")
+                    return grouped
+            except Exception as e:
+                self.logger.warning(f"L2 表读取失败，回退到外部源: {e}")
+
+        # ---- Layer 3: 调用外部 API（与原逻辑保持一致） ----
+        results: Dict[str, List[Dict[str, Any]]] = {}
+
+        async def _fetch(provider_name: str, source_instance):
+            try:
+                items = await source_instance.get_calendar(user)
+                if items:
+                    return provider_name, items
+            except Exception as e:
+                self.logger.warning(f"获取 {provider_name} 日历失败: {e}")
+            return provider_name, []
+
+        tasks = []
+        for provider_name, setting in self.source_settings.items():
+            if not setting.get('isEnabled'):
+                continue
+            source = self.sources.get(provider_name)
+            if source and hasattr(source, 'get_calendar'):
+                tasks.append(_fetch(provider_name, source))
+
+        if tasks:
+            fetched = await asyncio.gather(*tasks, return_exceptions=True)
+            for item in fetched:
+                if isinstance(item, Exception):
+                    continue
+                name, items = item
+                if items:
+                    results[name] = items
+
+        # ---- 双写：持久化到表 + 写缓存 ----
+        if results:
+            # 写表（按 provider 分别 upsert）
+            try:
+                async with self._session_factory() as session:
+                    for provider_name, items in results.items():
+                        await ec_crud.upsert_items(session, provider_name, items)
+                self.logger.info(f"get_all_calendars: 已持久化 {sum(len(v) for v in results.values())} 条到 external_calendar_item 表")
+            except Exception as e:
+                self.logger.warning(f"L2 表写入失败（不影响返回）: {e}")
+
+            # 同步「平台用户私人在追状态」（OAuth 账号下的 watching/wish/done 等）
+            # 这个调用是可选的：未授权时各源会自动跳过返回 {}
+            try:
+                await self.sync_user_platform_status(user)
+                # 平台状态写入后，重新从表读取以保证返回的 results 含最新状态
+                async with self._session_factory() as session:
+                    refreshed = await ec_crud.get_all_fresh(session, max_age_hours=TABLE_MAX_AGE_HOURS)
+                if refreshed:
+                    results = refreshed
+            except Exception as e:
+                self.logger.warning(f"同步平台用户状态失败（不影响返回）: {e}")
+
+            # 写 L1 缓存
+            try:
+                await self.cache_manager.set(CACHE_REGION, CACHE_KEY, results, ttl_seconds=CACHE_TTL)
+            except Exception as e:
+                self.logger.debug(f"L1 缓存写入失败（忽略）: {e}")
+
+        return results
+
+    async def sync_user_platform_status(self, user: models.User) -> Dict[str, int]:
+        """同步「平台账号下我的在追/想看」状态到 external_calendar_item 表。
+
+        遍历所有已启用的元数据源，如果该源实现了 get_user_watching_collection，
+        则拉取用户在该平台的私人收藏状态，并 Upsert 到表中（仅更新 platformWatchStatus 等字段）。
+
+        :return: { provider_name: updated_rows_count }
+        """
+        from src.db.crud import external_calendar as ec_crud
+
+        result: Dict[str, int] = {}
+        for provider_name, setting in self.source_settings.items():
+            if not setting.get("isEnabled"):
+                continue
+            source = self.sources.get(provider_name)
+            if not source or not hasattr(source, "get_user_watching_collection"):
+                continue
+            try:
+                statuses = await source.get_user_watching_collection(user)
+                if not statuses:
+                    continue
+                async with self._session_factory() as session:
+                    updated = await ec_crud.update_platform_status(session, provider_name, statuses)
+                result[provider_name] = updated
+                self.logger.info(
+                    f"sync_user_platform_status: provider={provider_name} 拉取 {len(statuses)} 条，更新 {updated} 行"
+                )
+            except Exception as e:
+                self.logger.warning(f"sync_user_platform_status 调用 {provider_name} 失败: {e}")
+        return result
 
     async def close_all(self):
         """在应用关闭时关闭所有元数据源客户端。"""

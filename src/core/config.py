@@ -6,6 +6,8 @@ from typing import Any, Dict, Tuple, Optional
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
+from src.core.env import is_docker_environment
+
 # 1. 为配置的不同部分创建 Pydantic 模型，提供类型提示和默认值
 class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
@@ -125,46 +127,17 @@ class YamlConfigSettingsSource(PydanticBaseSettingsSource):
         super().__init__(settings_cls)
         # 在项目根目录的 config/ 文件夹下查找 config.yml
         # 修正：根据运行环境自动调整路径
-        def _is_docker_environment():
-            """检测是否在Docker容器中运行"""
-            import os
-            # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-            if Path("/.dockerenv").exists():
-                return True
-            # 方法2: 检查环境变量
-            if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-                return True
-            # 方法3: 检查当前工作目录是否为 /app
-            if Path.cwd() == Path("/app"):
-                return True
-            return False
-
-        if _is_docker_environment():
+        if is_docker_environment():
             # 容器环境
             self.yaml_file = Path("/app/config/config.yml")
         else:
-            # 源码运行环境
-            self.yaml_file = Path("config/config.yml")
+            # 源码运行环境：基于本文件位置推算项目根目录
+            # config.py 位于 src/core/config.py → 项目根 = ../../
+            project_root = Path(__file__).resolve().parent.parent.parent
+            self.yaml_file = project_root / "config" / "config.yml"
 
-        # 自动创建：若配置文件不存在则生成带注释的模板
-        if not self.yaml_file.exists():
-            try:
-                self.yaml_file.parent.mkdir(parents=True, exist_ok=True)
-                jwt_secret = secrets.token_urlsafe(32)
-                template = _generate_config_template(jwt_secret)
-                self.yaml_file.write_text(template, encoding="utf-8")
-                import sys
-                print(
-                    f"\n{'='*60}\n"
-                    f"[Misaka] 未检测到配置文件，已自动生成模板：\n"
-                    f"  {self.yaml_file.resolve()}\n"
-                    f"请根据实际环境修改配置后重启服务。\n"
-                    f"{'='*60}\n",
-                    file=sys.stderr,
-                )
-            except OSError as e:
-                import sys
-                print(f"[Misaka] 警告：无法创建配置文件 {self.yaml_file}: {e}", file=sys.stderr)
+        # 不再自动创建配置文件，由 bootstrap.preload_config() 负责
+        # 这样辅助脚本（如 reset_password.py）导入 settings 时不会意外生成新配置文件
 
     def get_field_value(self, field, field_name):
         return None, None, False

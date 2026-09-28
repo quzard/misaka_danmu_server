@@ -16,10 +16,10 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from src.db import crud, orm_models, models, get_db_session, sync_postgres_sequence, ConfigManager
 from src.core import get_now
-from src.core.cache import get_cache_backend
 from src.services import ScraperManager, TaskManager, TaskSuccess
-from src.utils import parse_search_keyword, sample_comments_evenly, record_play_history, handle_danmaku_likes, strip_danmaku_likes
+from src.utils import parse_search_keyword, sample_comments_evenly, record_play_history, handle_danmaku_likes, strip_danmaku_likes, is_movie_by_title
 from src.utils import restyle_danmaku_likes
+from src.utils.task_profiler import TaskProfiler, FLOW_FALLBACK_MATCH, FLOW_FALLBACK_SEARCH
 from src.rate_limiter import RateLimiter
 from src import tasks
 
@@ -39,7 +39,6 @@ from .constants import (
     FALLBACK_SEARCH_CACHE_TTL,
     COMMENTS_FETCH_CACHE_TTL,
     SAMPLED_COMMENTS_CACHE_TTL_DB,
-    SAMPLED_CACHE_TTL,
 )
 from .helpers import (
     get_db_cache, set_db_cache, delete_db_cache,
@@ -68,6 +67,7 @@ from .danmaku_color import (
     apply_repeat_highlight,
     parse_palette,
 )
+from .danmaku_mode import convert_danmaku_position
 from .danmaku_filter import apply_blacklist_filter
 
 logger = logging.getLogger(__name__)
@@ -153,15 +153,7 @@ async def get_external_comments_from_url(
     结果会被缓存5小时。
     """
     cache_key = f"ext_danmaku_v2_{url}"
-    _backend = get_cache_backend()
-    cached_comments = None
-    if _backend is not None:
-        try:
-            cached_comments = await _backend.get(cache_key, region="default")
-        except Exception as e:
-            logger.warning(f"缓存后端读取失败，回退到数据库: {e}")
-    if cached_comments is None:
-        cached_comments = await crud.get_cache(session, cache_key)
+    cached_comments = await get_db_cache(session, "", cache_key)
     if cached_comments is not None:
         logger.info(f"外部弹幕缓存命中: {url}")
         comments_data = cached_comments
@@ -195,14 +187,7 @@ async def get_external_comments_from_url(
             raise HTTPException(status_code=500, detail=f"获取 {scraper.provider_name} 弹幕失败。")
 
         # 缓存结果5小时 (18000秒)
-        _backend = get_cache_backend()
-        if _backend is not None:
-            try:
-                await _backend.set(cache_key, comments_data, ttl=18000, region="default")
-            except Exception:
-                await crud.set_cache(session, cache_key, comments_data, 18000)
-        else:
-            await crud.set_cache(session, cache_key, comments_data, 18000)
+        await set_db_cache(session, "", cache_key, comments_data, 18000)
 
     # 处理简繁转换（根据优先级决定使用服务端配置还是播放器参数）
     try:
@@ -270,41 +255,52 @@ async def get_comments_for_dandan(
         except (ValueError, TypeError):
             auto_refresh_days = 0
 
+        # 弹幕条数阈值：仅当现有弹幕条数低于此值时才刷新，避免对已抓全的弹幕重复重抓。0 表示不限制条数。
+        try:
+            refresh_threshold = int(await config_manager.get("danmakuRefreshThreshold", "5000"))
+        except (ValueError, TypeError):
+            refresh_threshold = 5000
+
         if auto_refresh_days > 0:
-            fetched_at = await crud.get_episode_fetched_at(session, episodeId)
-            if fetched_at is not None:
-                now = get_now()
-                age_days = (now - fetched_at).total_seconds() / 86400
-                if age_days >= auto_refresh_days:
-                    unique_key = f"refresh-episode-{episodeId}"
-                    # 检查是否已有刷新任务在跑（避免重复提交）
-                    already_running = False
-                    async with task_manager._lock:
-                        already_running = unique_key in task_manager._active_unique_keys
+            # 条数阈值过滤：当前弹幕已达到/超过阈值则跳过刷新
+            current_count = len(comments_data)
+            if refresh_threshold > 0 and current_count >= refresh_threshold:
+                logger.debug(f"[自动刷新] episodeId={episodeId} 现有弹幕 {current_count} 条已达阈值（{refresh_threshold}），跳过自动刷新")
+            else:
+                fetched_at = await crud.get_episode_fetched_at(session, episodeId)
+                if fetched_at is not None:
+                    now = get_now()
+                    age_days = (now - fetched_at).total_seconds() / 86400
+                    if age_days >= auto_refresh_days:
+                        unique_key = f"refresh-episode-{episodeId}"
+                        # 检查是否已有刷新任务在跑（避免重复提交）
+                        already_running = False
+                        async with task_manager._lock:
+                            already_running = unique_key in task_manager._active_unique_keys
 
-                    if not already_running:
-                        logger.info(f"[自动刷新] episodeId={episodeId} 弹幕已 {age_days:.1f} 天未更新（阈值={auto_refresh_days}天），触发自动刷新")
-                        try:
-                            _ep_id = episodeId
-                            _scraper = scraper_manager
-                            _rl = rate_limiter
-                            _cfg = config_manager
-                            await task_manager.submit_task(
-                                lambda s, cb, _eid=_ep_id, _sm=_scraper, _r=_rl, _c=_cfg: tasks.refresh_episode_task(
-                                    _eid, s, _sm, _r, cb, _c
-                                ),
-                                f"自动刷新弹幕: episodeId={episodeId}",
-                                unique_key=unique_key,
-                                run_immediately=True
-                            )
-                        except Exception as e:
-                            logger.warning(f"[自动刷新] 提交刷新任务失败: {e}")
+                        if not already_running:
+                            logger.info(f"[自动刷新] episodeId={episodeId} 弹幕已 {age_days:.1f} 天未更新（阈值={auto_refresh_days}天），触发自动刷新")
+                            try:
+                                _ep_id = episodeId
+                                _scraper = scraper_manager
+                                _rl = rate_limiter
+                                _cfg = config_manager
+                                await task_manager.submit_task(
+                                    lambda s, cb, _eid=_ep_id, _sm=_scraper, _r=_rl, _c=_cfg: tasks.refresh_episode_task(
+                                        _eid, s, _sm, _r, cb, _c
+                                    ),
+                                    f"自动刷新弹幕: episodeId={episodeId}",
+                                    unique_key=unique_key,
+                                    run_immediately=True
+                                )
+                            except Exception as e:
+                                logger.warning(f"[自动刷新] 提交刷新任务失败: {e}")
 
-                    # 等待刷新任务完成（最多30秒），完成后重取弹幕
-                    refreshed = await wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=30.0)
-                    if refreshed:
-                        comments_data = await crud.fetch_comments(session, episodeId)
-                        logger.info(f"[自动刷新] episodeId={episodeId} 刷新完成，重新获取弹幕 {len(comments_data)} 条")
+                        # 等待刷新任务完成（最多30秒），完成后重取弹幕
+                        refreshed = await wait_for_refresh_task(episodeId, task_manager, max_wait_seconds=30.0)
+                        if refreshed:
+                            comments_data = await crud.fetch_comments(session, episodeId)
+                            logger.info(f"[自动刷新] episodeId={episodeId} 刷新完成，重新获取弹幕 {len(comments_data)} 条")
 
     # 预下载下一集弹幕 (异步,不阻塞当前响应)
     # 只有当前集已存在于数据库时才触发预下载（后备场景会在任务完成后单独触发）
@@ -349,7 +345,11 @@ async def get_comments_for_dandan(
         # 缓存key格式: fallback_episode_25000166010000 (最后4位为0000表示整部剧)
 
         fallback_info = None
+        match_fallback_handled = False
         episode_number = None
+
+        # 后备路径性能统计
+        _fallback_profiler: Optional[TaskProfiler] = None
 
         # 尝试解析虚拟episodeId
         if episodeId >= 25000000000000:
@@ -365,16 +365,8 @@ async def get_comments_for_dandan(
             fallback_series_key = f"fallback_episode_{virtual_anime_base}"
 
             # 从数据库缓存中查找整部剧的信息
-            # 注意：整部剧缓存存储时无前缀（_backend.set/crud.set_cache直接用key），查询同样无前缀
-            _backend = get_cache_backend()
-            fallback_info = None
-            if _backend is not None:
-                try:
-                    fallback_info = await _backend.get(fallback_series_key, region="default")
-                except Exception as e:
-                    logger.warning(f"缓存后端读取失败，回退到数据库: {e}")
-            if fallback_info is None:
-                fallback_info = await crud.get_cache(session, fallback_series_key)
+            # 注意：整部剧缓存存储时无前缀，查询同样无前缀
+            fallback_info = await get_db_cache(session, "", fallback_series_key)
             logger.debug(f"查找缓存: {fallback_series_key}, 找到: {fallback_info is not None}")
 
         # 如果数据库缓存中没有,再从数据库缓存中查找(使用新的前缀)
@@ -384,7 +376,53 @@ async def get_comments_for_dandan(
             if fallback_info:
                 episode_number = fallback_info.get("episode_number")
 
+        # DB 兜底：缓存全部 miss 但 episodeId 编码的 (animeId, sourceOrder) 在库中真实存在时，
+        # 直接从 Anime + AnimeSource 反查 provider/mediaId 重建后备信息。
+        # why：缓存(fallback_episode_*)会被清理或过期，而 episodeId 本身编码了 animeId+sourceOrder，
+        # 只要作品与源仍在库中（如仅删了弹幕文件/清了缓存），就应能重新触发后备下载，
+        # 而非卡在"尝试直接从源站获取"无任何后续动作。
+        if not fallback_info and episodeId >= 25000000000000:
+            try:
+                db_anime = (await session.execute(
+                    select(Anime).where(Anime.id == anime_id_part)
+                )).scalar_one_or_none()
+                db_src = (await session.execute(
+                    select(AnimeSource.providerName, AnimeSource.mediaId)
+                    .where(
+                        AnimeSource.animeId == anime_id_part,
+                        AnimeSource.sourceOrder == source_order_part,
+                    )
+                    .limit(1)
+                )).first()
+                if db_anime and db_src:
+                    _db_provider, _db_media_id = db_src
+                    fallback_info = {
+                        "real_anime_id": anime_id_part,
+                        "provider": _db_provider,
+                        "mediaId": _db_media_id,
+                        "final_title": db_anime.title,
+                        "original_title": db_anime.title,
+                        "final_season": db_anime.season,
+                        "media_type": db_anime.type,
+                        "imageUrl": db_anime.imageUrl,
+                        "year": db_anime.year,
+                    }
+                    logger.info(
+                        f"[DB兜底] 缓存缺失，从数据库重建后备信息: anime_id={anime_id_part}, "
+                        f"provider={_db_provider}, mediaId={_db_media_id}, 集号={episode_number}"
+                    )
+                else:
+                    logger.debug(
+                        f"[DB兜底] 未找到可重建的作品/源 (anime_id={anime_id_part}, "
+                        f"source_order={source_order_part})，跳过 DB 兜底"
+                    )
+            except Exception as e:
+                logger.warning(f"[DB兜底] 从数据库重建后备信息失败: {e}")
+
         if fallback_info:
+            # why：本请求已由匹配后备链路接管，后续不得再次落入 fallback_comments 第二套下载链路。
+            match_fallback_handled = True
+            _fallback_profiler = TaskProfiler(FLOW_FALLBACK_MATCH)
             logger.info(f"检测到后备搜索/匹配后备的episodeId: {episodeId}, 集数: {episode_number}")
 
             # 从缓存中获取信息
@@ -392,6 +430,8 @@ async def get_comments_for_dandan(
             provider = fallback_info["provider"]
             mediaId = fallback_info["mediaId"]
             final_title = fallback_info["final_title"]
+            # 创建条目用原始标题（如"碧蓝之海 第二季"），匹配查询用 final_title
+            display_title = fallback_info.get("original_title") or final_title
             final_season = fallback_info["final_season"]
             media_type = fallback_info["media_type"]
             imageUrl = fallback_info.get("imageUrl")
@@ -439,11 +479,11 @@ async def get_comments_for_dandan(
             existing_anime = result.scalar_one_or_none()
 
             if not existing_anime:
-                # 创建anime条目
-                logger.info(f"创建anime条目: id={real_anime_id}, title='{final_title}'")
+                # 创建anime条目（使用原始标题展示，如"碧蓝之海 第二季"）
+                logger.info(f"创建anime条目: id={real_anime_id}, title='{display_title}'")
                 new_anime = Anime(
                     id=real_anime_id,
-                    title=final_title,
+                    title=display_title,
                     type=media_type,
                     season=final_season,
                     imageUrl=imageUrl,
@@ -470,18 +510,34 @@ async def get_comments_for_dandan(
 
             # 检查是否已有相同的弹幕下载任务正在进行
             task_unique_key = f"match_fallback_comments_{episodeId}"
-            existing_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
+            recent_task = await crud.find_recent_task_by_unique_key(session, task_unique_key, 1)
+            # why：历史查询也会返回最近完成的任务；只有活跃状态才应阻止重新提交。
+            existing_task = (
+                recent_task
+                if recent_task and recent_task.status in {'排队中', '运行中', '已暂停'}
+                else None
+            )
             if existing_task:
-                logger.info(f"弹幕下载任务已存在: {task_unique_key}，等待任务完成...")
+                logger.info(f"弹幕下载任务正在执行: {task_unique_key}，等待任务完成...")
                 # 等待最多30秒，检查缓存中是否有结果
                 cache_key = f"comments_{episodeId}"
-                for i in range(30):
+                for _ in range(30):
                     await asyncio.sleep(1)
                     cached_comments = await get_db_cache(session, COMMENTS_FETCH_CACHE_PREFIX, cache_key)
                     if cached_comments:
+                        comments_data = cached_comments
                         logger.info(f"从缓存中获取到弹幕数据，共 {len(cached_comments)} 条")
                         break
-                # 跳过任务提交，直接进入缓存读取逻辑
+                if not comments_data:
+                    # why：已有匹配后备任务仍在运行时，当前请求不能继续提交 fallback_comments，
+                    # 否则同一 episodeId 会同时沿用旧 episode_mapping 再跑一套下载。
+                    await _release_coalesce(episodeId)
+                    if async_mode:
+                        return models.CommentResponse(
+                            count=0, comments=[], status="pending", taskId=existing_task.taskId,
+                        )
+                    return models.CommentResponse(count=0, comments=[])
+                # 已取得缓存结果，跳过任务提交并进入统一输出处理。
             else:
                 # 任务不存在，提交新任务
                 # 保存当前作用域的变量，避免闭包问题
@@ -497,6 +553,7 @@ async def get_comments_for_dandan(
                 current_fallback_episode_cache_key = f"fallback_episode_{episodeId}"
                 current_rate_limiter = rate_limiter
                 current_final_title = final_title
+                current_display_title = display_title
                 current_final_season = final_season
                 current_media_type = media_type
                 current_imageUrl = imageUrl
@@ -545,11 +602,11 @@ async def get_comments_for_dandan(
                         existing_anime = result.scalar_one_or_none()
 
                         if not existing_anime:
-                            # 创建anime条目
-                            logger.info(f"任务中创建anime条目: id={current_real_anime_id}, title='{current_final_title}'")
+                            # 创建anime条目（使用原始标题展示）
+                            logger.info(f"任务中创建anime条目: id={current_real_anime_id}, title='{current_display_title}'")
                             new_anime = Anime(
                                 id=current_real_anime_id,
-                                title=current_final_title,
+                                title=current_display_title,
                                 type=current_media_type,
                                 season=current_final_season,
                                 imageUrl=current_imageUrl,
@@ -595,6 +652,7 @@ async def get_comments_for_dandan(
                                 "provider": current_provider,
                                 "mediaId": current_mediaId,
                                 "final_title": current_final_title,
+                                "original_title": current_display_title,
                                 "final_season": current_final_season,
                                 "media_type": current_media_type,
                                 "imageUrl": current_imageUrl,
@@ -603,14 +661,7 @@ async def get_comments_for_dandan(
                             }
 
                             # 存储到缓存,3小时过期
-                            _backend = get_cache_backend()
-                            if _backend is not None:
-                                try:
-                                    await _backend.set(fallback_series_key, cache_value, ttl=10800, region="default")
-                                except Exception:
-                                    await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
-                            else:
-                                await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
+                            await set_db_cache(task_session, "", fallback_series_key, cache_value, 10800)
                             await task_session.flush()
                             logger.info(f"为整部剧创建了缓存记录: {fallback_series_key} (共{len(current_episodes_list)}集)")
                         except Exception as e:
@@ -623,13 +674,13 @@ async def get_comments_for_dandan(
                             task_session, current_episodeId, comments, config_manager,
                             fire_threshold=current_scraper.likes_fire_threshold
                         )
+                        # 将弹幕数据写入短期缓存表，供外部会话读取（TTL 5分钟）
+                        # 优化B：与上方 save_danmaku_for_episode 的落库操作合并为一次 commit，
+                        # 短期缓存属于派生物，不需要独立事务边界
+                        cache_key = f"comments_{current_episodeId}"
+                        await set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, comments, 300)
                         await task_session.commit()
                         logger.info(f"保存成功，共 {added_count} 条弹幕")
-
-                        # 将弹幕数据写入缓存表,供外部会话读取
-                        cache_key = f"comments_{current_episodeId}"
-                        await set_db_cache(task_session, COMMENTS_FETCH_CACHE_PREFIX, cache_key, comments, 300)  # 5分钟过期
-                        await task_session.commit()
                         logger.debug(f"弹幕数据已写入缓存: {cache_key}")
 
                         # 清理数据库缓存
@@ -639,8 +690,34 @@ async def get_comments_for_dandan(
                         # 注意:不删除数据库缓存中的整部剧记录,保留3小时以支持连续播放
                         # 数据库缓存会自动过期
 
+                        # 写入 match_season 整季缓存，让后续 /match 请求能直接命中（避免重新搜索）
+                        if current_media_type != "movie":
+                            try:
+                                _parsed_for_cache = parse_search_keyword(current_final_title)
+                                season_cache_key = f"match_season_{_parsed_for_cache['title']}_{current_final_season}"
+                                season_cache_data = {
+                                    "provider": current_provider,
+                                    "mediaId": current_mediaId,
+                                    "real_anime_id": current_real_anime_id,
+                                    "virtual_anime_id": 900000,
+                                    "final_title": current_final_title,
+                                    "original_title": current_display_title,
+                                    "final_season": current_final_season,
+                                    "source_order": source_order,
+                                    "media_type": current_media_type,
+                                    "imageUrl": current_imageUrl,
+                                    "year": current_year,
+                                    "timestamp": time.time()
+                                }
+                                await set_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, season_cache_key, season_cache_data, 3600)
+                                logger.info(f"整季缓存已存储（匹配后备路径）: {season_cache_key}")
+                            except Exception as e:
+                                logger.warning(f"写入整季缓存失败: {e}")
+
                         await progress_callback(100, "完成")
-                        return comments
+                        # why：普通后备下载通过返回业务消息，把本次源站实际获取数量
+                        # 传给 TaskManager，供任务历史与完成通知展示。
+                        return f"后备下载完成，共获取 {len(comments)} 条弹幕"
 
                     except TaskSuccess:
                         raise  # TaskSuccess 直接穿透到 task_manager
@@ -651,12 +728,24 @@ async def get_comments_for_dandan(
 
                 # 提交弹幕下载任务到后备队列
                 try:
+                    # 结构化通知参数：供完成通知渲染「作品名/季集/弹幕源/海报」结构块
+                    _mf_params = {
+                        "anime_title": current_display_title or current_final_title or "",
+                        "season": current_final_season,
+                        "episode": current_episode_number,
+                        "provider": current_provider,
+                        "imageUrl": current_imageUrl or "",
+                        # 有具体集数即视为剧集；仅当无集数且类型为 movie 时才按电影展示
+                        "is_movie": (current_episode_number is None and current_media_type == "movie"),
+                        "media_type": current_media_type,
+                    }
                     task_id, done_event = await task_manager.submit_task(
                         download_match_fallback_comments_task,
                         f"匹配后备弹幕下载: {final_title} 第{episode_number}集 [{provider}:{mediaId}]",
                         unique_key=task_unique_key,
                         task_type="download_comments",
-                        queue_type="fallback"  # 使用后备队列
+                        queue_type="fallback",  # 使用后备队列
+                        task_parameters=_mf_params
                     )
                     logger.info(f"已提交匹配后备弹幕下载任务: {task_id}")
 
@@ -773,9 +862,18 @@ async def get_comments_for_dandan(
                     return models.CommentResponse(count=0, comments=[])
 
         # 任务完成后,弹幕已经保存到数据库,不再从缓存读取
+        # 在后备匹配路径结束时写入性能统计
+        # why：传入 session_factory 而非请求级 session，确保在独立 session 中 commit，
+        # 避免 get_db_session 的 finally 只 close() 导致写入被回滚。
+        if _fallback_profiler is not None:
+            _fallback_profiler.record_step("全流程", _fallback_profiler.total_duration_ms)
+            await _fallback_profiler.flush(session, session_factory=request.app.state.db_session_factory)
+            _fallback_profiler = None
+
         # 2. 检查是否是后备搜索的特殊episodeId（以25开头的新格式）
-        if str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
+        if not match_fallback_handled and str(episodeId).startswith("25") and len(str(episodeId)) >= 13:  # 新的ID格式
             # 解析episodeId：25 + animeId(6位) + 源顺序(2位) + 集编号(4位)
+            _fallback_profiler = TaskProfiler(FLOW_FALLBACK_SEARCH)
             episode_id_str = str(episodeId)
             real_anime_id = int(episode_id_str[2:8])  # 提取真实animeId
             _ = int(episode_id_str[8:10])  # 提取源顺序（暂时不使用）
@@ -790,7 +888,7 @@ async def get_comments_for_dandan(
             if mapping_data:
                 episode_url = mapping_data["media_id"]
                 provider = mapping_data["provider"]
-                logger.info(f"从缓存获取episodeId映射: episodeId={episodeId}, provider={provider}, url={episode_url}")
+                logger.info(f"从缓存获取episodeId映射: episodeId={episodeId}, provider={provider}, mediaId={episode_url}")
             else:
                 # 如果缓存中没有，从数据库缓存中查找
                 # 首先尝试根据用户最后的选择来确定源
@@ -840,7 +938,7 @@ async def get_comments_for_dandan(
                         logger.error(f"查找真实animeId映射失败: {e}")
 
             if episode_url and provider:
-                logger.info(f"找到后备搜索映射: provider={provider}, url={episode_url}")
+                logger.info(f"找到后备搜索映射: provider={provider}, mediaId={episode_url}")
 
                 # 检查是否已有相同的弹幕下载任务正在进行或最近完成
                 task_unique_key = f"fallback_comments_{episodeId}"
@@ -866,6 +964,21 @@ async def get_comments_for_dandan(
                     current_scraper_manager = scraper_manager
                     current_rate_limiter = rate_limiter
                     current_episodes_list_ref = None  # 用于保存整部剧的分集列表
+                    # 【修复】在外层确定映射信息后直接传入任务，避免任务内二次查缓存时
+                    # 因并发导致命中另一部剧的 mapping（标题串台 bug）
+                    # mapping_data 来自 episode_mapping 缓存（按 episodeId 一对一，不会被串扰）
+                    # mapping_info 来自 fallback_search 缓存（可能被并发覆盖，但此刻外层刚查到的是正确的）
+                    # 优先使用 mapping_data，其次用外层刚查到的 mapping_info
+                    current_mapping_info = None
+                    if mapping_data and isinstance(mapping_data, dict):
+                        current_mapping_info = mapping_data
+                    else:
+                        # mapping_info 可能在 816-824 行的分支中被赋值
+                        try:
+                            if mapping_info and isinstance(mapping_info, dict):
+                                current_mapping_info = mapping_info
+                        except NameError:
+                            pass
 
                     async def download_comments_task(task_session, progress_callback):
                         try:
@@ -874,26 +987,30 @@ async def get_comments_for_dandan(
                             if scraper:
                                 # 首先获取分集列表
                                 await progress_callback(30, "获取分集列表...")
-                                # 查找映射信息（根据real_anime_id匹配）
-                                mapping_info = None
-                                try:
-                                    all_cache_keys_mapping = await get_cache_keys(task_session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
-                                    for cache_key_mapping in all_cache_keys_mapping:
-                                        search_key = cache_key_mapping.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
-                                        last_bangumi_id = await get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
-                                        if last_bangumi_id:
-                                            search_info = await get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
-                                            if not isinstance(search_info, dict):
-                                                continue
-                                            if last_bangumi_id in search_info.get("bangumi_mapping", {}):
-                                                temp_mapping = search_info["bangumi_mapping"][last_bangumi_id]
-                                                # 检查real_anime_id是否匹配
-                                                if temp_mapping.get("real_anime_id") == real_anime_id:
-                                                    mapping_info = temp_mapping
-                                                    logger.info(f"找到匹配的映射信息: search_key={search_key}, bangumiId={last_bangumi_id}, real_anime_id={real_anime_id}")
-                                                    break
-                                except Exception as e:
-                                    logger.error(f"查找映射信息失败: {e}")
+                                # 【修复】直接使用外层已确认的映射信息，不再二次遍历缓存
+                                # 避免并发窗口期内缓存被其他搜索覆盖导致标题串台
+                                mapping_info = current_mapping_info
+                                if not mapping_info:
+                                    # 兜底：如果外层没拿到，再去缓存查（保持向后兼容）
+                                    try:
+                                        all_cache_keys_mapping = await get_cache_keys(task_session, f"{FALLBACK_SEARCH_CACHE_PREFIX}*")
+                                        for cache_key_mapping in all_cache_keys_mapping:
+                                            search_key = cache_key_mapping.replace(FALLBACK_SEARCH_CACHE_PREFIX, "")
+                                            last_bangumi_id = await get_db_cache(task_session, USER_LAST_BANGUMI_CHOICE_PREFIX, search_key)
+                                            if last_bangumi_id:
+                                                search_info = await get_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, search_key)
+                                                if not isinstance(search_info, dict):
+                                                    continue
+                                                if last_bangumi_id in search_info.get("bangumi_mapping", {}):
+                                                    temp_mapping = search_info["bangumi_mapping"][last_bangumi_id]
+                                                    if temp_mapping.get("real_anime_id") == real_anime_id:
+                                                        mapping_info = temp_mapping
+                                                        logger.info(f"找到匹配的映射信息(兜底): search_key={search_key}, bangumiId={last_bangumi_id}, real_anime_id={real_anime_id}")
+                                                        break
+                                    except Exception as e:
+                                        logger.error(f"查找映射信息失败: {e}")
+                                else:
+                                    logger.info(f"使用外层已确认的映射信息: provider={mapping_info.get('provider')}, original_title={mapping_info.get('original_title')}, real_anime_id={real_anime_id}")
 
                                 if not mapping_info:
                                     logger.error(f"无法找到real_anime_id={real_anime_id}的映射信息")
@@ -942,12 +1059,11 @@ async def get_comments_for_dandan(
                                             pass  # 普通流控超限交给内部处理
 
                                         # 使用并发下载获取弹幕（三线程模式）
-                                        async def dummy_progress_callback(_, _unused):
-                                            pass  # 空的异步进度回调，忽略所有参数
-
+                                        # why：直接传入外层 progress_callback，让子进度（30~90）
+                                        # 能实时上报到任务管理器，避免任务进度卡死在某个值不动。
                                         download_results = await tasks._download_episode_comments_concurrent(
                                             scraper, [virtual_episode], current_rate_limiter,
-                                            dummy_progress_callback,
+                                            progress_callback,
                                             is_fallback=True,
                                             fallback_type="search"
                                         )
@@ -1006,10 +1122,16 @@ async def get_comments_for_dandan(
                                         except Exception as e:
                                             logger.error(f"查找搜索缓存信息失败: {e}")
 
-                                        # 解析搜索关键词，提取纯标题（如"天才基本法 S01E13" -> "天才基本法"）
+                                        # 直接使用源返回的原始标题（保留季度后缀，如"碧蓝之海 第二季"）
                                         search_term = search_keyword or original_title
                                         parsed_info = parse_search_keyword(search_term)
-                                        base_title = parsed_info["title"]
+                                        base_title = original_title
+                                        # 季度获取：① 映射数据自带 > ② 搜索词解析 > ③ 默认 1
+                                        effective_season = mapping_data.get("season") if mapping_data else None
+                                        if effective_season is None:
+                                            effective_season = parsed_info.get("season") or 1
+                                        # 电影/剧场版不使用季度概念（统一复用 is_movie_by_title 工具）
+                                        is_movie_type = media_type == "movie" or is_movie_by_title(base_title)
 
                                         # 由于我们在分配real_anime_id时已经检查了数据库，这里直接使用real_anime_id
                                         # 如果数据库中已有相同标题的条目，real_anime_id就是已有的anime_id
@@ -1026,11 +1148,13 @@ async def get_comments_for_dandan(
                                             logger.info(f"使用已存在的番剧: ID={anime_id}")
                                         else:
                                             # 如果不存在，直接创建新的（使用real_anime_id作为指定ID）
+                                            # 电影/剧场版季度存 1（数据库约束），非电影用 effective_season
+                                            anime_season = 1 if is_movie_type else effective_season
                                             new_anime = Anime(
                                                 id=real_anime_id,
                                                 title=base_title,
                                                 type=media_type,
-                                                season=1,
+                                                season=anime_season,
                                                 year=year,
                                                 imageUrl=image_url,
                                                 createdAt=get_now()
@@ -1038,7 +1162,10 @@ async def get_comments_for_dandan(
                                             task_session.add(new_anime)
                                             await task_session.flush()  # 确保ID可用
                                             anime_id = real_anime_id
-                                            logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+                                            if is_movie_type:
+                                                logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 年份={year}")
+                                            else:
+                                                logger.info(f"创建新番剧: ID={anime_id}, 标题='{base_title}', 季度={anime_season}, 年份={year}")
 
                                             # 同步PostgreSQL序列(避免主键冲突)
                                             await sync_postgres_sequence(task_session)
@@ -1073,8 +1200,9 @@ async def get_comments_for_dandan(
                                                     "real_anime_id": anime_id,
                                                     "provider": current_provider,
                                                     "mediaId": current_episode_url,
-                                                    "final_title": base_title,
-                                                    "final_season": 1,
+                                                    "final_title": parsed_info["title"],
+                                                    "original_title": base_title,
+                                                    "final_season": 1 if is_movie_type else effective_season,
                                                     "media_type": media_type,
                                                     "imageUrl": image_url,
                                                     "year": year,
@@ -1082,14 +1210,7 @@ async def get_comments_for_dandan(
                                                 }
 
                                                 # 存储到缓存,3小时过期
-                                                _backend = get_cache_backend()
-                                                if _backend is not None:
-                                                    try:
-                                                        await _backend.set(fallback_series_key, cache_value, ttl=10800, region="default")
-                                                    except Exception:
-                                                        await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
-                                                else:
-                                                    await crud.set_cache(task_session, fallback_series_key, cache_value, 10800)
+                                                await set_db_cache(task_session, "", fallback_series_key, cache_value, 10800)
                                                 await task_session.flush()
                                                 logger.info(f"为整部剧创建了缓存记录: {fallback_series_key} (共{len(current_episodes_list_ref)}集)")
                                             except Exception as e:
@@ -1125,6 +1246,30 @@ async def get_comments_for_dandan(
                                         except Exception as e:
                                             logger.error(f"清除缓存映射失败: {e}")
 
+                                        # 写入 match_season 整季缓存，让后续 /match 请求能直接命中
+                                        if not is_movie_type:
+                                            try:
+                                                _parsed_sc = parse_search_keyword(base_title)
+                                                season_cache_key = f"match_season_{_parsed_sc['title']}_{effective_season}"
+                                                season_cache_data = {
+                                                    "provider": current_provider,
+                                                    "mediaId": current_episode_url,
+                                                    "real_anime_id": anime_id,
+                                                    "virtual_anime_id": 900000,
+                                                    "final_title": _parsed_sc["title"],
+                                                    "original_title": base_title,
+                                                    "final_season": effective_season,
+                                                    "source_order": source_order,
+                                                    "media_type": media_type,
+                                                    "imageUrl": image_url,
+                                                    "year": year,
+                                                    "timestamp": time.time()
+                                                }
+                                                await set_db_cache(task_session, FALLBACK_SEARCH_CACHE_PREFIX, season_cache_key, season_cache_data, 3600)
+                                                logger.info(f"整季缓存已存储（后备搜索路径）: {season_cache_key}")
+                                            except Exception as e:
+                                                logger.warning(f"写入整季缓存失败: {e}")
+
                                     except Exception as db_error:
                                         logger.error(f"创建数据库条目失败: {db_error}", exc_info=True)
                                         await task_session.rollback()
@@ -1132,7 +1277,9 @@ async def get_comments_for_dandan(
                                     # 不再写入缓存,弹幕已经保存到数据库和XML文件
                                     # 外部会话会从数据库读取episode记录和弹幕文件
                                     logger.info(f"弹幕已保存到数据库和文件,任务完成")
-                                    return raw_comments_data
+                                    # why：后备搜索落到普通下载通知时，也必须携带源站实际获取数，
+                                    # 避免成功通知只显示笼统的“任务成功完成”。
+                                    return f"后备下载完成，共获取 {len(raw_comments_data)} 条弹幕"
                             else:
                                 logger.warning(f"获取弹幕失败")
                                 raise TaskSuccess("获取弹幕失败，源站未返回数据")
@@ -1142,12 +1289,27 @@ async def get_comments_for_dandan(
 
                     # 提交弹幕下载任务
                     try:
+                        # 结构化通知参数：从外层已确认的映射信息提取，供完成通知渲染
+                        # 「作品名/季集/弹幕源/海报」结构块（与预下载通知统一）。
+                        _mi = current_mapping_info or {}
+                        _dl_media_type = _mi.get("type", "")
+                        _dl_params = {
+                            "anime_title": _mi.get("original_title") or _mi.get("final_title") or "",
+                            "season": _mi.get("season") if _mi.get("season") is not None else _mi.get("final_season"),
+                            "episode": episode_number,
+                            "provider": current_provider,
+                            "imageUrl": _mi.get("imageUrl") or "",
+                            # 有具体集数即视为剧集；仅当无集数且类型为 movie 时才按电影展示
+                            "is_movie": (episode_number is None and _dl_media_type == "movie"),
+                            "media_type": _dl_media_type,
+                        }
                         task_id, done_event = await task_manager.submit_task(
                             download_comments_task,
                             f"后备搜索弹幕下载: episodeId={episodeId}",
                             unique_key=task_unique_key,
                             task_type="download_comments",
-                            queue_type="fallback"  # 使用后备队列
+                            queue_type="fallback",  # 使用后备队列
+                            task_parameters=_dl_params
                         )
                         logger.info(f"已提交弹幕下载任务: {task_id}")
 
@@ -1254,6 +1416,14 @@ async def get_comments_for_dandan(
                     except Exception as e:
                         logger.error(f"提交弹幕下载任务失败: {e}", exc_info=True)
 
+        # 后备搜索路径结束：写入性能统计
+        # why：传入 session_factory 而非请求级 session，确保在独立 session 中 commit，
+        # 避免 get_db_session 的 finally 只 close() 导致写入被回滚。
+        if _fallback_profiler is not None:
+            _fallback_profiler.record_step("全流程", _fallback_profiler.total_duration_ms)
+            await _fallback_profiler.flush(session, session_factory=request.app.state.db_session_factory)
+            _fallback_profiler = None
+
         # 如果仍然没有弹幕数据，返回空结果
         if not comments_data:
             logger.warning(f"无法获取 episodeId={episodeId} 的弹幕数据")
@@ -1286,25 +1456,14 @@ async def get_comments_for_dandan(
         cache_key = f"sampled_{episodeId}_{limit}{merge_suffix}"
         current_time = time.time()
 
-        # 尝试从数据库缓存获取
+        # 尝试从缓存获取
         cached_data = await get_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key)
         if cached_data:
-            # 缓存格式: {"comments": [...], "timestamp": 123456.789}
+            # 缓存命中（DB 层已按 TTL 管理过期，无需在 Python 层重复判断时间戳）
+            # 问题3修复：删除原有 Python 层 time.time() 手工过期判断，信任 DB 缓存 TTL 语义
             cached_comments = cached_data.get("comments", [])
-            cached_time = cached_data.get("timestamp", 0)
-            if current_time - cached_time <= SAMPLED_CACHE_TTL:
-                logger.info(f"使用缓存的采样结果: episodeId={episodeId}, limit={limit}, 缓存时间={int(current_time - cached_time)}秒前")
-                comments_data = cached_comments
-            else:
-                # 缓存过期,重新采样
-                logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样 (缓存已过期)")
-                original_count = len(comments_data)
-                comments_data = sample_comments_evenly(comments_data, limit)
-                logger.info(f"弹幕采样完成: {original_count} -> {len(comments_data)} 条")
-
-                # 更新缓存
-                cache_value = {"comments": comments_data, "timestamp": current_time}
-                await set_db_cache(session, SAMPLED_COMMENTS_CACHE_PREFIX, cache_key, cache_value, SAMPLED_COMMENTS_CACHE_TTL_DB)
+            logger.info(f"使用缓存的采样结果: episodeId={episodeId}, limit={limit}")
+            comments_data = cached_comments
         else:
             # 无缓存,执行采样
             logger.info(f"弹幕数量 {len(comments_data)} 超过限制 {limit}，开始均匀采样")
@@ -1381,6 +1540,15 @@ async def get_comments_for_dandan(
             logger.debug(f"弹幕简繁转换 (episodeId: {episodeId}): 最终模式={final_convert}(优先级={priority}, 播放器={chConvert}, 服务端={server_ch}), 处理 {len(comments_data)} 条")
     except Exception as e:
         logger.error(f"应用简繁转换失败: {e}", exc_info=True)
+
+    # 弹幕位置转换：按配置把顶部(5)/底部(4)弹幕转为其他类型（仅输出时转换，基于原始 mode 一次性映射）
+    try:
+        top_to = await config_manager.get('danmakuTopConvertTo', 'none')
+        bottom_to = await config_manager.get('danmakuBottomConvertTo', 'none')
+        if comments_data and (top_to != 'none' or bottom_to != 'none'):
+            comments_data = convert_danmaku_position(comments_data, top_to=top_to, bottom_to=bottom_to)
+    except Exception as e:
+        logger.error(f"应用弹幕位置转换失败: {e}", exc_info=True)
 
     # UA 已由 get_token_from_path 依赖项记录
     logger.debug(f"弹幕接口响应 (episodeId: {episodeId}): 总计 {len(comments_data)} 条弹幕")

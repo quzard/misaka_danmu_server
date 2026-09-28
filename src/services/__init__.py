@@ -8,7 +8,7 @@
 """
 
 # 任务管理
-from .task_manager import TaskManager, TaskStatus, TaskSuccess, TaskPauseForRateLimit
+from .task_manager import TaskManager, TaskStatus, TaskSuccess, TaskFailed, TaskPauseForRateLimit
 
 # 弹幕源管理
 from .scraper_manager import ScraperManager
@@ -24,6 +24,11 @@ from .webhook_manager import WebhookManager
 
 # 媒体服务器管理
 from .media_server_manager import MediaServerManager, get_media_server_manager
+
+# bangumi-data 离线数据层管理
+from .bangumi_data_manager import (
+    BangumiDataManager, init_bangumi_data_manager, get_bangumi_data_manager,
+)
 
 # 下载任务管理
 from .download_task_manager import DownloadTaskManager, DownloadTask, get_download_task_manager
@@ -64,6 +69,7 @@ __all__ = [
     'TaskManager',
     'TaskStatus',
     'TaskSuccess',
+    'TaskFailed',
     'TaskPauseForRateLimit',
     # 弹幕源管理
     'ScraperManager',
@@ -74,6 +80,9 @@ __all__ = [
     # 媒体服务器管理
     'MediaServerManager',
     'get_media_server_manager',
+    'BangumiDataManager',
+    'init_bangumi_data_manager',
+    'get_bangumi_data_manager',
     # 标题识别
     'TitleRecognitionManager',
     # 下载任务管理

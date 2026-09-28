@@ -7,6 +7,7 @@ from typing import List, Set
 import asyncio
 
 from src.core.config import settings
+from src.core.env import is_docker_environment
 
 # 这个双端队列将用于在内存中存储最新的日志，以供Web界面展示
 _logs_deque = collections.deque(maxlen=200)
@@ -84,34 +85,58 @@ class BilibiliInfoFilter(logging.Filter):
                 return False
         return True  # 其他所有日志都通过
 
-# 新增：过滤 SQLAlchemy 连接池关闭时的良性噪音
+# 新增：过滤 SQLAlchemy 连接池 terminate 连接时的良性噪音
 class SQLAlchemyPoolShutdownFilter(logging.Filter):
     """
-    服务关闭时，SQLAlchemy 连接池尝试 terminate 连接，
-    但 uvloop TCPTransport 已关闭，会抛出 RuntimeError。
-    这是已知的良性噪音，降级为 DEBUG 避免误报。
+    压制 SQLAlchemy 连接池 terminate 一条连接时的良性 ERROR 噪音（"Exception terminating connection"）。
+
+    两类触发场景（表象相同，均无害——连接会被池作废重建，不影响功能）：
+    1. 运行期：客户端在请求完成前断开，cancel scope 级联取消正被占用的连接
+       → 尾部为 asyncio.CancelledError（Cancelled via ... BaseHTTPMiddleware）。
+    2. 关闭/重启期：engine.dispose() 批量回收连接，但 uvloop transport 已先关
+       → 尾部为 RuntimeError: unable to perform operation on <TCPTransport closed=True>。
+
+    这条 ERROR 由 SQLAlchemy 在 pool/base.py._close_connection 内部 logger.error(exc_info=True)
+    直接打出（异常已在池内被 catch），因此**只能在日志层过滤**。
+
+    why 直接丢弃而非降级：filter 早于 handler 的级别判定执行，仅改 record.levelno 不会阻止输出
+    （旧实现的 bug）。故这里在非 DEBUG 全局级别下直接 return False 丢弃；DEBUG 模式保留以便排查。
     """
+    _MSG_MARKERS = (
+        'Exception terminating connection',
+        'Exception closing connection',
+        'unable to perform operation',
+        'TCPTransport closed',
+        'the handler is closed',
+    )
+    _EXC_MARKERS = (
+        'TCPTransport closed',
+        'the handler is closed',
+        'unable to perform operation',
+        'CancelledError',
+        'Cancelled via cancel scope',
+    )
+
     def filter(self, record):
-        if record.levelno >= logging.ERROR:
-            msg = record.getMessage()
-            # 检查主消息
-            is_pool_noise = (
-                'Exception terminating connection' in msg
-                or 'unable to perform operation' in msg
-                or 'TCPTransport closed' in msg
-                or 'the handler is closed' in msg
-            )
-            # 检查异常堆栈（RuntimeError 详情可能只在 exc_info 里）
-            if not is_pool_noise and record.exc_info:
-                exc_text = str(record.exc_info[1]) if record.exc_info[1] else ''
-                is_pool_noise = (
-                    'TCPTransport closed' in exc_text
-                    or 'the handler is closed' in exc_text
-                    or 'unable to perform operation' in exc_text
-                )
-            if is_pool_noise:
+        if record.levelno < logging.ERROR:
+            return True
+
+        msg = record.getMessage()
+        is_pool_noise = any(m in msg for m in self._MSG_MARKERS)
+
+        # 主消息未命中时，检查异常堆栈（CancelledError/RuntimeError 详情常只在 exc_info 里）
+        if not is_pool_noise and record.exc_info and record.exc_info[1] is not None:
+            exc = record.exc_info[1]
+            exc_text = f"{type(exc).__name__}: {exc}"
+            is_pool_noise = any(m in exc_text for m in self._EXC_MARKERS)
+
+        if is_pool_noise:
+            # 全局 DEBUG 级别时保留（降级为 DEBUG 便于排查）；否则直接丢弃，日志彻底干净
+            if logging.getLogger().getEffectiveLevel() <= logging.DEBUG:
                 record.levelno = logging.DEBUG
                 record.levelname = 'DEBUG'
+                return True
+            return False
         return True
 
 # 新增：一个过滤器，用于翻译 apscheduler 的日志
@@ -134,27 +159,30 @@ class ApschedulerLogTranslatorFilter(logging.Filter):
 
         return True
 
+
+class McpRequestLogDowngradeFilter(logging.Filter):
+    """将 MCP SDK 的高频请求日志按 DEBUG 级别处理。
+
+    why：fastapi-mcp 底层依赖的 mcp SDK（logger 名为 'mcp.server.lowlevel.server'）
+    会在每次处理请求时用 INFO 级别打印 "Processing request of type XxxRequest"。
+    MCP 客户端会定时轮询 ListTools，导致该日志成对刷屏。
+    这里把它当作 DEBUG 级别对待：仅当全局日志级别为 DEBUG 时才放行，
+    否则（INFO 及以上）直接丢弃，从而消除刷屏噪音。
+    """
+    def filter(self, record):
+        if record.name.startswith("mcp.") and record.levelno == logging.INFO \
+                and isinstance(record.msg, str) and record.msg.startswith("Processing request of type"):
+            # 等价于把该日志降级为 DEBUG：全局为 DEBUG 时显示，否则过滤掉
+            return logging.getLogger().getEffectiveLevel() <= logging.DEBUG
+        return True
+
 def setup_logging():
     """
     配置根日志记录器，使其能够将日志输出到控制台、一个可轮转的文件，
     以及一个用于API的内存双端队列。
     此函数应在应用启动时被调用一次。
     """
-    def _is_docker_environment():
-        """检测是否在Docker容器中运行"""
-        import os
-        # 方法1: 检查 /.dockerenv 文件（Docker标准做法）
-        if Path("/.dockerenv").exists():
-            return True
-        # 方法2: 检查环境变量
-        if os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true":
-            return True
-        # 方法3: 检查当前工作目录是否为 /app
-        if Path.cwd() == Path("/app"):
-            return True
-        return False
-
-    if _is_docker_environment():
+    if is_docker_environment():
         log_dir = Path("/app/config/logs")
     else:
         log_dir = Path("config/logs")
@@ -190,10 +218,19 @@ def setup_logging():
     # 添加新的过滤器到根日志记录器，以便翻译所有输出
     logger.addFilter(ApschedulerLogTranslatorFilter())
     logger.addFilter(SensitiveInfoFilter())  # 添加敏感信息过滤器到所有处理器
-    logger.addFilter(SQLAlchemyPoolShutdownFilter())  # 压制连接池关闭时的良性噪音
 
     logger.addHandler(logging.StreamHandler()) # 控制台处理器
     logger.addHandler(logging.handlers.RotatingFileHandler(log_file, maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')) # 文件处理器
+
+    # 把 MCP 高频请求日志降级 + SQLAlchemy 连接池关闭噪音过滤器挂到所有处理器上。
+    # why：filter 必须加在 handler 上才对子 logger 传播来的记录生效；加在 root logger
+    # 上只对 root 直接产生的记录有效。连接池报错来自子 logger(sqlalchemy.pool.*)，
+    # 原先把 SQLAlchemyPoolShutdownFilter 加在 root 上（addFilter）对其不生效，故改挂 handler。
+    mcp_filter = McpRequestLogDowngradeFilter()
+    pool_filter = SQLAlchemyPoolShutdownFilter()  # 压制连接池 terminate 连接的良性噪音
+    for handler in logger.handlers:
+        handler.addFilter(mcp_filter)
+        handler.addFilter(pool_filter)
 
     # 配置httpx logger,确保其日志也经过敏感信息过滤
     httpx_logger = logging.getLogger("httpx")
@@ -203,6 +240,8 @@ def setup_logging():
     deque_handler = DequeHandler(_logs_deque)
     deque_handler.addFilter(NoHttpxLogFilter())
     deque_handler.addFilter(BilibiliInfoFilter()) # 添加新的过滤器
+    deque_handler.addFilter(mcp_filter)  # UI 日志同样降级 MCP 高频请求噪音
+    deque_handler.addFilter(pool_filter)  # UI 日志同样压制连接池关闭噪音（deque_handler 在上面 for 循环后创建，需单独补挂）
     logger.addHandler(deque_handler)
 
     # 为所有处理器设置格式
@@ -261,8 +300,7 @@ def get_logs() -> List[str]:
 
 def get_log_dir() -> Path:
     """返回日志目录路径。"""
-    import os
-    if Path("/.dockerenv").exists() or os.getenv("DOCKER_CONTAINER") == "true" or os.getenv("IN_DOCKER") == "true" or Path.cwd() == Path("/app"):
+    if is_docker_environment():
         return Path("/app/config/logs")
     return Path("config/logs")
 
@@ -291,28 +329,58 @@ def list_log_files() -> List[dict]:
     return files
 
 
-def read_log_file(filename: str, tail: int = 500) -> List[str]:
-    """读取指定日志文件的最后 N 行。"""
-    log_dir = get_log_dir()
+# 每行不做长度限制，日志内容完整返回。
+_LOG_READ_CHUNK_BYTES = 64 * 1024
+
+
+def read_log_file(
+    filename: str,
+    tail: int = 200,
+    keyword: str = "",
+    offset: int = 0,
+) -> dict:
+    """从文件末尾反向读取日志，支持关键词过滤和分页偏移。
+
+    :param filename: 日志文件名
+    :param tail:     每次返回的行数（单批大小），默认 200
+    :param keyword:  关键词过滤（大小写不敏感），空字符串表示不过滤
+    :param offset:   已加载的条数（从匹配结果尾部再往前跳过的行数），用于"加载更多"
+    :return: {"lines": [...], "hasMore": bool, "total": int}
+             total 为本次匹配总行数（含已加载部分），方便前端显示进度
+    """
+    log_dir = get_log_dir().resolve()
     file_path = (log_dir / filename).resolve()
 
-    # 安全检查：防止路径穿越
-    if not str(file_path).startswith(str(log_dir.resolve())):
+    # why：只允许日志目录下的直接文件，阻止路径穿越到同前缀目录。
+    if file_path.parent != log_dir:
         raise ValueError("非法的文件路径")
-
     if not file_path.exists() or not file_path.is_file():
         raise FileNotFoundError(f"日志文件不存在: {filename}")
 
-    # 读取最后 tail 行
-    lines = []
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-            from collections import deque
-            lines = list(deque(f, maxlen=tail))
-    except Exception as e:
-        raise IOError(f"读取日志文件失败: {e}")
+        # 全量读取文件（避免反向读取时需要多次IO往返，文件本身已有轮转大小限制）
+        with open(file_path, 'rb') as f:
+            raw = f.read()
 
-    return [line.rstrip('\n').rstrip('\r') for line in lines]
+        all_lines = raw.decode('utf-8', errors='replace').splitlines()
+        all_lines = [line for line in all_lines if line.strip()]
+
+        # 关键词过滤（后端处理，不依赖前端 filter）
+        if keyword:
+            kw = keyword.lower()
+            all_lines = [line for line in all_lines if kw in line.lower()]
+
+        total = len(all_lines)
+        # 分页：从尾部往前，跳过 offset 行后再取 tail 行
+        # all_lines 按文件顺序（最旧→最新），返回也保持此顺序
+        end = total - offset
+        start = max(0, end - tail)
+        page_lines = all_lines[start:end]
+        has_more = start > 0
+
+        return {"lines": page_lines, "hasMore": has_more, "total": total}
+    except Exception as e:
+        raise IOError(f"读取日志文件失败: {e}") from e
 
 
 def subscribe_to_logs(queue: asyncio.Queue) -> None:

@@ -115,14 +115,42 @@ class So360MetadataSource(BaseMetadataSource):
             'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
         }
 
-        self.client = httpx.AsyncClient(
-            headers=self.headers,
-            cookies=self.cookies,
-            timeout=20.0,
-        )
+        self.client = None  # 延迟初始化，支持代理配置
+
+    async def _get_proxy(self) -> Optional[str]:
+        """当 360 元数据源开启 useProxy 时，返回代理 URL。"""
+        proxy_mode = await self.config_manager.get("proxyMode", "none")
+        if proxy_mode == "none":
+            if (await self.config_manager.get("proxyEnabled", "false")).lower() == "true":
+                proxy_mode = "http_socks"
+        if proxy_mode != "http_socks":
+            return None
+        proxy_url = await self.config_manager.get("proxyUrl", "")
+        if not proxy_url:
+            return None
+        async with self._session_factory() as session:
+            from src.db import crud as _crud
+            all_settings = await _crud.get_all_metadata_source_settings(session)
+            setting = next((s for s in all_settings if s.get('providerName') == '360'), None)
+            if setting and setting.get('useProxy', False):
+                return proxy_url
+        return None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """获取或创建 httpx client，支持代理。"""
+        if self.client is None:
+            proxy = await self._get_proxy()
+            self.client = httpx.AsyncClient(
+                headers=self.headers,
+                cookies=self.cookies,
+                timeout=20.0,
+                proxy=proxy,
+            )
+        return self.client
 
     async def search(self, keyword: str, user: models.User, mediaType: Optional[str] = None) -> List[models.MetadataDetailsResponse]:
         """基于参考实现的简化搜索方法（使用 CacheManager 缓存避免短期内重复请求）"""
+        await self._get_client()  # 确保 client 已初始化
         cache_prefix = "360_search_"
         cache_key = keyword
 
@@ -330,6 +358,7 @@ class So360MetadataSource(BaseMetadataSource):
         return await self._get_episode_url_from_360(best_match, episode_index, target_site)
 
     async def get_details(self, item_id: str, user: models.User, mediaType: Optional[str] = None) -> Optional[models.MetadataDetailsResponse]:
+        await self._get_client()
         possible_paths = [f"/dianshiju/{item_id}.html", f"/dongman/{item_id}.html", f"/dianying/{item_id}.html"]
         try:
             for path in possible_paths:
@@ -640,6 +669,7 @@ class So360MetadataSource(BaseMetadataSource):
         Returns:
             List[Tuple[int, str]]: (集数, 播放URL) 的列表
         """
+        await self._get_client()
         try:
             # 1. 获取条目信息 - 优先级: item_data > 数据库缓存 > 重新查询
             if item_data:
@@ -684,7 +714,7 @@ class So360MetadataSource(BaseMetadataSource):
                         if isinstance(episode, dict):
                             episode_url = episode.get('url', '')
                         elif isinstance(episode, str):
-                            episode_url = episode
+                            episode_url = item.playlinks.get(item.seriesSite, '') if item.playlinks else ''
                         else:
                             continue
                         if episode_url:
@@ -785,7 +815,7 @@ class So360MetadataSource(BaseMetadataSource):
         try:
             # 综艺类型处理
             if cat_id == '3' or (item_data.get('cat_name') and '综艺' in item_data.get('cat_name', '')):
-                return await self._get_zongyi_episodes(ent_id, site, item_data)
+                return await self._get_zongyi_episodes_raw(ent_id, site, item_data)
             else:
                 # 电视剧/动漫处理
                 return await self._get_series_episodes(cat_id, en_id or ent_id, site)
@@ -793,18 +823,33 @@ class So360MetadataSource(BaseMetadataSource):
             self.logger.error(f"360获取分集失败 (site={site}): {e}")
             return []
 
-    async def _get_zongyi_episodes(self, ent_id: str, site: str, item_data: dict) -> List[Any]:
-        """获取综艺分集 (基于参考实现)"""
+    async def _get_zongyi_episodes_raw(self, ent_id: str, site: str, item_data: Any) -> List[Any]:
+        """获取综艺分集【原始字典列表】(基于参考实现，供 failover 链路使用)。
+
+        why：此方法返回 360 API 的原始分集 dict 列表（调用方 _get_episode_url_from_360
+        会自行从 dict 取 url）。而 get_episode_urls 用的是同名的 _get_zongyi_episodes
+        （返回 (集数,url) 2元组）——两者契约不同，故必须区分方法名，否则后定义会覆盖前者，
+        导致 get_episode_urls 拿到原始 dict、上层 `for idx, url in episode_urls` 解包报
+        'too many values to unpack (expected 2)'（表现为分集接口 403）。
+
+        兼容 dict 与 So360SearchResultItem(pydantic) 两种入参：用 _read 统一取值。
+        """
         all_episodes = []
+
+        def _read(key: str, default=None):
+            if isinstance(item_data, dict):
+                return item_data.get(key, default)
+            return getattr(item_data, key, default)
 
         # 获取年份列表
         years = []
-        if item_data.get('playlinks_year') and site in item_data['playlinks_year']:
-            years = [str(y) for y in item_data['playlinks_year'][site] if y]
-        elif item_data.get('years'):
-            years = [str(y) for y in item_data['years'] if y]
-        elif item_data.get('year'):
-            years = [str(item_data['year'])]
+        playlinks_year = _read('playlinks_year')
+        if playlinks_year and site in playlinks_year:
+            years = [str(y) for y in playlinks_year[site] if y]
+        elif _read('years'):
+            years = [str(y) for y in _read('years') if y]
+        elif _read('year'):
+            years = [str(_read('year'))]
 
         if not years:
             years = ['']
@@ -910,8 +955,10 @@ class So360MetadataSource(BaseMetadataSource):
         for site in platforms_to_check:
             try:
                 # 尝试获取第一集URL
+                # why：此处 item 为 dict 且下方按原始分集字典取 url（first_ep.get('url')），
+                # 需调用返回原始 dict 列表的 raw 版本，而非返回 (集数,url) 2元组的版本。
                 if cat_id == '3' or '综艺' in cat_name:
-                    episodes = await self._get_zongyi_episodes(ent_id, site, item)
+                    episodes = await self._get_zongyi_episodes_raw(ent_id, site, item)
                 else:
                     episodes = await self._get_series_episodes(cat_id, en_id or ent_id, site)
 
@@ -1033,4 +1080,5 @@ class So360MetadataSource(BaseMetadataSource):
         raise NotImplementedError(f"操作 '{action_name}' 在 {self.provider_name} 中未实现。")
 
     async def close(self):
-        await self.client.aclose()
+        if self.client:
+            await self.client.aclose()

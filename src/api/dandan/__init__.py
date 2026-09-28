@@ -82,7 +82,7 @@ from .danmaku_color import (
 from .danmaku_filter import apply_blacklist_filter
 
 # 弹幕解析
-from .danmaku_parser import parse_dandan_xml_to_comments
+from src.utils.danmaku_parser import parse_dandan_xml_to_comments
 
 # 后备搜索
 from .fallback_search import (
@@ -139,6 +139,9 @@ from .predownload import (
     wait_for_refresh_task,
     try_predownload_next_episode,
 )
+
+# 版本信息
+from .version import version_router
 
 __all__ = [
     # 路由处理器
@@ -245,6 +248,7 @@ dandan_router.include_router(taskcomment_router, prefix="/{token}/api/v2")
 dandan_router.include_router(bangumi_router, prefix="/{token}/api/v2")
 dandan_router.include_router(search_router, prefix="/{token}/api/v2")
 dandan_router.include_router(match_router, prefix="/{token}/api/v2")
+dandan_router.include_router(version_router, prefix="/{token}/api/v2")
 
 # 挂载以支持直接路径: /{token}/...
 dandan_router.include_router(comments_router, prefix="/{token}")
@@ -252,4 +256,5 @@ dandan_router.include_router(taskcomment_router, prefix="/{token}")
 dandan_router.include_router(bangumi_router, prefix="/{token}")
 dandan_router.include_router(search_router, prefix="/{token}")
 dandan_router.include_router(match_router, prefix="/{token}")
+dandan_router.include_router(version_router, prefix="/{token}")
 

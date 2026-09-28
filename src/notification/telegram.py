@@ -14,7 +14,7 @@ from src._version import APP_VERSION
 
 from src.notification.base import (
     BaseNotificationChannel, CommandResult,
-    ChannelCapability, ChannelCapabilities,
+    ChannelCapability, ChannelCapabilities, IMAGE_MODE_FIELD,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,9 +60,48 @@ class TelegramChannel(BaseNotificationChannel):
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None  # 主事件循环引用
 
-    def get_capabilities(self) -> ChannelCapabilities:
-        """返回 Telegram 渠道能力"""
-        return self._CAPABILITIES
+    @staticmethod
+    def _escape_markdown_v2(text: str) -> str:
+        """转义 MarkdownV2 特殊字符（用于把纯文本 title 安全嵌入 MarkdownV2）"""
+        if not text:
+            return ""
+        special = r'_*[]()~`>#+-=|{}.!'
+        out = []
+        for ch in str(text):
+            if ch in special:
+                out.append("\\" + ch)
+            else:
+                out.append(ch)
+        return "".join(out)
+
+    @staticmethod
+    def _strip_markdown_v2(text: str) -> str:
+        """将 MarkdownV2 文本清洗为纯文本（去转义反斜杠、引用块 > 前缀、加粗/代码符号、Markdown 链接）"""
+        if not text:
+            return ""
+        import re as _re
+        # 先把 [显示文字](URL) 替换为"显示文字"，避免 send_photo 图片 URL 非 HTTPS 失败时
+        # 降级发纯文本却把 Markdown 链接语法原样打印给用户（TG 不渲染无 parse_mode 的链接）。
+        # why：_strip 只处理反斜杠转义和 */` 符号，[text](url) 完全不处理，是泄漏根源。
+        text = _re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', str(text))
+        lines = []
+        for line in text.split("\n"):
+            if line.startswith(">"):
+                line = line[1:]
+            out = []
+            i = 0
+            while i < len(line):
+                ch = line[i]
+                if ch == "\\" and i + 1 < len(line):
+                    out.append(line[i + 1])
+                    i += 2
+                elif ch in ("*", "`"):
+                    i += 1
+                else:
+                    out.append(ch)
+                    i += 1
+            lines.append("".join(out))
+        return "\n".join(lines)
 
     @staticmethod
     def get_config_schema() -> list:
@@ -72,6 +111,8 @@ class TelegramChannel(BaseNotificationChannel):
                 "label": "Bot Token",
                 "type": "password",
                 "description": "从 @BotFather 获取的 Bot Token",
+                "description_en": "Bot Token obtained from @BotFather",
+                "description_tw": "從 @BotFather 取得的 Bot Token",
                 "placeholder": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
                 "required": True,
             },
@@ -79,62 +120,97 @@ class TelegramChannel(BaseNotificationChannel):
                 "key": "chat_id",
                 "label": "Chat ID",
                 "type": "string",
+                "rowGroup": "tg_id_row1",
                 "description": "默认消息接收者的 Chat ID，用于接收系统通知",
+                "description_en": "Default Chat ID for receiving system notifications",
+                "description_tw": "預設訊息接收者的 Chat ID，用於接收系統通知",
                 "placeholder": "123456789",
             },
             {
                 "key": "admin_ids",
                 "label": "管理员用户ID",
+                "label_en": "Admin User IDs",
+                "label_tw": "管理員使用者ID",
                 "type": "string",
+                "rowGroup": "tg_id_row1",
                 "description": "拥有管理权限的用户ID，多个用逗号分隔",
+                "description_en": "User IDs with admin privileges, separated by commas",
+                "description_tw": "擁有管理權限的使用者ID，多個用逗號分隔",
                 "placeholder": "123456789,987654321",
             },
             {
                 "key": "allowed_ids",
                 "label": "允许的用户ID",
+                "label_en": "Allowed User IDs",
+                "label_tw": "允許的使用者ID",
                 "type": "string",
+                "rowGroup": "tg_id_row2",
                 "description": "允许使用 Bot 交互的用户ID，多个用逗号分隔。留空则仅管理员可用",
+                "description_en": "User IDs allowed to interact with the Bot, separated by commas. Leave empty for admin-only",
+                "description_tw": "允許使用 Bot 互動的使用者ID，多個用逗號分隔。留空則僅管理員可用",
                 "placeholder": "",
             },
             {
                 "key": "mode",
                 "label": "交互模式",
+                "label_en": "Interaction Mode",
+                "label_tw": "互動模式",
                 "type": "switch",
                 "description": "消息接收方式",
-                "switchLabels": {"checked": "Webhook", "unchecked": "轮询"},
+                "description_en": "Message receiving method",
+                "description_tw": "訊息接收方式",
+                "switchLabels": {"checked": "Webhook", "unchecked": "轮询", "unchecked_en": "Polling", "unchecked_tw": "輪詢"},
                 "switchValues": {"checked": "webhook", "unchecked": "polling"},
                 "default": "polling",
             },
             {
                 "key": "webhook_base_url",
                 "label": "外部访问地址",
+                "label_en": "External Access URL",
+                "label_tw": "外部存取位址",
                 "type": "string",
                 "description": "你的服务器公网地址（如 https://my-domain.com），系统会自动拼接完整回调路径",
+                "description_en": "Your server's public URL (e.g. https://my-domain.com). The system will auto-append the callback path.",
+                "description_tw": "你的伺服器公網位址（如 https://my-domain.com），系統會自動拼接完整回呼路徑",
                 "placeholder": "https://your-domain.com",
                 "visibleWhen": {"mode": "webhook"},
             },
             {
                 "key": "tunnel_enabled",
                 "label": "启用 VPS 隧道连接",
+                "label_en": "Enable VPS Tunnel",
+                "label_tw": "啟用 VPS 隧道連接",
                 "type": "boolean",
                 "description": "启用后，弹幕库将通过上方「外部访问地址」建立 WebSocket 反向隧道，将 Telegram 回调转发到本地（无需公网 IP）",
+                "description_en": "When enabled, a WebSocket reverse tunnel is established via the external URL to forward Telegram callbacks locally (no public IP needed).",
+                "description_tw": "啟用後，彈幕庫將透過上方「外部存取位址」建立 WebSocket 反向隧道，將 Telegram 回呼轉發到本地（無需公網 IP）",
                 "default": False,
                 "visibleWhen": {"mode": "webhook"},
             },
             {
                 "key": "telegram_api_proxy",
                 "label": "API 出网代理地址",
+                "label_en": "API Outbound Proxy",
+                "label_tw": "API 出網代理位址",
                 "type": "string",
+                "rowGroup": "tg_id_row2",
                 "description": "填入 VPS 地址（如 http://vps.example.com），Bot 的 API 请求将通过 VPS 出网，解决国内 IP 被封锁的问题。留空则直连 api.telegram.org",
+                "description_en": "Enter VPS address (e.g. http://vps.example.com). Bot API requests will go through VPS to bypass IP blocks. Leave empty to connect directly to api.telegram.org.",
+                "description_tw": "填入 VPS 位址（如 http://vps.example.com），Bot 的 API 請求將透過 VPS 出網，解決國內 IP 被封鎖的問題。留空則直連 api.telegram.org",
                 "placeholder": "http://your-vps.com",
             },
             {
                 "key": "log_raw",
                 "label": "记录原始交互",
+                "label_en": "Log Raw Interactions",
+                "label_tw": "記錄原始互動",
                 "type": "boolean",
                 "description": "启用后，Bot 的所有收发消息将记录到 config/logs/bot_raw.log 文件中，用于调试",
+                "description_en": "When enabled, all Bot messages will be logged to config/logs/bot_raw.log for debugging.",
+                "description_tw": "啟用後，Bot 的所有收發訊息將記錄到 config/logs/bot_raw.log 檔案中，用於除錯",
                 "default": False,
             },
+            IMAGE_MODE_FIELD,
         ]
 
     def _is_log_raw(self) -> bool:
@@ -251,7 +327,7 @@ class TelegramChannel(BaseNotificationChannel):
 
         # ── 命令处理 ──
         @bot.message_handler(commands=[
-            'start', 'help', 'search', 'tasks', 'tokens',
+            'start', 'help', 'status', 'sh', 'search', 'tasks', 'tokens',
             'auto', 'refresh', 'url', 'cache', 'cancel'
         ])
         def handle_command(message):
@@ -374,6 +450,126 @@ class TelegramChannel(BaseNotificationChannel):
             markup.row(*btn_row)
         return markup
 
+    async def _edit_with_retry(self, chat_id, message_id, text,
+                               markup=None, parse_mode=None,
+                               max_retries: int = 3, retry_delay: float = 5.0) -> bool:
+        """带重试的消息编辑，网络瞬断时自动重试。返回是否成功。"""
+        for attempt in range(max_retries):
+            try:
+                await asyncio.to_thread(
+                    self._bot.edit_message_text,
+                    text=text,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=markup,
+                    parse_mode=parse_mode,
+                )
+                return True
+            except Exception as edit_err:
+                err_str = str(edit_err).lower()
+                if "message is not modified" in err_str:
+                    return True  # 内容未变化，视为成功
+                elif "no text in the message" in err_str:
+                    try:
+                        await asyncio.to_thread(
+                            self._bot.edit_message_caption,
+                            caption=text,
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                        )
+                        return True
+                    except Exception as cap_err:
+                        if "message is not modified" in str(cap_err).lower():
+                            return True
+                        # caption 编辑失败也重试
+                elif "connection" in err_str or "timeout" in err_str or "reset" in err_str:
+                    # 网络瞬断，等待后重试
+                    if attempt < max_retries - 1:
+                        self.logger.warning(
+                            f"编辑消息网络异常 (第{attempt+1}次)，{retry_delay}秒后重试: "
+                            f"{type(edit_err).__name__}"
+                        )
+                        await asyncio.sleep(retry_delay)
+                        continue
+                elif "can't parse entities" in err_str:
+                    # MarkdownV2 解析失败，不重试，返回 False 让调用方降级为纯文本
+                    self.logger.warning(f"编辑消息 MarkdownV2 解析失败，将降级为纯文本: {edit_err}")
+                    return False
+                else:
+                    # 其他错误直接抛出
+                    raise edit_err
+        return False
+
+    async def _render_photo_bytes(self, result, chat_id, markup,
+                                  parse_mode, reply_to_message_id):
+        """发送聚合海报图（PNG bytes）。
+
+        Telegram 图片消息的图片本身无法 edit，因此翻页场景（edit_message_id 非空）
+        采用「先删旧消息，再发新图」策略，保证每页都能换成对应的九宫格海报。
+        caption 长度上限 1024，超出时截断。
+        """
+        import io as _io
+        caption = result.text or ""
+        if len(caption) > 1024:
+            caption = caption[:1021] + "..."
+
+        # 翻页：先删除旧消息（图片无法 edit）
+        if result.edit_message_id:
+            try:
+                await asyncio.to_thread(
+                    self._bot.delete_message, chat_id, result.edit_message_id
+                )
+            except Exception as del_err:
+                self.logger.debug(f"删除旧海报消息失败（忽略）: {del_err}")
+
+        sent = None
+        try:
+            photo = _io.BytesIO(result.image_bytes)
+            photo.name = "poster.png"
+            sent = await asyncio.to_thread(
+                self._bot.send_photo, chat_id, photo,
+                caption=caption, reply_markup=markup,
+                parse_mode=parse_mode, reply_to_message_id=reply_to_message_id,
+            )
+        except Exception as photo_err:
+            err_str = str(photo_err).lower()
+            if "can't parse entities" in err_str:
+                # caption 解析失败：去掉 parse_mode 重发
+                try:
+                    photo = _io.BytesIO(result.image_bytes)
+                    photo.name = "poster.png"
+                    sent = await asyncio.to_thread(
+                        self._bot.send_photo, chat_id, photo,
+                        caption=caption, reply_markup=markup,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                except Exception as e2:
+                    self.logger.warning(f"send_photo(bytes) 重试失败，降级纯文本: {e2}")
+            else:
+                self.logger.warning(f"send_photo(bytes) 失败，降级纯文本: {photo_err}")
+            if sent is None:
+                # 最终降级：发纯文本列表，至少保证用户能选
+                try:
+                    sent = await asyncio.to_thread(
+                        self._bot.send_message, chat_id, result.text,
+                        reply_markup=markup, parse_mode=parse_mode,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                except Exception:
+                    try:
+                        sent = await asyncio.to_thread(
+                            self._bot.send_message, chat_id, result.text,
+                            reply_markup=markup,
+                        )
+                    except Exception:
+                        pass
+
+        # 回写新消息 id，供后续翻页 edit/删除使用
+        if sent and result.next_state:
+            self.service.update_conversation_message_id(str(chat_id), sent.message_id)
+
     async def _render_result(self, result: CommandResult, chat_id: int,
                              reply_to_message_id: int = None):
         """根据 CommandResult 渲染消息（发送新消息或编辑已有消息）
@@ -388,40 +584,37 @@ class TelegramChannel(BaseNotificationChannel):
 
             parse_mode = result.parse_mode
 
+            # 聚合海报图：优先以图片消息（bytes）发送。
+            # 翻页等编辑场景下图片本身无法 edit，需删除旧消息后发新图。
+            if result.image_bytes:
+                await self._render_photo_bytes(
+                    result, chat_id, markup, parse_mode, reply_to_message_id
+                )
+                return
+
             if result.edit_message_id:
                 self._log_raw("⬆ 编辑消息", {"chat_id": chat_id, "message_id": result.edit_message_id, "text": result.text[:200]})
-                try:
-                    await asyncio.to_thread(
-                        self._bot.edit_message_text,
-                        text=result.text,
-                        chat_id=chat_id,
-                        message_id=result.edit_message_id,
-                        reply_markup=markup,
-                        parse_mode=parse_mode,
+                success = await self._edit_with_retry(
+                    chat_id, result.edit_message_id, result.text,
+                    markup=markup, parse_mode=parse_mode,
+                )
+                if not success:
+                    # 重试全部失败，降级为发新消息
+                    self.logger.warning(f"编辑消息重试全部失败，降级为发新消息")
+                    sent = await asyncio.to_thread(
+                        self._bot.send_message, chat_id, result.text,
+                        reply_markup=markup, parse_mode=parse_mode,
                     )
-                except Exception as edit_err:
-                    err_str = str(edit_err).lower()
-                    if "message is not modified" in err_str:
-                        pass
-                    elif "no text in the message" in err_str:
-                        try:
-                            await asyncio.to_thread(
-                                self._bot.edit_message_caption,
-                                caption=result.text,
-                                chat_id=chat_id,
-                                message_id=result.edit_message_id,
-                                reply_markup=markup,
-                                parse_mode=parse_mode,
-                            )
-                        except Exception as cap_err:
-                            if "message is not modified" not in str(cap_err).lower():
-                                raise
-                    else:
-                        raise
+                    if result.task_id and sent and hasattr(self.service, '_task_progress_tg_msg'):
+                        self.service._task_progress_tg_msg.setdefault(
+                            result.task_id, {}
+                        )[self.channel_id] = sent.message_id
             else:
                 cover_url = ""
-                if result.articles:
-                    for a in result.articles:
+                # why：交互卡片不走 send_rendered，外链模式下需先本地化海报地址。
+                articles = await self.localize_articles(result.articles)
+                if articles:
+                    for a in articles:
                         if a.get("picurl"):
                             cover_url = a["picurl"]
                             break
@@ -546,7 +739,14 @@ class TelegramChannel(BaseNotificationChannel):
             self.logger.warning("未配置 Chat ID，无法发送消息")
             return
         image: str = kwargs.get("image", "") or ""
-        caption = f"*{title}*\n{text}" if title else text
+        # image_bytes：聚合海报 PNG 字节（如后备搜索九宫格），优先级高于单图 URL
+        image_bytes: Optional[bytes] = kwargs.get("image_bytes")
+        # caption：title 已是纯文本（to_markdown 返回的 title 去掉了 *），需转义后再套 *粗体*
+        # body(text) 已是合法 MarkdownV2，直接拼接
+        safe_title = self._escape_markdown_v2(title) if title else ""
+        caption = f"*{safe_title}*\n{text}" if title else text
+        # 纯文本兜底版（解析失败时使用，去掉所有 markdown 符号）
+        plain_caption = f"{title}\n{self._strip_markdown_v2(text)}" if title else self._strip_markdown_v2(text)
         # edit_message_id：有则 edit 已有消息，无则发新消息
         edit_message_id: Optional[int] = kwargs.get("edit_message_id")
         # _msg_id_out：调用方传入的列表，发新消息后把 message_id 写进去
@@ -554,81 +754,152 @@ class TelegramChannel(BaseNotificationChannel):
         # reply_markup：内联键盘按钮（列表格式同 CommandResult.reply_markup）
         raw_markup = kwargs.get("reply_markup")
         markup = self._build_inline_markup(raw_markup) if raw_markup else None
+        # image_separate：图片模式 — 图片与文字分两条消息发送。
+        # why: 先单独发图（无 caption），再走下方纯文本分支发文字，
+        # 观感与企业微信的「图片模式」一致。
+        if kwargs.get("image_separate") and (image or image_bytes) and not edit_message_id:
+            try:
+                if image_bytes:
+                    import io as _sep_io
+                    _photo = _sep_io.BytesIO(image_bytes)
+                    _photo.name = "poster.png"
+                    await asyncio.to_thread(self._bot.send_photo, chat_id, _photo)
+                else:
+                    await asyncio.to_thread(self._bot.send_photo, chat_id, image)
+            except Exception as sep_err:
+                self.logger.warning(f"图片模式单独发图失败，改为仅发文本: {sep_err}")
+            # 图片已单独发出，后续按纯文本处理
+            image = ""
+            image_bytes = None
+
         try:
-            if edit_message_id:
-                # 尝试 edit 已有消息
-                try:
-                    await asyncio.to_thread(
-                        self._bot.edit_message_text,
-                        text=caption,
-                        chat_id=chat_id,
-                        message_id=edit_message_id,
-                        parse_mode="Markdown",
+            # 仅当"纯文本编辑"时才走 edit_message_text（如任务进度消息反复刷新同一条）。
+            # 若同时带图（image/image_bytes，如刷新完成的海报通知），则不能走此分支：
+            # Telegram 无法把纯文本消息 edit 成图片消息，需改为"先删旧消息再发新图"，
+            # 落入下方 image_bytes / image 分支处理。
+            if edit_message_id and not (image or image_bytes):
+                # 尝试 edit 已有消息（带重试）
+                success = await self._edit_with_retry(
+                    chat_id, edit_message_id, caption,
+                    markup=markup, parse_mode="MarkdownV2",
+                )
+                if not success:
+                    # 重试全部失败，降级为发新消息（纯文本，不带 parse_mode）
+                    self.logger.warning(f"edit_message_text 重试全部失败，降级为发纯文本新消息")
+                    sent = await asyncio.to_thread(
+                        self._bot.send_message, chat_id, plain_caption,
                         reply_markup=markup,
                     )
-                except Exception as edit_err:
-                    err_str = str(edit_err).lower()
-                    if "message is not modified" in err_str:
-                        pass  # 内容未变化，静默忽略
-                    elif "no text in the message" in err_str:
-                        try:
-                            await asyncio.to_thread(
-                                self._bot.edit_message_caption,
-                                caption=caption,
-                                chat_id=chat_id,
-                                message_id=edit_message_id,
-                                parse_mode="Markdown",
-                                reply_markup=markup,
-                            )
-                        except Exception as cap_err:
-                            if "message is not modified" not in str(cap_err).lower():
-                                self.logger.warning(f"edit_message_caption 失败: {cap_err}")
-                    else:
-                        self.logger.warning(f"edit_message_text 失败，将发新消息: {edit_err}")
-                        # edit 失败时降级为发新消息；若为 Markdown 解析失败则去掉 parse_mode
-                        is_parse_err = "can't parse entities" in err_str
-                        fallback_mode = None if is_parse_err else "Markdown"
-                        fallback_text = f"{title}\n{text}" if (is_parse_err and title) else caption
-                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, parse_mode=fallback_mode, reply_markup=markup)
-                        if msg_id_out is not None and sent:
-                            msg_id_out.append(sent.message_id)
-            elif image:
-                # 有封面图：发带图片的消息，正文作为 caption
+                    if msg_id_out is not None and sent:
+                        msg_id_out.append(sent.message_id)
+            elif image_bytes:
+                # 聚合海报（PNG bytes）：以图片消息发送，正文作为 caption。
+                # 失败时降级为纯文本，确保通知必达。
+                # why：若带 edit_message_id（完成消息取代原进度消息），先删旧进度消息，
+                # 因为图片消息无法由文本消息 edit 而来，只能"先删后发"。
+                if edit_message_id:
+                    try:
+                        await asyncio.to_thread(
+                            self._bot.delete_message, chat_id, edit_message_id
+                        )
+                    except Exception as del_err:
+                        self.logger.debug(f"删除旧进度消息失败（忽略）: {del_err}")
+                import io as _io
                 try:
-                    sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="Markdown", reply_markup=markup)
+                    photo = _io.BytesIO(image_bytes)
+                    photo.name = "poster.png"
+                    sent = await asyncio.to_thread(
+                        self._bot.send_photo, chat_id, photo, caption=caption,
+                        parse_mode="MarkdownV2", reply_markup=markup,
+                    )
                 except Exception as photo_err:
                     photo_err_str = str(photo_err).lower()
                     if "can't parse entities" in photo_err_str:
-                        self.logger.warning(f"send_photo Markdown 解析失败，降级为纯文本: {photo_err}")
-                        fallback_caption = f"{title}\n{text}" if title else text
-                        sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=fallback_caption, reply_markup=markup)
+                        self.logger.warning(f"send_photo(bytes) MarkdownV2 解析失败，降级纯文本caption: {photo_err}")
+                        photo = _io.BytesIO(image_bytes)
+                        photo.name = "poster.png"
+                        sent = await asyncio.to_thread(
+                            self._bot.send_photo, chat_id, photo,
+                            caption=plain_caption, reply_markup=markup,
+                        )
                     else:
-                        raise
+                        self.logger.warning(f"send_photo(bytes) 失败，降级为纯文本消息: {photo_err}")
+                        sent = await asyncio.to_thread(
+                            self._bot.send_message, chat_id, caption,
+                            parse_mode="MarkdownV2", reply_markup=markup,
+                        )
+                if msg_id_out is not None and sent:
+                    msg_id_out.append(sent.message_id)
+            elif image:
+                # 有封面图：发带图片的消息，正文作为 caption
+                # why：若带 edit_message_id（完成消息取代原进度消息），先删旧进度消息，
+                # 因为图片消息无法由文本消息 edit 而来，只能"先删后发"。
+                if edit_message_id:
+                    try:
+                        await asyncio.to_thread(
+                            self._bot.delete_message, chat_id, edit_message_id
+                        )
+                    except Exception as del_err:
+                        self.logger.debug(f"删除旧进度消息失败（忽略）: {del_err}")
+                try:
+                    sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=caption, parse_mode="MarkdownV2", reply_markup=markup)
+                except Exception as photo_err:
+                    photo_err_str = str(photo_err).lower()
+                    if "can't parse entities" in photo_err_str:
+                        # MarkdownV2 语法错误：图片能发，只是 caption 解析失败，降级纯文本 caption
+                        self.logger.warning(f"send_photo MarkdownV2 解析失败，降级为纯文本 caption: {photo_err}")
+                        sent = await asyncio.to_thread(self._bot.send_photo, chat_id, image, caption=plain_caption, reply_markup=markup)
+                    else:
+                        # 图片 URL 不可访问（如 HTTP 地址被 TG 拒绝）或其他网络错误：
+                        # 图片发不出去，降级为发纯文字消息，不再 raise 让外层兜底。
+                        # why：外层 except 的 _strip_markdown_v2 不处理 [text](url) 链接语法，
+                        # 会把 [海报](URL) 原样打印到消息里（TG 纯文本不渲染 Markdown 链接）。
+                        # 改为就地降级，plain_caption 已经过 _strip_markdown_v2 完整清洗。
+                        self.logger.warning(f"send_photo 图片发送失败，降级为纯文字消息（图片 URL 可能不可访问）: {photo_err}")
+                        try:
+                            # 尝试发送带 markup 的纯文本消息
+                            sent = await asyncio.to_thread(self._bot.send_message, chat_id, plain_caption, reply_markup=markup)
+                        except Exception as text_err:
+                            # markup 中可能也包含不可访问的 URL（如按钮链接），最后降级为无 markup 的纯文本
+                            self.logger.warning(f"带 markup 的纯文本消息也失败，移除 markup 重试: {text_err}")
+                            sent = await asyncio.to_thread(self._bot.send_message, chat_id, plain_caption)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             else:
                 try:
-                    sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="Markdown", reply_markup=markup)
+                    sent = await asyncio.to_thread(self._bot.send_message, chat_id, caption, parse_mode="MarkdownV2", reply_markup=markup)
                 except Exception as send_err:
                     send_err_str = str(send_err).lower()
                     if "can't parse entities" in send_err_str:
-                        self.logger.warning(f"send_message Markdown 解析失败，降级为纯文本: {send_err}")
-                        fallback_text = f"{title}\n{text}" if title else text
-                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, fallback_text, reply_markup=markup)
+                        self.logger.warning(f"send_message MarkdownV2 解析失败，降级为纯文本: {send_err}")
+                        sent = await asyncio.to_thread(self._bot.send_message, chat_id, plain_caption, reply_markup=markup)
                     else:
                         raise
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
         except Exception as e:
             self.logger.error(f"发送消息失败: {e}")
-            # 降级为纯文本
+            # 降级为纯文本（清洗掉 MarkdownV2 符号，避免显示反斜杠和 > 前缀）
             try:
-                plain = f"{title}\n{text}" if title else text
+                plain = f"{title}\n{self._strip_markdown_v2(text)}" if title else self._strip_markdown_v2(text)
                 sent = await asyncio.to_thread(self._bot.send_message, chat_id, plain)
                 if msg_id_out is not None and sent:
                     msg_id_out.append(sent.message_id)
             except Exception:
                 pass
+
+    def render_progress_text(self, progress: int, description: str) -> str:
+        """渲染 MarkdownV2 进度条。
+
+        why：进度条本体用反引号 code 包裹（█░ 不含 MarkdownV2 保留字符），
+        但百分比和描述必须转义——description 里的 "..." 含保留字符 "."，
+        未转义会导致 edit 时解析失败 → 降级发新消息 → 进度刷屏。
+        """
+        filled = max(0, min(10, int(progress / 10)))
+        bar = "█" * filled + "░" * (10 - filled)
+        pct = self._escape_markdown_v2(f"{progress}%")
+        desc = self._escape_markdown_v2(description)
+        return f"`[{bar}]` {pct}\n• {desc}"
 
     async def send_quick(self, text: str, chat_id=None) -> Optional[int]:
         """发送一条快速消息，返回 message_id 供后续 edit 使用"""
