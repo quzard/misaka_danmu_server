@@ -1,4 +1,4 @@
-"""在 misaka 镜像的一次性容器里运行：把各种 Emby / Jellyfin webhook 负载喂给处理器，记录分发出去的任务。
+"""在 misaka 镜像的一次性容器里运行：把各种 Jellyfin webhook 负载喂给处理器，记录分发出去的任务。
 
 用法: python /t/test_webhooks.py <输出 json 路径>
 """
@@ -10,7 +10,6 @@ from urllib.parse import urlencode
 sys.path.insert(0, "/app")
 
 import src.services  # noqa: E402,F401  与应用启动时的导入顺序一致，避免循环导入
-from src.webhook.emby import EmbyWebhook  # noqa: E402
 from src.webhook.jellyfin import JellyfinWebhook  # noqa: E402
 
 
@@ -95,11 +94,6 @@ JF_UD = {"NotificationType": "UserDataSaved", "NotificationUsername": "qiu", "Pl
 JF_SERIES = {"ItemType": "Series", "Name": "兰香如故", "ItemId": "series-1", "Year": 2025, "Provider_tmdb": "555", "Provider_Douban": "db1"}
 JF_SEASON = {"ItemType": "Season", "Name": "第 2 季", "ItemId": "season-2", "SeriesName": "兰香如故", "SeriesId": "series-1", "SeasonNumber": 2, "Year": 2025}
 
-EMBY_EP = {"Event": "library.new", "Item": {
-    "Type": "Episode", "Name": "第2集", "Id": "11", "SeriesName": "兰香如故", "SeriesId": "10", "SeasonId": "12",
-    "ParentIndexNumber": 1, "IndexNumber": 2, "ProductionYear": 2026, "ProviderIds": {"Tmdb": "123", "IMDB": "tt1"}}}
-EMBY_SERIES = {"Event": "item.rate", "Item": {"Type": "Series", "Name": "兰香如故", "Id": "10", "ProductionYear": 2025, "ProviderIds": {"Tmdb": "555"}}}
-
 CASES = {
     "jf_itemadded_episode": (JellyfinWebhook, JF_EP, None),
     "jf_itemadded_episode_form": (JellyfinWebhook, urlencode({"payload": json.dumps(JF_EP)}).encode(), None, "application/x-www-form-urlencoded"),
@@ -117,7 +111,6 @@ CASES = {
     "jf_ud_toggle_no_season_no_episode_ignored": (JellyfinWebhook, {**JF_EP, **JF_UD, "SeriesName": "快乐驿站", "SeasonNumber": None, "EpisodeNumber": None, "SaveReason": "TogglePlayed", "Played": True, "PlayCount": 1}, None),
     "jf_itemadded_no_season_number": (JellyfinWebhook, {**JF_EP, "SeriesName": "编辑部的故事", "SeasonNumber": None, "EpisodeNumber": 3}, None),
     "jf_ud_favorite_series_probe_s1_conflict": (JellyfinWebhook, {**JF_SERIES, **JF_UD, "SaveReason": "UpdateUserRating", "Favorite": True}, {"_conflict_keys": ["webhook-search-兰香如故-S1-全季"]}),
-    "emby_rate_series_probe_s1_conflict": (EmbyWebhook, EMBY_SERIES, {"_conflict_keys": ["webhook-search-兰香如故-S1-全季"]}),
     "jf_ud_unfavorite_ignored": (JellyfinWebhook, {**JF_SERIES, **JF_UD, "SaveReason": "UpdateUserRating"}, None),
     "jf_ud_favorite_series_probe": (JellyfinWebhook, {**JF_SERIES, **JF_UD, "SaveReason": "UpdateUserRating", "Favorite": True}, None),
     "jf_ud_like_season": (JellyfinWebhook, {**JF_SEASON, **JF_UD, "SaveReason": "UpdateUserRating", "Likes": True, "PremiereDate": "2026-03-01"}, None),
@@ -128,14 +121,6 @@ CASES = {
     "jf_item_deleted": (JellyfinWebhook, {**JF_EP, "NotificationType": "ItemDeleted"}, None),
     "jf_item_removed_legacy": (JellyfinWebhook, {**JF_EP, "NotificationType": "ItemRemoved"}, None),
     "jf_playback_start_ignored": (JellyfinWebhook, {**JF_EP, "NotificationType": "PlaybackStart"}, None),
-    "emby_library_new_episode": (EmbyWebhook, EMBY_EP, None),
-    "emby_markplayed_episode": (EmbyWebhook, {**EMBY_EP, "Event": "item.markplayed"}, None),
-    "emby_library_new_series_aggregated": (EmbyWebhook, {"Event": "library.new", "Description": "S02 E01-E06\n\nTmdbId: 555", "Item": EMBY_SERIES["Item"]}, None),
-    "emby_rate_series_probe": (EmbyWebhook, EMBY_SERIES, None),
-    "emby_rate_series_disabled": (EmbyWebhook, EMBY_SERIES, {"webhookEnabled": "false"}),
-    "emby_rate_series_whitelist_miss": (EmbyWebhook, EMBY_SERIES, {"webhookFilterRegex": "火影", "webhookFilterMode": "whitelist"}),
-    "emby_library_deleted": (EmbyWebhook, {"Event": "library.deleted", "Item": {"Type": "Episode", "Id": "11"}}, None),
-    "emby_playback_ignored": (EmbyWebhook, {**EMBY_EP, "Event": "playback.start"}, None),
 }
 
 

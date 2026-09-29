@@ -1,16 +1,13 @@
 import logging
 import re
 from typing import Optional
+from fastapi import Request, HTTPException, status
 
-from fastapi import HTTPException, Request, status
-
-from ._season_probe import SeasonProbeMixin
 from .base import BaseWebhook
 
 logger = logging.getLogger(__name__)
 
-
-class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
+class EmbyWebhook(BaseWebhook):
     async def handle(self, request: Request, webhook_source: str):
         # 处理器现在负责解析请求体。
         # Emby 通常发送 application/json。
@@ -27,11 +24,9 @@ class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
             await self._handle_delete(payload, webhook_source)
             return
 
-        # 兼容本地扩展事件：评分/标记已看
-        if event_type not in ["library.new", "item.rate", "item.markplayed"]:
-            logger.info(
-                f"Webhook: 忽略非 'library.new' / 'item.rate' / 'item.markplayed' / 'library.deleted' 事件 (类型: {event_type})"
-            )
+        # 我们只关心新媒体入库的事件
+        if event_type not in ["library.new"]:
+            logger.info(f"Webhook: 忽略非 'library.new' 或 'library.deleted' 的事件 (类型: {event_type})")
             return
 
         item = payload.get("Item", {})
@@ -44,34 +39,28 @@ class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
             logger.info(f"Webhook: 忽略非 'Episode'、'Movie' 或 'Series' 的媒体项 (类型: {item_type})")
             return
 
-        # 提取通用信息（兼容不同大小写/命名）
+        # 提取通用信息
         provider_ids = item.get("ProviderIds", {})
-        tmdb_id = provider_ids.get("Tmdb") or provider_ids.get("TMDB") or provider_ids.get("tmdb")
-        imdb_id = provider_ids.get("Imdb") or provider_ids.get("IMDB") or provider_ids.get("imdb")
-        tvdb_id = provider_ids.get("Tvdb") or provider_ids.get("TVDB") or provider_ids.get("tvdb")
-        douban_id = provider_ids.get("DoubanID") or provider_ids.get("Douban") or provider_ids.get("douban")
-        bangumi_id = provider_ids.get("Bangumi") or provider_ids.get("bangumi")
+        tmdb_id = provider_ids.get("Tmdb")
+        imdb_id = provider_ids.get("IMDB") # 修正：Emby 使用大写的 "IMDB"
+        tvdb_id = provider_ids.get("Tvdb")
+        douban_id = provider_ids.get("DoubanID") # Emby 可能使用 DoubanID
+        bangumi_id = provider_ids.get("Bangumi")
         year = item.get("ProductionYear")
-        emby_item_id = str(item.get("Id", "")) if item.get("Id") else None
-        emby_series_id = str(item.get("SeriesId", "")) if item.get("SeriesId") else None
-        emby_season_id = str(item.get("SeasonId", "")) if item.get("SeasonId") else None
-
-        selected_episodes: Optional[list[int]] = None
-        ep_range_str = ""
 
         # 根据媒体类型分别处理
         if item_type == "Episode":
             series_title = item.get("SeriesName")
+            # 修正：使用正确的键名来获取季度和集数
             season_number = item.get("ParentIndexNumber")
             episode_number = item.get("IndexNumber")
 
             if not all([series_title, season_number is not None, episode_number is not None]):
-                logger.warning("Webhook: 忽略一个剧集，因为缺少系列标题、季度或集数信息。")
+                logger.warning(f"Webhook: 忽略一个剧集，因为缺少系列标题、季度或集数信息。")
                 return
 
-            logger.info(
-                f"Emby Webhook: 解析到剧集 - 标题: '{series_title}', 类型: Episode, 季: {season_number}, 集: {episode_number}"
-            )
+            logger.info(f"Emby Webhook: 解析到剧集 - 标题: '{series_title}', 类型: Episode, 季: {season_number}, 集: {episode_number}")
+            logger.info(f"Webhook: 收到剧集 '{series_title}' S{season_number:02d}E{episode_number:02d}' 的入库通知。")
 
             task_title = f"Webhook（emby）搜索: {series_title} - S{season_number:02d}E{episode_number:02d}"
             search_keyword = f"{series_title} S{season_number:02d}E{episode_number:02d}"
@@ -81,35 +70,43 @@ class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
         elif item_type == "Movie":
             movie_title = item.get("Name")
             if not movie_title:
-                logger.warning("Webhook: 忽略一个电影，因为缺少标题信息。")
+                logger.warning(f"Webhook: 忽略一个电影，因为缺少标题信息。")
                 return
 
             logger.info(f"Emby Webhook: 解析到电影 - 标题: '{movie_title}', 类型: Movie")
+            logger.info(f"Webhook: 收到电影 '{movie_title}' 的入库通知。")
 
             task_title = f"Webhook（emby）搜索: {movie_title}"
             search_keyword = movie_title
             media_type = "movie"
             season_number = 1
-            episode_number = 1  # 电影按单集处理
+            episode_number = 1 # 电影按单集处理
             anime_title = movie_title
 
-        else:  # Series
-            # 优先采用上游聚合通知逻辑：从 Description 中解析季号和集数范围
-            series_title = item.get("Name") or item.get("OriginalTitle") or item.get("SortName")
+        elif item_type == "Series":
+            # 聚合通知：Emby 批量入库多集时会发送 Type=Series 的 library.new 事件
+            # 季号和集数范围在 Description 中，格式为 "S02 E01-E06\n\nTmdbId: ..."
+            series_title = item.get("Name")
             if not series_title:
-                logger.warning("Emby Webhook: Series 通知缺少标题，忽略。")
+                logger.warning("Emby Webhook: 聚合通知缺少 Series 标题，忽略。")
                 return
 
-            description = payload.get("Description", "") or ""
+            description = payload.get("Description", "")
             season_number: Optional[int] = None
-
             # 解析 "S02 E01-E06" 格式
-            season_match = re.search(r"S(\d+)", description, re.IGNORECASE)
+            season_match = re.search(r'S(\d+)', description, re.IGNORECASE)
             if season_match:
                 season_number = int(season_match.group(1))
 
-            ep_range_match = re.search(r"E(\d+)\s*-\s*E(\d+)", description, re.IGNORECASE)
-            ep_single_match = re.search(r"E(\d+)", description, re.IGNORECASE)
+            if season_number is None:
+                logger.warning(f"Emby Webhook: 聚合通知 Description 中无法解析季号，Description='{description}'，忽略。")
+                return
+
+            # 解析集数范围 "E01-E06" → [1,2,3,4,5,6]
+            selected_episodes: Optional[list] = None
+            ep_range_str = ""
+            ep_range_match = re.search(r'E(\d+)\s*-\s*E(\d+)', description, re.IGNORECASE)
+            ep_single_match = re.search(r'E(\d+)', description, re.IGNORECASE)
             if ep_range_match:
                 ep_start = int(ep_range_match.group(1))
                 ep_end = int(ep_range_match.group(2))
@@ -120,58 +117,33 @@ class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
                 selected_episodes = [ep_start]
                 ep_range_str = f"E{ep_start:02d}"
 
-            # 兜底：若未能解析出季号，则回退到“按季探测后整季导入”
-            if season_number is None:
-                logger.warning(
-                    f"Emby Webhook: Series 通知无法解析季号，回退为按季探测整季导入。Description='{description}'"
-                )
-
-                base_payload = {
-                    "animeTitle": series_title,
-                    "mediaType": "tv_series",
-                    "currentEpisodeIndex": None,
-                    "year": year,
-                    "doubanId": str(douban_id) if douban_id else None,
-                    "tmdbId": str(tmdb_id) if tmdb_id else None,
-                    "imdbId": str(imdb_id) if imdb_id else None,
-                    "tvdbId": str(tvdb_id) if tvdb_id else None,
-                    "bangumiId": str(bangumi_id) if bangumi_id else None,
-                    "selectedEpisodes": None,
-                    "mediaServerType": "emby",
-                    "mediaServerSeriesId": emby_series_id or emby_item_id,
-                    "mediaServerSeasonId": emby_season_id,
-                    "mediaServerEpisodeId": None,
-                }
-                await self._dispatch_by_season_probe(series_title, base_payload, webhook_source, "emby")
-                return
-
             logger.info(
                 f"Emby Webhook: 解析到聚合通知 - 标题: '{series_title}', 季: {season_number}, "
                 f"集数范围: {ep_range_str or '未知'}, selectedEpisodes={selected_episodes}"
             )
 
+            # currentEpisodeIndex=None + selectedEpisodes=[1..N]：以一个任务导入指定集数
             episode_number = None
-            task_title = f"Webhook（emby）聚合搜索: {series_title} - S{season_number:02d} {ep_range_str}".strip()
+            task_title = f"Webhook（emby）聚合搜索: {series_title} - S{season_number:02d} {ep_range_str}"
             search_keyword = f"{series_title} S{season_number:02d}"
             media_type = "tv_series"
             anime_title = series_title
 
-        # 统一：触发全网搜索任务，并附带元数据 ID
-        ep_suffix = f"E{episode_number}" if episode_number is not None else (ep_range_str or "全季")
+        # 提取媒体服务三级 ID（用于删除联动）
+        emby_item_id = str(item.get("Id", "")) if item.get("Id") else None
+        emby_series_id = str(item.get("SeriesId", "")) if item.get("SeriesId") else None
+        emby_season_id = str(item.get("SeasonId", "")) if item.get("SeasonId") else None
+
+        # 新逻辑：总是触发全网搜索任务，并附带元数据ID
+        _ep_range_str = ep_range_str if item_type == "Series" else ""
+        ep_suffix = f"E{episode_number}" if episode_number is not None else _ep_range_str or "全季"
         unique_key = f"webhook-search-{anime_title}-S{season_number}-{ep_suffix}"
+        logger.info(f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID (TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。")
 
-        logger.info(
-            f"Webhook: 准备为 '{anime_title}' 创建全网搜索任务，并附加元数据ID "
-            f"(TMDB: {tmdb_id}, IMDb: {imdb_id}, TVDB: {tvdb_id}, Douban: {douban_id})。"
-        )
-
+        # 将所有需要的信息打包成 payload
         task_payload = {
-            "animeTitle": anime_title,
-            "mediaType": media_type,
-            "season": season_number,
-            "currentEpisodeIndex": episode_number,
-            "year": year,
-            "searchKeyword": search_keyword,
+            "animeTitle": anime_title, "mediaType": media_type, "season": season_number,
+            "currentEpisodeIndex": episode_number, "year": year, "searchKeyword": search_keyword,
             "doubanId": str(douban_id) if douban_id else None,
             "tmdbId": str(tmdb_id) if tmdb_id else None,
             "imdbId": str(imdb_id) if imdb_id else None,
@@ -188,10 +160,8 @@ class EmbyWebhook(SeasonProbeMixin, BaseWebhook):
         }
 
         await self.dispatch_task(
-            task_title=task_title,
-            unique_key=unique_key,
-            payload=task_payload,
-            webhook_source=webhook_source,
+            task_title=task_title, unique_key=unique_key,
+            payload=task_payload, webhook_source=webhook_source
         )
 
     async def _handle_delete(self, payload: dict, webhook_source: str):
