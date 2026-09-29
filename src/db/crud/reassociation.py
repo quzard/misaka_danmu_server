@@ -247,6 +247,8 @@ async def reassociate_anime_sources_with_resolution(
                                 if fs_path and fs_path.is_file():
                                     fs_path.unlink(missing_ok=True)
                             await session.delete(target_episode)
+                            # fork：先把删除落库，否则同一次 flush 里先更新后删除，会撞上 (source_id, episode_index) 唯一约束
+                            await session.flush()
 
                             # 移动源分集
                             if episode_to_process.danmakuFilePath:
@@ -332,10 +334,13 @@ async def reassociate_anime_sources_with_resolution(
     # 4. 重新编号
     sorted_sources = sorted(target_anime.sources, key=lambda s: s.sourceOrder)
     logger.info(f"正在为目标番剧 (ID: {request.targetAnimeId}) 的 {len(sorted_sources)} 个源重新编号...")
+    # fork：和上面 reassociate_anime_sources 一样分两步编号，避免撞上 (anime_id, source_order) 唯一约束
     for i, source in enumerate(sorted_sources):
-        new_order = i + 1
-        if source.sourceOrder != new_order:
-            source.sourceOrder = new_order
+        source.sourceOrder = -(i + 1)
+    await session.flush()
+    for i, source in enumerate(sorted_sources):
+        source.sourceOrder = i + 1
+    await session.flush()
 
     # 5. 删除源番剧
     logger.info(f"正在删除现已为空的源番剧 (ID: {source_anime_id})。")

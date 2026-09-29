@@ -74,7 +74,9 @@ async def save_danmaku_for_episode(
     old_comment_count = episode.commentCount or 0
 
     # 刷新场景：如果新弹幕数量不比原有的多，跳过写入
-    if episode.danmakuFilePath and new_comment_count <= old_comment_count:
+    # fork：原文件已经不在时照常写入，否则这一集会一直读不到弹幕、刷新也修不好
+    old_fs_path = _get_fs_path_from_web_path(episode.danmakuFilePath) if episode.danmakuFilePath else None
+    if old_fs_path is not None and old_fs_path.exists() and new_comment_count <= old_comment_count:
         logger.info(f"分集 {episode_id} 弹幕数量未增加 (新:{new_comment_count} <= 旧:{old_comment_count})，跳过刷新")
         return 0
 
