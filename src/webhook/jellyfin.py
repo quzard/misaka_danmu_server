@@ -4,12 +4,13 @@ from datetime import datetime
 from typing import Any, Dict
 from fastapi import Request, HTTPException, status
 
+from ._jellyfin_fork import JellyfinForkMixin
 from .base import BaseWebhook
 from src.services import ScraperManager
 
 logger = logging.getLogger(__name__)
 
-class JellyfinWebhook(BaseWebhook):
+class JellyfinWebhook(JellyfinForkMixin, BaseWebhook):
     async def handle(self, request: Request, webhook_source: str):
         # 处理器现在负责解析请求体。
         # 这段逻辑是从主 webhook_api.py 移过来的，专门处理 Jellyfin 的情况。
@@ -51,6 +52,11 @@ class JellyfinWebhook(BaseWebhook):
 
         # 从这里开始，代码与之前相同，处理已解析的 payload
         event_type = payload.get("NotificationType")
+
+        # fork 扩展：标记已看/收藏补弹幕等，见 _jellyfin_fork.py；返回 None 表示已处理完
+        event_type = await self._route_fork_event(payload, event_type, webhook_source)
+        if event_type is None:
+            return
 
         # 处理删除事件
         # Webhook 插件的删除事件叫 ItemDeleted，旧名 ItemRemoved 一并兼容
