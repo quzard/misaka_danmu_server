@@ -784,7 +784,10 @@ class ScraperVersionManager:
             if not f.is_file():
                 continue
             if f.name == manifest_name or f.suffix in ScraperVersionManager._BINARY_SUFFIXES:
-                _shutil.copy2(f, dst_dir / f.name)
+                # fork：先写临时名再 os.replace，不原地覆盖进程已加载的 .so（原地截断会 SIGBUS）
+                tmp = dst_dir / f".{f.name}.new"
+                _shutil.copy2(f, tmp)
+                tmp.replace(dst_dir / f.name)
                 copied += 1
 
         return copied

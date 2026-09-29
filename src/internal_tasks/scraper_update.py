@@ -300,7 +300,8 @@ async def _scraper_auto_update_handler(app: FastAPI) -> None:
     # 版本状态预校（代替时间冷却）：若备份目录已经是目标版本，说明上一轮已下载/上传好，
     # 只是尚未重启生效（如上次重启失败）。此时不重复下载，直接触发重启让备份生效即可。
     # why：以“版本状态”而非“时间”决策，既避免重复下载重启循环，又不会误伤正常更新。
-    if _verify_backup_version(remote_version):
+    # fork: 没有 Docker 套接字时这条路只能每轮打警告；交给下面的正常更新（原子替换，可重入）
+    if _verify_backup_version(remote_version) and is_docker_socket_available() and is_running_in_docker():
         await _restart_to_apply_backup(config_manager, remote_version)
         return
 
@@ -753,7 +754,10 @@ async def _perform_update(
         hashes_data = {}
 
         # 创建临时下载目录（与手动下载保持一致）
-        temp_dir = _get_temp_download_base_dir() / f"auto_update_{int(time.time())}"
+        # fork: 固定目录名，先清掉上次被杀时留下的 auto_update*（finally 在进程崩溃时不会执行）
+        for stale in _get_temp_download_base_dir().glob("auto_update*"):
+            shutil.rmtree(stale, ignore_errors=True)
+        temp_dir = _get_temp_download_base_dir() / "auto_update"
         temp_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"创建临时下载目录: {temp_dir}")
 
@@ -802,15 +806,23 @@ async def _perform_update(
             copied_count = 0
             for file in temp_dir.iterdir():
                 if file.suffix in ('.so', '.pyd'):
-                    await asyncio.to_thread(shutil.copy2, file, scrapers_dir / file.name)
+                    # fork: 先写临时名再 os.replace。原地 copy2 会截断进程已映射的 .so → SIGBUS（exit 135）；
+                    # 换成新 inode 后旧映射不受影响，新文件下次启动才被 import
+                    staged = scrapers_dir / f".{file.name}.new"
+                    await asyncio.to_thread(shutil.copy2, file, staged)
+                    staged.replace(scrapers_dir / file.name)
                     copied_count += 1
             logger.info(f"已复制 {copied_count} 个文件到运行目录")
 
-            # 保存 manifest 到运行目录
+            # fork: 远程 package.json 没有 sources，原样保存会在下次启动被判为格式错误、重建成 unknown；
+            # 转成 manifest 格式，且在文件全部替换之后才写
+            (temp_dir / "package.json").write_text(json.dumps(manifest_data, ensure_ascii=False), encoding="utf-8")
             await asyncio.to_thread(
                 ScraperVersionManager.save_manifest,
-                manifest_data,  # 第一个参数：manifest 数据
-                scrapers_dir    # 第二个参数：目标目录
+                ScraperVersionManager.extract_manifest_from_legacy(
+                    temp_dir / "package.json", temp_dir / "versions.json", scrapers_dir
+                ),
+                scrapers_dir
             )
 
         finally:
@@ -851,7 +863,7 @@ async def _perform_update(
                     package_data=package_data_for_backup
                 )
                 # 校验备份目录 package.json 版本号是否已更新为远程版本（确认落盘成功）
-                backup_ok = _verify_backup_version(remote_version)
+                backup_ok = _verify_backup_only(remote_version)  # fork: 运行目录此时已是新版，旧判据恒为 False
                 if backup_ok:
                     logger.info("新资源备份完成并校验通过")
                 else:
