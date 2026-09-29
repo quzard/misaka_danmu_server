@@ -53,12 +53,13 @@ class JellyfinWebhook(BaseWebhook):
         event_type = payload.get("NotificationType")
 
         # 处理删除事件
-        if event_type == "ItemRemoved":
+        # Webhook 插件的删除事件叫 ItemDeleted，旧名 ItemRemoved 一并兼容
+        if event_type in ["ItemDeleted", "ItemRemoved"]:
             await self._handle_delete(payload, webhook_source)
             return
 
         if event_type not in ["ItemAdded"]:
-            logger.info(f"Webhook: 忽略非 'ItemAdded' 或 'ItemRemoved' 的事件 (类型: {event_type})")
+            logger.info(f"Webhook: 忽略非 'ItemAdded' 或 'ItemDeleted' 的事件 (类型: {event_type})")
             return
 
         item_type = payload.get("ItemType")
@@ -148,7 +149,7 @@ class JellyfinWebhook(BaseWebhook):
         )
 
     async def _handle_delete(self, payload: dict, webhook_source: str):
-        """处理 Jellyfin ItemRemoved 事件，联动删除弹幕数据。"""
+        """处理 Jellyfin ItemDeleted（旧名 ItemRemoved）事件，联动删除弹幕数据。"""
         from src.tasks.webhook_delete import handle_webhook_delete
 
         item_type = payload.get("ItemType")
