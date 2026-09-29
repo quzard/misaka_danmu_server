@@ -83,6 +83,11 @@ class JellyfinForkMixin(SeasonProbeMixin):
             logger.info(f"Jellyfin Webhook: '{payload.get('SeriesName')}' E{payload.get('EpisodeNumber')} 所在季没有编号，按第 1 季处理。")
             payload["SeasonNumber"] = 1
 
+        if event_type == "ItemAdded":
+            # 给新入库的单集和电影登记弹幕重抓计划，见 src/fork_freshness.py
+            from src.fork_freshness import register_ingest
+            await register_ingest(self._session_factory, payload)
+
         if event_type != "UserDataSaved":
             return event_type
 

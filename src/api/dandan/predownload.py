@@ -88,6 +88,10 @@ async def try_predownload_next_episode(
     - 如果下一集无记录: 从源站获取并创建记录+下载弹幕
     """
     try:
+        # fork 扩展：播放这一集时顺带刷新下一集的弹幕，见 src/fork_freshness.py
+        from src.fork_freshness import on_play
+        await on_play(current_episode_id, session_factory, task_manager, scraper_manager, rate_limiter, config_manager)
+
         # 1. 检查配置: 是否启用预下载
         predownload_enabled = (await config_manager.get("preDownloadNextEpisodeEnabled", "false")).lower() == 'true'
         if not predownload_enabled:
