@@ -346,6 +346,10 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
             existing_episode.providerEpisodeId = provider_episode_id
             needs_update = True
             update_details.append(f"分集ID已更新")
+            # 换成了另一个视频，原来的标题（花絮的标题）也不再适用
+            if title and existing_episode.title != title:
+                existing_episode.title = title
+                update_details.append(f"标题: → '{title}'")
 
         if needs_update:
             await session.flush()

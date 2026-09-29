@@ -309,12 +309,17 @@ async def db_tests(sf):
         await create_episode_if_not_exists(s, a.id, src.id, 39, "第 39 集", None, "failover")
         await s.commit()
     async with sf() as s:
-        check("没有 URL 的调用不改分集 ID", (await s.get(Episode, eid)).providerEpisodeId == "trailer")
+        e = await s.get(Episode, eid)
+        check("没有 URL 的调用不改分集 ID 和标题", e.providerEpisodeId == "trailer" and e.title == "花絮", (e.providerEpisodeId, e.title))
         await create_episode_if_not_exists(s, a.id, src.id, 39, "第 39 集", "https://v.qq.com/x/cover/c/real.html", "real")
         await s.commit()
     async with sf() as s:
         e = await s.get(Episode, eid)
-        check("正片导入时分集 ID 跟着 URL 更新", e.providerEpisodeId == "real" and e.sourceUrl.endswith("real.html"), (e.providerEpisodeId, e.sourceUrl))
+        check("正片导入时分集 ID、标题跟着 URL 更新", e.providerEpisodeId == "real" and e.sourceUrl.endswith("real.html") and e.title == "第 39 集", (e.providerEpisodeId, e.sourceUrl, e.title))
+        await create_episode_if_not_exists(s, a.id, src.id, 39, "别的标题", "https://v.qq.com/x/cover/c/real.html", "real")
+        await s.commit()
+    async with sf() as s:
+        check("分集 ID 没变时不改标题（保护手动改过的标题）", (await s.get(Episode, eid)).title == "第 39 集")
 
     print("== 总开关")
 
