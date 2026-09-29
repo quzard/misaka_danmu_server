@@ -306,9 +306,11 @@ async def download_image(image_url: Optional[str], session: AsyncSession, scrape
             elif "png" in content_type: extension = ".png"
             elif "webp" in content_type: extension = ".webp"
 
-            filename = f"{uuid.uuid4()}{extension}"
+            # fork：按内容命名。每次导入弹幕都会重新下载海报，同一张图命中同一个文件，不再每次多存一份
+            filename = f"{hashlib.sha256(response.content).hexdigest()[:16]}{extension}"
             save_path = IMAGE_DIR / filename
-            save_path.write_bytes(response.content)
+            if not save_path.is_file():
+                save_path.write_bytes(response.content)
             logger.info(f"图片已成功缓存到: {save_path}")
             return f"/data/images/{filename}"  # 返回Web可访问的相对路径
     except Exception as e:
