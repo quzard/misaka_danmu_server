@@ -341,6 +341,12 @@ async def create_episode_if_not_exists(session: AsyncSession, anime_id: int, sou
             needs_update = True
             update_details.append(f"URL已更新")
 
+        # 分集ID与URL出自同一次抓取，一起更新（预下载可能先用花絮建了这一行，不更新的话以后刷新抓到的还是花絮）
+        if url and provider_episode_id and existing_episode.providerEpisodeId != provider_episode_id:
+            existing_episode.providerEpisodeId = provider_episode_id
+            needs_update = True
+            update_details.append(f"分集ID已更新")
+
         if needs_update:
             await session.flush()
             logger.info(f"更新已存在的episode: id={new_episode_id}, 更新内容: {', '.join(update_details)}")
