@@ -10,6 +10,7 @@ import logging
 import re
 from typing import Any, Dict
 
+from fastapi import HTTPException, status
 from thefuzz import fuzz
 
 from src.utils.filename_parser import normalize_title
@@ -91,11 +92,17 @@ class SeasonProbeMixin:
                 logger.info(f"{prefix}: 为 '{series_title}' 检测到季列表: {seasons_found}")
 
             for s in seasons_found:
-                await self.dispatch_task(
-                    task_title=f"Webhook（{server_label}）搜索: {series_title} - S{s:02d} 全季",
-                    unique_key=f"webhook-search-{series_title}-S{s}-全季",
-                    payload={**base_payload, "season": s, "searchKeyword": f"{series_title} S{s:02d}"},
-                    webhook_source=webhook_source,
-                )
+                try:
+                    await self.dispatch_task(
+                        task_title=f"Webhook（{server_label}）搜索: {series_title} - S{s:02d} 全季",
+                        unique_key=f"webhook-search-{series_title}-S{s}-全季",
+                        payload={**base_payload, "season": s, "searchKeyword": f"{series_title} S{s:02d}"},
+                        webhook_source=webhook_source,
+                    )
+                except HTTPException as e:
+                    # 同一季的任务已在队列中（409）时跳过这一季，继续分发后面的季
+                    if e.status_code != status.HTTP_409_CONFLICT:
+                        raise
+                    logger.info(f"{prefix}: '{series_title}' S{s:02d} 全季任务已在队列中，跳过。")
         except Exception as e:
             logger.error(f"{prefix}: 为 '{series_title}' 按季探测并分发任务失败: {e}", exc_info=True)
