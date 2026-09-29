@@ -259,7 +259,8 @@ class JellyfinMediaServer(BaseMediaServer):
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
         return {
-            'X-Emby-Token': self.api_token,  # Jellyfin兼容Emby的Token头
+            # Jellyfin 12 起默认拒绝 X-Emby-Token 等旧式鉴权；Authorization 头 10.x 也支持
+            'Authorization': f'MediaBrowser Token="{self.api_token}"',
             'Accept': 'application/json',
         }
 
