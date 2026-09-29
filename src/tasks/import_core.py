@@ -751,7 +751,7 @@ async def generic_import_task(
             target_episode = ep_result.scalar_one_or_none()
             if target_episode:
                 target_episode.mediaServerEpisodeId = mediaServerEpisodeId
-                await session.flush()
+                await session.commit()
                 logger.info(f"已写入媒体服务 Episode ID: episode_id={target_episode.id}, mediaServerEpisodeId={mediaServerEpisodeId}")
         except Exception as e:
             logger.warning(f"写入媒体服务 Episode ID 失败: {e}")
